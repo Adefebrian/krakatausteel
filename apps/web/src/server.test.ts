@@ -35,20 +35,21 @@ describe("web server", () => {
 
   afterAll(() => {
     server?.stop();
-    GlobalRegistrator.register();
+    // Same url as src/happydom.ts, see the note in src/smoke.test.ts.
+    GlobalRegistrator.register({ url: "http://localhost:3000/" });
   });
 
   test("serves the built index.html at /", async () => {
     const res = await fetch(`http://localhost:${server.port}/`);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("<title>krakatausteel");
+    expect(body).toContain("<title>TJSL Online");
   });
 
   test("falls back to index.html for an unknown deep link, not a 404", async () => {
     const res = await fetch(`http://localhost:${server.port}/some/unknown/deep-link`);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("<title>krakatausteel");
+    expect(body).toContain("<title>TJSL Online");
   });
 });

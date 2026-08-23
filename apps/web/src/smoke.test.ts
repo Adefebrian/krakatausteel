@@ -57,14 +57,21 @@ describe.skipIf(!chromePath)("smoke: built SPA renders", () => {
   afterAll(async () => {
     await browser?.close();
     server?.stop();
-    GlobalRegistrator.register();
+    // Re-register with the same url src/happydom.ts uses. Registering without
+    // it lands on about:blank, where history.replaceState leaves
+    // location.pathname as "blank" and every routing test in a file that runs
+    // after this one resolves to the same bogus path.
+    GlobalRegistrator.register({ url: "http://localhost:3000/" });
   });
 
-  test("renders the welcome heading", async () => {
+  test("renders the login screen when no session is available", async () => {
+    // No API is running in this suite, so GET /auth/session cannot resolve and
+    // the app must land on the login screen rather than a blank page.
     const page = await browser.newPage();
     await page.goto(`http://localhost:${server.port}`, { waitUntil: "networkidle0" });
+    await page.waitForSelector("#login-username", { timeout: 5000 });
     const heading = await page.$eval("h1", (el) => el.textContent);
-    expect(heading).toContain("Welcome to krakatausteel");
+    expect(heading).toContain("TJSL Online");
     await page.close();
   });
 });

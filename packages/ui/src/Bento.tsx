@@ -1,6 +1,10 @@
-// Gap-consistent bento grid primitive. One gap value per breakpoint, every
-// card in a grid shares the same corner radius, padding, and border weight;
-// visual weight varies only by span, never by inconsistent chrome.
+// Bento grid primitive. Default layout system per jal-frontend-rules: one gap
+// value per breakpoint, every card in a grid sharing one corner radius,
+// padding, and border weight. Visual weight varies only by span, never by
+// inconsistent chrome.
+//
+// The CSS lives in ./ui.css (imported once by the app's stylesheet) rather
+// than in an exported template string, so there is exactly one copy of it.
 import type { ReactNode } from "react";
 
 export type BentoSpan = "sm" | "wide" | "tall" | "lg";
@@ -14,11 +18,13 @@ const spanClass: Record<BentoSpan, string> = {
 
 export interface BentoProps {
   children: ReactNode;
+  /** Column count on desktop. 4 by default, 2 for a narrower band. */
+  columns?: 2 | 3 | 4;
   className?: string;
 }
 
-export function Bento({ children, className }: BentoProps) {
-  const classes = ["bento", className].filter(Boolean).join(" ");
+export function Bento({ children, columns = 4, className }: BentoProps) {
+  const classes = ["bento", `bento-cols-${columns}`, className].filter(Boolean).join(" ");
   return <div className={classes}>{children}</div>;
 }
 
@@ -32,34 +38,3 @@ export function BentoItem({ span = "sm", children, className }: BentoItemProps) 
   const classes = ["bento-item", spanClass[span], className].filter(Boolean).join(" ");
   return <div className={classes}>{children}</div>;
 }
-
-/**
- * Inline styles matching the base recipe from jal-frontend-rules, kept here
- * so consuming apps get a working grid without having to hand-copy CSS.
- * Import once (e.g. from the app's root styles.css):
- *
- *   @import "@krakatausteel/ui/src/Bento.css";
- */
-export const bentoStyles = `
-.bento {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: minmax(160px, auto);
-  gap: var(--space-4);
-}
-.bento-item {
-  border-radius: var(--radius-md);
-  border: var(--border-weight) solid var(--color-border);
-  background: var(--color-surface);
-  padding: var(--space-4);
-}
-.bento-lg { grid-column: span 2; grid-row: span 2; }
-.bento-wide { grid-column: span 2; grid-row: span 1; }
-.bento-tall { grid-column: span 1; grid-row: span 2; }
-.bento-sm { grid-column: span 1; grid-row: span 1; }
-
-@media (max-width: 640px) {
-  .bento { grid-template-columns: 1fr; }
-  .bento-lg, .bento-wide, .bento-tall, .bento-sm { grid-column: span 1; grid-row: span 1; }
-}
-`;

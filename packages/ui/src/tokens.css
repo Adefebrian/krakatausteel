@@ -1,10 +1,53 @@
 /*
- * Shared design tokens. Minimalist, no neon accents, no glow effects.
- * One spacing scale, one radius scale, one type scale, for the whole product.
+ * Shared design tokens for TJSL Online.
+ *
+ * One type scale, one 4/8pt spacing rhythm, one radius scale, one elevation
+ * scale, for the whole product. Nothing in the codebase may introduce a
+ * second scale or an inline value that is not on a table below.
+ *
+ * White-first per jal-frontend-rules: the page ground is always a white.
+ * Near monochrome ink, with a single restrained accent hue (steel blue) used
+ * only for links, the active navigation state, selection, and focus rings.
+ * No gradient, no glow, no neon, no dark default background.
  */
 
 :root {
-  /* Spacing scale: 4/8/12/16/24/32/48/64 */
+  /* ---------------------------------------------------------------- type */
+  /* Modular scale, base 16px, ratio 1.25, rounded to whole pixels. */
+  --text-caption: 13px;
+  --text-body: 16px;
+  --text-subhead: 20px;
+  --text-h4: 25px;
+  --text-h3: 31px;
+  --text-h2: 39px;
+  --text-h1: 49px;
+
+  --leading-caption: 1.4;
+  --leading-body: 1.6;
+  --leading-subhead: 1.5;
+  --leading-h4: 1.3;
+  --leading-h3: 1.25;
+  --leading-h2: 1.2;
+  --leading-h1: 1.15;
+
+  /* Two weights per screen, medium is the emphasis ceiling. */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  /*
+   * Money and any other column of digits that has to line up vertically.
+   * Same family as the body text so the product still reads as one product,
+   * with lining tabular figures switched on so every digit occupies the same
+   * advance width and the decimal separators stack in a column.
+   */
+  --font-numeric: var(--font-sans);
+  --numeric-variant: tabular-nums lining-nums;
+
+  /* ------------------------------------------------------------- spacing */
+  /* 4/8pt rhythm. No arbitrary value anywhere in the codebase. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -13,40 +56,106 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+  --space-9: 96px;
 
-  /* Radius scale: 8/12/16/24 */
+  /* -------------------------------------------------------------- radius */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+  --radius-full: 9999px;
 
-  /* Type scale */
-  --font-size-xs: 12px;
-  --font-size-sm: 14px;
-  --font-size-md: 16px;
-  --font-size-lg: 20px;
-  --font-size-xl: 28px;
-  --font-size-2xl: 36px;
+  /* ----------------------------------------------------------- elevation */
+  /* Depth only where something genuinely stacks above something else. */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --elevation-3: 0 12px 32px rgba(0, 0, 0, 0.14);
 
-  /* Neutral, minimalist, white-first palette. Per jal-frontend-rules the
-     default background is always a white (never dark or colored). Near
-     monochrome: one ink primary (black on white, Apple/Vercel posture),
-     no gradient, no chromatic accent fill. A dark mode, if a product ever
-     ships one, is added deliberately, never auto-triggered from the OS. */
+  /* --------------------------------------------------------------- color */
+  /* Ground and ink. Never pure #000 for ink, never a dark default ground. */
   --color-bg: #ffffff;
-  --color-surface: #fafaf8;
+  --color-surface: #faf9f7;
+  --color-surface-sunken: #f4f2ee;
   --color-border: #eae8e2;
-  --color-border-strong: #ddd9cf;
+  --color-border-strong: #d8d4ca;
   --color-text: #16150f;
   --color-text-muted: #6b675d;
+  --color-text-subtle: #8f8b80;
+
+  /* Primary action: neutral ink on white, the quiet Apple/Vercel posture. */
   --color-primary: #16150f;
   --color-primary-hover: #322f27;
   --color-primary-contrast: #ffffff;
-  --color-danger: #b3261e;
+
+  /* The one accent hue for the whole product: a considered steel blue.
+     Never purple, violet, or indigo. Used on links, the active nav item,
+     selection, and focus rings only, never as a large filled area. */
+  --color-accent: #1c4f7c;
+  --color-accent-hover: #16405f;
+  --color-accent-weak: #eef3f8;
+  --color-accent-border: #c3d4e3;
+  --color-focus: #1c4f7c;
+
+  /* Semantic state. Each one is always paired with a text label or an icon,
+     never carrying meaning by color alone. */
   --color-success: #1f7a45;
-  --color-focus: #16150f;
+  --color-success-weak: #edf6f0;
+  --color-success-border: #c2ded0;
+
+  --color-warning: #8a6100;
+  --color-warning-weak: #fbf5e7;
+  --color-warning-border: #e5d6ae;
+
+  --color-caution: #a1522a;
+  --color-caution-weak: #fbf1eb;
+  --color-caution-border: #e6cdbe;
+
+  --color-danger: #b3261e;
+  --color-danger-hover: #931d17;
+  --color-danger-weak: #fbeeed;
+  --color-danger-border: #e6c4c1;
+
+  --color-info: #1c4f7c;
+  --color-info-weak: #eef3f8;
+  --color-info-border: #c3d4e3;
+
+  /* Kolektibilitas (spec 5.1). Four classes that must stay distinguishable
+     side by side in a report, so they walk the neutral to danger ramp rather
+     than reusing one hue at four opacities. Always rendered with the class
+     name spelled out next to the swatch. */
+  --color-kol-lancar: var(--color-success);
+  --color-kol-lancar-weak: var(--color-success-weak);
+  --color-kol-lancar-border: var(--color-success-border);
+  --color-kol-kurang-lancar: var(--color-warning);
+  --color-kol-kurang-lancar-weak: var(--color-warning-weak);
+  --color-kol-kurang-lancar-border: var(--color-warning-border);
+  --color-kol-diragukan: var(--color-caution);
+  --color-kol-diragukan-weak: var(--color-caution-weak);
+  --color-kol-diragukan-border: var(--color-caution-border);
+  --color-kol-macet: var(--color-danger);
+  --color-kol-macet-weak: var(--color-danger-weak);
+  --color-kol-macet-border: var(--color-danger-border);
 
   --border-weight: 1px;
+
+  /* ---------------------------------------------------- dense data table */
+  /* Accounting tables are read in long vertical runs, so the row is short,
+     the header is sticky, and the figures use the numeric font tokens. */
+  --table-font-size: var(--text-caption);
+  --table-row-height: 36px;
+  --table-header-height: 36px;
+  --table-cell-pad-x: var(--space-3);
+  --table-cell-pad-y: var(--space-2);
+  --table-row-hover: var(--color-surface);
+  --table-row-stripe: var(--color-surface);
+
+  /* ---------------------------------------------------------- app shell */
+  --shell-sidebar-width: 264px;
+  --shell-topbar-height: 56px;
+  --shell-tabbar-height: 56px;
+  --control-height: 40px;
+  --touch-target: 44px;
 
   /* Restrained motion: transform and opacity only, one easing, short. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
