@@ -1,0 +1,55 @@
+/*
+ * Shared design tokens. Minimalist, no neon accents, no glow effects.
+ * One spacing scale, one radius scale, one type scale, for the whole product.
+ */
+
+:root {
+  /* Spacing scale: 4/8/12/16/24/32/48/64 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Radius scale: 8/12/16/24 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* Type scale */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 28px;
+  --font-size-2xl: 36px;
+
+  /* Neutral, minimalist, white-first palette. Per jal-frontend-rules the
+     default background is always a white (never dark or colored). Near
+     monochrome: one ink primary (black on white, Apple/Vercel posture),
+     no gradient, no chromatic accent fill. A dark mode, if a product ever
+     ships one, is added deliberately, never auto-triggered from the OS. */
+  --color-bg: #ffffff;
+  --color-surface: #fafaf8;
+  --color-border: #eae8e2;
+  --color-border-strong: #ddd9cf;
+  --color-text: #16150f;
+  --color-text-muted: #6b675d;
+  --color-primary: #16150f;
+  --color-primary-hover: #322f27;
+  --color-primary-contrast: #ffffff;
+  --color-danger: #b3261e;
+  --color-success: #1f7a45;
+  --color-focus: #16150f;
+
+  --border-weight: 1px;
+
+  /* Restrained motion: transform and opacity only, one easing, short. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur-med: 200ms;
+}
