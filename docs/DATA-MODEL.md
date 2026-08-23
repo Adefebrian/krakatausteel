@@ -1,7 +1,12 @@
 # TJSL Online data model
 
-67 tables and 4 views, created by `migrations/0002` through `migrations/0015`. This document is
+74 tables and 11 views, created by `migrations/0002` through `migrations/0017`. This document is
 the map; the migrations are the source of truth and every non-obvious column is commented there.
+
+Sections 1 to 13 are the core system, which works standalone and holds the books.
+Section 14 is an **optional** outbound integration layer that is inert until a target is
+configured: who holds the authoritative TJSL books is still undecided (ADR 0008), and nothing in
+section 14 changes an account, a report or a closing rule.
 
 Read this first:
 
@@ -155,6 +160,40 @@ transaction date fall in", shared by the journal guard and the closing engine.
 | `v_integritas_jadwal` | Active version 1 schedules whose principal does not add up to the loan. |
 | `v_integritas_snapshot` | Duplicate collectibility snapshots. Should always be empty. |
 
+
+## 14. Optional outbound integration layer (0016, 0017)
+
+Inert until a target is registered and activated. Adds no column to `jurnal`, modifies no trigger
+in 0007 or 0010, demotes no report, and does not gate period closing. Decisions: ADR 0008
+(ownership open, mapping as a table, why export state lives outside `jurnal`, two-way sync
+rejected) and ADR 0009 (state machine for a target with no idempotency, mutable remote records,
+silent party mismatch).
+
+| Table | Purpose |
+|---|---|
+| `sistem_eksternal` | One row per export target. `arah` is CHECKed to `KELUAR`, so an inbound configuration cannot be represented. Capability flags (`dukung_referensi_eksternal`, `dukung_baca_by_referensi`, `dukung_idempotensi`, the three dimension flags, `maks_baris_per_dokumen`) all default to the pessimistic answer the API research supports, so the exporter degrades instead of assuming. |
+| `pemetaan_akun_eksternal` | Our account to their account, one-to-one in both directions while active. References `akun(postable_id)`, so only accounts that can appear in a journal line can be mapped. Also declares what sub-ledger party the account expects (`jenis_pihak_diharapkan`, `pihak_wajib`), because a party of the wrong kind is accepted silently on their side. |
+| `pemetaan_mitra_eksternal` | Our Mitra to their party record (customer by default), one-to-one both ways: two Mitra sharing one customer record would merge two people's receivables in their sub-ledger. |
+| `jurnal_ekspor` | Export state per journal per target: the six-state machine (`BELUM_KIRIM`, `SEDANG_DIKIRIM`, `TERKIRIM`, `GAGAL`, `AMBIGU`, `DIKECUALIKAN`), attempt bookkeeping, their id, the adapter used, the payload fingerprint pair, and the remote-verification triple. `UNIQUE (jurnal_id, sistem_kode)` is the actual double-post protection, because the target has none. Physical delete blocked. |
+| `berkas_ekspor` | A file-adapter push: one file covering many journals, with a CHECK that its totals balance. |
+| `pengambilan_saldo_eksternal` | One row per fetch of external balances for a period. Exactly one run is current per (target, period); older runs stay, which is what makes remote drift detectable. |
+| `saldo_akun_eksternal` | What the target reported, per run per account. Same debit-positive convention and same self-checking identity as `saldo_akun_periode`. Never overwritten in place. |
+
+| View | Purpose |
+|---|---|
+| `v_akun_belum_dipetakan` | Accounts already in use (posted lines, or an active event mapping) with no active counterpart. Must be empty before a push starts. |
+| `v_baris_jurnal_pihak_bermasalah` | Posted lines whose sub-ledger party does not match the mapped account's expectation, classified as `PIHAK_HILANG`, `PIHAK_TIDAK_DIPETAKAN`, `PIHAK_TIDAK_DIHARAPKAN` or `JENIS_PIHAK_TIDAK_COCOK`. The check the target does not perform. |
+| `v_jurnal_belum_terkirim` | Posted journals not yet successfully exported, per target, per period. `BELUM_ADA_JEJAK` means the export layer has never seen the journal. |
+| `v_ekspor_perlu_keputusan` | Rows a machine must not resolve: ambiguous sends, sends still in flight, and journals that changed or vanished on their side. |
+| `v_ekspor_payload_berubah` | Journals marked sent whose current payload no longer hashes to what was sent. |
+| `v_rekonsiliasi_eksternal` | Per period per account: our snapshot versus their current fetch, with the count of journals not yet exported. Symmetric; does not presume which side is authoritative. |
+| `v_drift_saldo_eksternal` | Their balance movement between the previous fetch and the current one. Non-empty for a CLOSED period means a pushed journal was edited or deleted over there. |
+
+Integration parameters live in `konfigurasi` under group `integrasi` (master switch off, target,
+`pemegang_buku_resmi` defaulting to `SISTEM_INI`, adapter, push granularity, line limit unknown,
+retry budget, in-flight timeout, the two pre-push gates, remote re-verification interval,
+dimension switch). All flagged `perlu_konfirmasi`.
+
 ## Relationship map
 
 ```
@@ -199,6 +238,12 @@ pumk_proposal ── pumk_survey, pumk_jaminan, pumk_review, pumk_approval,
 nonpumk_proposal ── nonpumk_penilaian, nonpumk_review, nonpumk_approval,
                     nonpumk_proposal_sdg, nonpumk_proposal_transisi,
                     nonpumk_penyaluran, nonpumk_lpj
+
+optional integration layer (inert until a target is active)
+sistem_eksternal ──┬── pemetaan_akun_eksternal ──► akun(postable_id)
+                   ├── pemetaan_mitra_eksternal ──► mitra
+                   ├── jurnal_ekspor ──► jurnal, berkas_ekspor
+                   └── pengambilan_saldo_eksternal ── saldo_akun_eksternal ──► akun, periode
 ```
 
 ## Query shapes the indexes are built for
@@ -216,3 +261,6 @@ nonpumk_proposal ── nonpumk_penilaian, nonpumk_review, nonpumk_approval,
 | Penyaluran by province / sector / bidang | `mitra_kota_idx`, `mitra_sektor_idx`, `pumk_proposal_sektor_idx`, `nonpumk_proposal_bidang_idx` |
 | Provision reports per class | `kolektibilitas_snapshot_kelas_idx`, `kolektibilitas_snapshot_sektor_idx` |
 | Audit trail by user / entity / rejection | `audit_log_user_idx`, `audit_log_entitas_idx`, `audit_log_ditolak_idx` |
+| Export worklist, retries, stuck sends | `jurnal_ekspor_status_idx`, `jurnal_ekspor_gagal_idx`, `jurnal_ekspor_inflight_idx` |
+| Sent journals due for re-verification against a mutable remote | `jurnal_ekspor_verifikasi_idx` |
+| External balance reconciliation and drift | `saldo_akun_eksternal_periode_idx`, `pengambilan_saldo_eksternal_periode_idx` |

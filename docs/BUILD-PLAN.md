@@ -92,6 +92,37 @@ Riset di `docs/REGULASI.md` menemukan spesifikasi mengacu ke peraturan yang suda
 
 Batas kepercayaan temuan: riset dilakukan tanpa bisa membuka dokumen primer secara langsung, jadi setiap temuan diberi label tingkat keyakinan di `docs/REGULASI.md` dan enam dokumen primer yang harus dibuka manual sudah didaftar di sana. Keputusan kebijakan akuntansi (metode jasa, dasar penyisihan, format laporan) adalah wewenang tim keuangan klien dan KAP-nya, bukan tim pembangun. Sampai ada keputusan, default mengikuti spec supaya prototype tetap bisa didemokan, dan setiap default ditandai di `ASSUMPTIONS.md`.
 
+## Integrasi Accurate Online, dan dampaknya ke posisi sistem ini
+
+Keputusan pemilik repo: produk yang dituju adalah **Accurate Online** (bukan Accurate 5 desktop), sehingga API resmi tersedia. Tetapi **siapa pemegang buku resmi TJSL belum diputuskan.** Jangan membangun seolah sudah diputuskan.
+
+Sampai ada keputusan, yang berlaku:
+
+- **Default mengikuti spesifikasi Bagian 1**: unit TJSL adalah entitas pelaporan tersendiri, jadi sistem ini yang memegang buku dan menghasilkan laporan Bagian 10.3 secara penuh.
+- **Integrasi Accurate dibangun sebagai lapisan opsional yang inert** kalau tidak ada target yang dikonfigurasi. Tujuannya menjaga keputusan tetap bisa dibalik tanpa bongkar skema.
+
+Dua kemungkinan dan konsekuensinya, supaya keputusan nanti diambil dengan sadar:
+
+| Kalau diputuskan | Konsekuensi |
+|---|---|
+| Sistem ini tetap pemegang buku | Accurate hanya menerima jurnal ringkas untuk konsolidasi induk. Laporan Bagian 10.3 tetap laporan resmi. Perubahan paling kecil |
+| Accurate jadi pemegang buku | COA kita wajib mencerminkan COA Accurate persis, laporan 17 sampai 20 turun status jadi laporan manajemen dan alat rekonsiliasi, dan scope Fase 6 berubah cukup besar |
+
+Yang dibangun sekarang, karena murah, aditif, dan justru yang membuat keputusan tetap terbuka:
+
+1. **Pemetaan akun kita ke akun Accurate sebagai tabel**, bukan kolom tempelan. Akun yang sudah punya baris jurnal POSTED tapi belum punya padanan harus terdeteksi lewat query sebelum push dimulai, bukan gagal di tengah jalan.
+2. **Status pengiriman per jurnal**: belum terkirim, terkirim, gagal, atau sengaja dikecualikan, beserta id eksternal dari Accurate, jumlah percobaan, dan sidik jari payload. Nomor jurnal kita dipakai sebagai kunci idempotensi supaya dobel posting mustahil.
+3. **Tabel pendaratan saldo Accurate** supaya rekonsiliasi per periode bisa direproduksi, bukan dihitung ulang terhadap API yang hidup.
+4. **Satu port ekspor dengan dua adapter**, API dan file. Kalau ternyata API tidak mendukung referensi eksternal, idempotensi harus ditegakkan sepenuhnya di sisi kita, dan jalur file tetap ada.
+
+Yang belum dibangun sampai ada keputusan: laporan rekonsiliasi terhadap Accurate, dan status kirim sebagai prasyarat closing. Keduanya masuk akal hanya kalau push sudah benar benar dipakai.
+
+Yang tidak akan dibangun dalam kondisi apa pun: sinkronisasi jurnal dua arah. Arah data satu saja, dari sini ke Accurate.
+
+Granularitas push dan mekanisme idempotensi menunggu verifikasi kemampuan API di `docs/INTEGRASI-ACCURATE.md`.
+
+Granularitas push (per jurnal detail versus ringkasan per periode) dan mekanisme idempotensi masih menunggu verifikasi kemampuan API di `docs/INTEGRASI-ACCURATE.md`. Sampai itu selesai, desain harus menyediakan satu port ekspor dengan dua adapter, file dan API, supaya jalur file tetap ada kalau API ternyata membatasi.
+
 ## Batas scope (Bagian 15)
 
 Tidak dibangun: payment gateway atau integrasi bank apa pun, aplikasi mobile native, UI multi tenant, multi mata uang, modul di luar TJSL, realtime atau websocket, design system baru dari nol, fitur AI di luar delapan yang disebut Bagian 12, hard delete data keuangan, optimasi performa prematur.

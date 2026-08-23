@@ -142,3 +142,136 @@ jurnalnya.
 **Perlu keputusan:** apakah unit TJSL klien benar benar punya dana terikat temporer, dan kalau
 ya, event apa yang membentuk serta melepaskannya. Tanpa itu, bagian laporan tersebut akan selalu
 nol.
+
+---
+
+# Integrasi Accurate Online (migrasi 0016, 0017)
+
+Semua butir di bawah lahir dari dua ketidakpastian yang berbeda: keputusan pemilik yang belum
+diambil, dan kemampuan API yang belum terverifikasi. Yang kedua hanya bisa dijawab dengan menarik
+deskriptor API memakai akun developer Accurate Online; `docs/INTEGRASI-ACCURATE.md` bagian 0
+menjelaskan batas metodologinya.
+
+## 11. Siapa pemegang buku resmi TJSL? (fork scope terbesar di proyek ini)
+
+**Belum diputuskan.** Ini bukan detail teknis, ini menentukan bentuk beberapa fase berikutnya.
+
+- **Kalau sistem ini tetap pemegang buku** (default sekarang, sesuai spesifikasi Bagian 1: unit
+  TJSL adalah entitas pelaporan tersendiri): Accurate hanya menerima jurnal ringkas untuk
+  konsolidasi induk, laporan 17 sampai 20 tetap laporan resmi, COA kita bebas mengikuti struktur
+  Bagian 10.3, dan perubahannya paling kecil.
+- **Kalau Accurate jadi pemegang buku:** COA kita wajib mencerminkan COA Accurate persis (ini
+  batasan pada `akun` itu sendiri, bukan hanya pada pemetaannya, dan layak ADR sendiri), laporan
+  17 sampai 20 turun status menjadi laporan manajemen dan alat rekonsiliasi, granularitas push
+  wajib per jurnal, dan status kirim wajib menjadi prasyarat closing.
+
+**Dipakai sekarang:** default `SISTEM_INI` di `konfigurasi.pemegang_buku_resmi`, lapisan integrasi
+inert, dan tidak ada satu pun laporan yang diturunkan statusnya. Lihat ADR 0008.
+
+**Perlu keputusan:** pemilik repo bersama tim keuangan klien dan KAP-nya. Sebelum fase pelaporan
+mulai, karena fase itu yang paling terpengaruh.
+
+## 12. Apakah API Accurate menerima referensi eksternal, dan bisa dicari berdasarkan nomor kita?
+
+**Belum terverifikasi.** Daftar Jurnal Umum menampilkan kolom `No. Trans #` (nomor transaksi
+sumber), jadi konsepnya ada di model datanya, tetapi apakah bisa diisi lewat API dan apakah ada
+endpoint pencarian berdasarkan nomor: tidak diketahui.
+
+**Dipakai sekarang:** `no_jurnal` kita tetap dikirim sebagai `referensi_eksternal` dan dijaga sama
+dengan nomor jurnal oleh trigger, tetapi idempotensi tidak bergantung pada Accurate menghormatinya.
+Flag `dukung_referensi_eksternal` dan `dukung_baca_by_referensi` default false.
+
+**Dampak kalau tidak didukung:** penyelesaian status `AMBIGU` harus manual (petugas mencari di
+Accurate). Itu beban operasional yang harus disepakati sebelum push otomatis dinyalakan.
+
+## 13. Apakah benar tidak ada mekanisme idempotensi di Accurate Online?
+
+**Argumen dari ketiadaan sumber.** Tidak ada satu pun sumber yang menyebut idempotency key, header
+dedup, atau jaminan "kirim dua kali tersimpan sekali", tetapi itu bukan bukti bahwa fiturnya tidak
+ada.
+
+**Dipakai sekarang:** diasumsikan tidak ada. Seluruh proteksi dobel posting ada di sisi kita
+(unique index `(jurnal_id, sistem_kode)`, state machine dengan in-flight tercatat sebelum
+panggilan, dan larangan retry atas `AMBIGU`). Lihat ADR 0009.
+
+**Perlu verifikasi:** deskriptor API. Kalau ternyata ada, biayanya hanya status `AMBIGU` yang
+jarang terpakai.
+
+## 14. Berapa batas baris per voucher, dan berapa presisi desimal yang diterima?
+
+**Tidak ada angka di sumber mana pun.** Yang ada hanya saran memecah impor besar, dan pengaturan
+format desimal untuk cetakan (bukan presisi penyimpanan).
+
+**Dipakai sekarang:** `maks_baris_per_dokumen` = 0 (belum diketahui) dan granularitas push default
+`REKAP_PERIODE`.
+
+**Perlu pengukuran empiris di database uji sebelum push otomatis dinyalakan.** Selisih pembulatan
+pada level entitas pelaporan adalah temuan audit, jadi presisi desimal wajib diuji, bukan
+diasumsikan sama dengan NUMERIC(20,2) kita.
+
+## 15. Tata kelola master data pihak: siapa yang memelihara ratusan record Mitra di Accurate?
+
+Buku pembantu piutang per Mitra hanya bisa terbentuk di Accurate kalau setiap Mitra Binaan menjadi
+satu record pelanggan di sana. Untuk program dengan ratusan mitra, itu keputusan tata kelola, bukan
+detail teknis: siapa yang berhak membuat, menonaktifkan, dan memelihara record tersebut, dan apa
+yang terjadi kalau seseorang di sisi Accurate menghapus atau menggabungkannya.
+
+**Dipakai sekarang:** `pemetaan_mitra_eksternal` satu ke satu di kedua arah, jadi penggabungan dua
+Mitra ke satu record pelanggan tidak bisa terjadi lewat sistem ini (A-30).
+
+**Alternatif kalau klien menolak:** push agregat tanpa dimensi pihak, dan buku pembantu per Mitra
+tetap hanya ada di sistem ini. Itu pilihan yang sah, tetapi harus disadari, karena artinya
+Accurate tidak akan pernah bisa menjawab "berapa piutang mitra X".
+
+## 16. Kalau jurnal yang sudah dikirim diubah atau dihapus di Accurate, apa kebijakannya?
+
+Jurnal umum di sana mutable, termasuk hapus massal. Sistem ini bisa mendeteksinya
+(`status_remote`, `v_ekspor_perlu_keputusan`, `v_drift_saldo_eksternal`), tetapi deteksi bukan
+kebijakan.
+
+Tiga sikap yang mungkin: (a) perbedaan diterima dan didokumentasikan di laporan rekonsiliasi,
+(b) selisihnya wajib dikoreksi di sisi Accurate oleh yang mengubahnya, (c) sistem ini mengirim
+jurnal pembalik plus jurnal baru untuk memaksa angka kembali cocok.
+
+**Dipakai sekarang:** hanya deteksi dan pencatatan, tanpa koreksi otomatis, dan koreksi apa pun
+tetap lewat jurnal pembalik (bukan edit lewat API), karena itu satu satunya cara koreksi yang
+tetap sah ketika periode tujuan sudah terkunci.
+
+**Perlu keputusan:** menggantung di antara ketiganya adalah cara paling pasti menghasilkan angka
+yang tidak bisa dipertanggungjawabkan.
+
+## 17. Kapan status kirim menjadi prasyarat closing internal?
+
+BUILD-PLAN butir 5 memintanya, dan datanya sudah tersedia (`v_jurnal_belum_terkirim`), tetapi
+belum dipasang: integrasi yang belum diputuskan dan belum aktif tidak boleh bisa memblokir cutoff
+akuntansi.
+
+**Dipakai sekarang:** tidak ada kopling. Closing internal berjalan apa pun status ekspornya, dan
+hal itu dibuktikan lewat tes psql.
+
+**Perlu keputusan:** aktifkan bersamaan dengan keputusan butir 11 dan penyalaan push. Pemasangannya
+satu trigger `BEFORE UPDATE` pada `periode`.
+
+## 18. Bagaimana jurnal yang tanggalnya jatuh di periode Accurate yang sudah terkunci?
+
+Periode di Accurate punya penguncian sendiri, dan bentuk pesan errornya belum diketahui. Sistem ini
+sudah memvalidasi tanggal terhadap `periode` kita, tetapi kalender kita dan kalender mereka bisa
+berbeda status.
+
+**Dipakai sekarang:** tidak ada mekanisme khusus. Push memvalidasi terhadap periode kita saja.
+
+**Perlu keputusan:** apakah jurnal semacam itu (a) ditahan sampai periode mereka dibuka,
+(b) dikirim dengan tanggal periode berikutnya beserta keterangan, atau (c) ditandai
+`DIKECUALIKAN` dan diselesaikan manual. Opsi (b) mengubah tanggal transaksi antara dua sistem dan
+itu keputusan akuntansi, bukan teknis.
+
+## 19. Multi mata uang
+
+Accurate punya fitur mata uang dengan mata uang default per database; bagaimana jurnal umum
+menangani baris mata uang asing lewat API tidak diketahui. Spesifikasi TJSL tidak menyebut mata
+uang selain rupiah dan Bagian 15 menyatakan multi mata uang tidak dibangun.
+
+**Dipakai sekarang:** semua angka rupiah, tanpa kolom mata uang di skema.
+
+**Perlu konfirmasi:** bahwa database Accurate tujuan memang berbasis rupiah. Kalau tidak, push akan
+menghasilkan konversi implisit, dan itu temuan audit.

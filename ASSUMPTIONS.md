@@ -297,3 +297,174 @@ mendaftarkan orang yang sama dua kali.
 **Dampak kalau salah:** kalau di data lama ada NIK ganda yang sah (misalnya salah input yang
 belum dibersihkan), import mitra massal akan menolak baris tersebut. Itu memang perilaku yang
 diinginkan, tapi harus dikomunikasikan sebelum migrasi go-live.
+
+---
+
+# Asumsi lapisan integrasi eksternal (migrasi 0016, 0017)
+
+Konteks: **siapa pemegang buku resmi TJSL belum diputuskan** (lihat ADR 0008 dan
+OPEN-QUESTIONS butir 11). Default tetap mengikuti spesifikasi Bagian 1, yaitu sistem ini yang
+memegang buku. Lapisan integrasi dibangun sebagai lapisan opsional yang inert supaya keputusan
+itu tetap bisa dibalik tanpa bongkar skema.
+
+Konteks kedua: temuan API di `docs/INTEGRASI-ACCURATE.md` **belum diverifikasi dari sumber
+primer** (WebFetch terblokir, semua temuan hasil ekstraksi pencarian, sebagian berlabel sekunder,
+dan temuan soal ketiadaan idempotensi adalah argumen dari ketiadaan sumber). Semua asumsi di
+bawah karena itu memilih sikap paling pesimistis: kalau nanti terbukti Accurate lebih mampu,
+konsekuensinya hanya kolom yang tidak terpakai dan status AMBIGU yang jarang muncul, bukan
+constraint yang salah.
+
+## A-21. Arah data satu saja, keluar, dalam kedua kemungkinan
+
+**Diasumsikan:** tidak ada jurnal yang pernah masuk ke sistem ini dari sistem luar.
+`sistem_eksternal.arah` di-CHECK ke `'KELUAR'`, jadi konfigurasi masuk tidak bisa direpresentasikan.
+
+**Kenapa:** dua penulis atas data double entry yang sama berarti dua skema idempotensi dan dua
+jam; kegagalannya berupa duplikat senyap atau lubang senyap di buku yang akan diaudit.
+Rekonsiliasi memberi visibilitas yang sama tanpa risiko itu. Berlaku sama baik sistem ini tetap
+pemegang buku maupun tidak.
+
+**Dampak kalau salah:** kalau klien benar benar butuh jurnal dari Accurate masuk ke sini, CHECK
+harus dilonggarkan lewat migrasi eksplisit, dan seluruh model idempotensi harus dirancang ulang
+dari dua arah. Itu justru alasan CHECK ini ada: keputusan sebesar itu tidak boleh terjadi sebagai
+efek samping edit konfigurasi.
+
+## A-22. Accurate butuh nomor akun, id internalnya belum pasti dipakai
+
+**Diasumsikan:** pemetaan akun menyimpan dua identitas, `akun_eksternal_no` (wajib) dan
+`akun_eksternal_id` (opsional), karena belum diketahui mana yang diminta API-nya.
+
+**Kenapa:** nomor akun adalah yang direkonsiliasi manusia terhadap laporan Accurate, sedangkan id
+internal adalah surrogate key yang biasanya diminta kembali oleh API. Riset belum bisa memastikan
+bentuk payload-nya.
+
+**Dampak kalau salah:** salah satu kolom jadi tidak terpakai. Tidak ada dampak angka.
+
+## A-23. Pemetaan akun bersifat satu ke satu di kedua arah
+
+**Diasumsikan:** satu akun kita menunjuk tepat satu akun Accurate, dan satu akun Accurate hanya
+boleh ditunjuk satu akun kita (dua partial unique index).
+
+**Kenapa:** kalau dua akun kita menunjuk satu akun Accurate, rekonsiliasi per akun tidak punya
+jawaban yang terdefinisi.
+
+**Dampak kalau salah:** kalau klien butuh banyak ke satu (misalnya beberapa akun rinci kita
+diringkas ke satu akun Accurate), index `pemetaan_akun_eksternal_eksternal_uq` harus di-DROP lewat
+migrasi eksplisit, dan laporan rekonsiliasi harus diubah jadi membandingkan agregat, bukan per
+akun.
+
+## A-24. Accurate belum tentu mengembalikan id, dan belum tentu menerima referensi eksternal
+
+**Diasumsikan:** `jurnal_ekspor.id_eksternal` nullable, dan idempotensi tidak bergantung padanya.
+Kunci identifikasi adalah `referensi_eksternal` = `no_jurnal` kita, unik per sistem tujuan, dan
+proteksi dobel posting yang sebenarnya adalah unique index `(jurnal_id, sistem_kode)` di sisi kita.
+
+**Kenapa:** riset tidak menemukan mekanisme idempotensi apa pun di Accurate Online, dan kemampuan
+mencari berdasarkan nomor kita belum terkonfirmasi. Bertumpu pada id yang mereka buat juga tidak
+mungkin: id itu belum ada tepat pada saat retry setelah timeout membutuhkannya.
+
+**Dampak kalau salah (ternyata ada idempotensi):** status `AMBIGU` jadi jarang dan bisa
+diselesaikan otomatis; flag `dukung_idempotensi` dan `dukung_baca_by_referensi` dinyalakan tanpa
+migrasi. Tidak ada yang perlu dibongkar.
+
+## A-25. Retry hanya untuk kegagalan yang PASTI
+
+**Diasumsikan:** hanya status `GAGAL` (terbukti tidak tersimpan di tujuan) yang boleh dicoba ulang
+otomatis. `AMBIGU` (timeout, proses mati, respons tidak terbaca) tidak pernah boleh dikirim ulang;
+transisi `AMBIGU -> SEDANG_DIKIRIM` tidak ada di tabel transisi.
+
+**Kenapa:** tanpa idempotensi di sisi tujuan, retry atas kiriman yang mungkin berhasil adalah cara
+paling langsung menghasilkan jurnal ganda di buku yang diaudit.
+
+**Dampak kalau salah:** kalau ternyata aman untuk retry, satu baris ditambahkan ke tabel transisi.
+Kalau asumsi ini dilonggarkan tanpa bukti, akibatnya persis kelas kesalahan yang paling mahal.
+Konsekuensi yang harus diterima sekarang: penyelesaian `AMBIGU` mungkin manual (petugas membuka
+Accurate dan mencari nomor jurnal kita) sampai kemampuan baca berdasarkan nomor terverifikasi.
+
+## A-26. Saldo dari Accurate diasumsikan konsolidasi, tanpa dimensi cabang
+
+**Diasumsikan:** `saldo_akun_eksternal.cabang_id` nullable dan NULL berarti angka konsolidasi.
+Saldo internal (per cabang) diagregasi ke tingkat akun sebelum dibandingkan.
+
+**Kenapa:** dimensi cabang di Accurate ada sebagai objek master, tetapi apakah wajib di baris
+jurnal belum diketahui, dan dimensi departemen/proyek tergantung edisi.
+
+**Dampak kalau salah:** kalau ternyata saldo bisa diambil per cabang, kolomnya sudah ada dan
+unique index sudah memakai `NULLS NOT DISTINCT`, jadi tinggal diisi. Rekonsiliasi per cabang
+menjadi lebih tajam, bukan berubah bentuk.
+
+## A-27. Sekali kirim dianggap benar hanya sampai diverifikasi ulang
+
+**Diasumsikan:** status `TERKIRIM` bukan klaim permanen. Jurnal di Accurate bisa diedit dan
+dihapus, jadi ada triple verifikasi (`status_remote`, `sidik_remote`, `diverifikasi_at`) dan
+interval pemeriksaan ulang (`konfigurasi.verifikasi_remote_setiap_hari`, default 7 hari).
+
+**Kenapa:** riset menemukan jurnal umum Accurate mutable, termasuk hapus massal.
+
+**Dampak kalau salah:** kalau ternyata jurnal hasil push bisa dikunci di sisi mereka, verifikasi
+ulang jadi pekerjaan sia sia dan intervalnya bisa dimatikan lewat konfigurasi. Sebaliknya, tanpa
+mekanisme ini, perubahan di sisi mereka tidak akan pernah terdeteksi.
+
+## A-28. Saldo eksternal disimpan per pengambilan, bukan ditimpa
+
+**Diasumsikan:** setiap pengambilan saldo dari sistem tujuan adalah baris tersendiri
+(`pengambilan_saldo_eksternal`), tepat satu ditandai `is_terkini` per (sistem, periode), dan baris
+saldo menempel pada pengambilan.
+
+**Kenapa:** kalau ditimpa di tempat, perubahan angka di sisi mereka untuk periode yang sudah
+ditutup akan diam diam menjadi baseline baru, dan drift-nya tidak bisa dibuktikan.
+
+**Dampak kalau salah:** biaya penyimpanan tumbuh sebanyak jumlah pengambilan. Itu memang harga
+dari kemampuan membuktikan bahwa angka di sisi lain berubah. Kalau klien tidak peduli, pengambilan
+lama bisa diarsipkan; jangan dihapus tanpa keputusan tertulis.
+
+## A-29. Pihak sub-ledger di sisi tujuan hanya Mitra Binaan
+
+**Diasumsikan:** satu satunya pihak sub-ledger yang di-push sistem ini adalah Mitra Binaan, jadi
+`pemetaan_mitra_eksternal` memakai foreign key langsung ke `mitra`, bukan pasangan polimorfik
+`entitas` plus `entitas_id`.
+
+**Kenapa:** buku pembantu yang jadi inti sistem ini adalah piutang per Mitra. Membuat bentuk
+generik sekarang menukar foreign key nyata dengan fleksibilitas yang belum dibutuhkan.
+
+**Dampak kalau salah:** kalau nanti beban operasional perlu di-push dengan pihak pemasok, perlu
+tabel sejenis untuk vendor (aditif) atau generalisasi tabel ini (migrasi sedang). Tidak ada dampak
+angka pada data yang sudah ada.
+
+## A-30. Satu Mitra sama dengan satu record pihak di sisi tujuan
+
+**Diasumsikan:** pemetaan Mitra ke pihak eksternal satu ke satu di kedua arah.
+
+**Kenapa:** dua Mitra yang memakai satu record pelanggan akan menggabungkan piutang dua orang di
+buku pembantu Accurate, dan itu tidak bisa dipisahkan lagi setelah terjadi.
+
+**Dampak kalau salah:** ini menciptakan kebutuhan tata kelola master data di sisi klien (ratusan
+Mitra berarti ratusan record pelanggan di Accurate, dengan pemilik proses yang jelas). Kalau klien
+menolak, alternatifnya adalah push agregat tanpa dimensi pihak, dan buku pembantu per Mitra tetap
+hanya ada di sistem ini. Lihat OPEN-QUESTIONS butir 15.
+
+## A-31. Dimensi program dan sektor tidak wajib ikut pada ekspor
+
+**Diasumsikan:** dimensi departemen dan proyek di sistem tujuan tergantung edisi, jadi
+`konfigurasi.kirim_dimensi_program` default mati dan ekspor tetap sah tanpa dimensi apa pun.
+`jurnal_baris.dimensi_json` tetap dimensi analitik kita, bukan syarat push.
+
+**Kenapa:** riset menyatakan integrasi departemen/proyek hanya ada pada edisi yang mendukungnya.
+
+**Dampak kalau salah:** kalau edisi klien mendukung dan mereka ingin dimensi terkirim, cukup
+menyalakan flag kemampuan dan konfigurasi; pembangun payload yang menambahkan pemetaan dimensi.
+Tidak ada perubahan skema.
+
+## A-32. Granularitas push default ringkas per periode
+
+**Diasumsikan:** `konfigurasi.granularitas_push` default `REKAP_PERIODE`, dan
+`maks_baris_per_dokumen` default 0 yang berarti belum diketahui.
+
+**Kenapa:** batas baris per voucher di sistem tujuan tidak ditemukan di sumber mana pun, hanya
+saran memecah impor besar. Selama sistem ini masih pemegang buku, jurnal ringkas sudah cukup untuk
+konsolidasi induk.
+
+**Dampak kalau salah:** kalau Accurate jadi pemegang buku, granularitas wajib `PER_JURNAL` dan
+batas baris harus diukur empiris di database uji lebih dulu. Ini setelan, bukan skema, tetapi
+mengubahnya tanpa mengukur batas baris adalah cara paling pasti menghasilkan periode yang
+setengah terkirim.
