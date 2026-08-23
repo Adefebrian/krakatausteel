@@ -1,4 +1,4 @@
-// S3-compatible object storage client (s3.datacenter.jalgroup.id), lazily
+// S3-compatible object storage client (MinIO locally, any S3 API in prod), lazily
 // constructed. The AWS SDK v3 client does not open a connection at
 // construction time, only when a command is actually sent, so this is safe
 // to import with no credentials configured.
@@ -9,7 +9,7 @@ let client: S3Client | undefined;
 export function getS3(): S3Client {
   if (!client) {
     client = new S3Client({
-      endpoint: process.env.S3_ENDPOINT ?? "https://s3.datacenter.jalgroup.id",
+      endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
       region: process.env.S3_REGION ?? "us-east-1",
       forcePathStyle: true,
       credentials: {

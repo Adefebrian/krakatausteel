@@ -46,4 +46,4 @@ are not used anywhere in this repository.
 ## Deploy
 
 Build the images in `infra/Dockerfile.api` and `infra/Dockerfile.web`, then deploy
-through Coolify. See `infra/coolify.md` for the exact steps.
+on your own server with Docker Compose. See `infra/DEPLOY.md` for the exact steps.

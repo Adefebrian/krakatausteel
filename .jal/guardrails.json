@@ -1,0 +1,4 @@
+{
+  "note": "Personal project. Deploy target is the owner's own server via infra/docker-compose.prod.yml, not deploy.jalgroup.id, so the JAL deploy-host lock is switched off for this repo only. Every other guardrail (Bun-only runtime, no Vite or Next, no emdash in frontend, no cross-module deep imports) still applies.",
+  "deployLock": false
+}

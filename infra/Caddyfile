@@ -1,0 +1,40 @@
+# Caddy fronts the whole stack. TLS certificates are issued automatically by
+# Let's Encrypt as long as APP_DOMAIN resolves to this server and ports 80 and
+# 443 are reachable from the internet.
+#
+# Route split: /api/* goes to the Hono API with the /api prefix stripped,
+# everything else goes to the SPA server. The API is never exposed on its own
+# hostname, so there is exactly one public origin and CORS stays trivial.
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	# Uploaded documents can be a few MB (scans of KTP, SIUP, foto usaha).
+	request_body {
+		max_size 20MB
+	}
+
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 20MB
+			roll_keep 10
+		}
+	}
+}

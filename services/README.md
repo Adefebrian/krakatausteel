@@ -62,8 +62,8 @@ Sidecars speak gRPC, not a hand-rolled REST API:
 
 ## Deploying a sidecar
 
-A sidecar deploys the same way `apps/api` and `apps/web` do (see `infra/coolify.md`): its
-own `Dockerfile`, its own Coolify application, pointed at `services/<service-name>/Dockerfile`
+A sidecar deploys the same way `apps/api` and `apps/web` do (see `infra/DEPLOY.md`): its
+own `Dockerfile`, its own service block in `infra/docker-compose.prod.yml`, pointed at `services/<service-name>/Dockerfile`
 with the build context at the repo root so it can pull in `proto/` during the image build.
 It gets its own health check path and its own set of environment variables, and it is tagged
 and rolled back independently of the two main apps.
