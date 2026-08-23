@@ -1,9 +1,11 @@
 // apps/api/src/modules/jurnal/contract.ts
 //
 // TYPE CONTRACT FOR THE JOURNAL ENGINE (spec 6). Written BEFORE the
-// implementation, per spec rule 5. Every function here is a stub that throws
-// `not implemented`; the tests in this folder are the specification and they
-// are expected to fail until the engine is built against this file.
+// implementation, per spec rule 5: the tests in this folder are the
+// specification, and this file is the shape they were written against. It has
+// not been widened, relaxed or renamed since; the engine was built to it.
+// The behaviour now lives in ./service.ts, reached through
+// `createJurnalEngine` below, which is still the single implementation site.
 //
 // -------------------------------------------------------------------------
 // WHY MONEY IS A DECIMAL STRING AND NOT A `number`
@@ -41,6 +43,8 @@
 // function cannot have a port injected. The free functions are thin app-level
 // wiring over an engine built from the core DbPort; there is exactly one
 // implementation site, `createJurnalEngine`.
+
+import { buatEngineJurnal, engineJurnalTerpasang } from "./service";
 
 // ---------------------------------------------------------------------------
 // Money
@@ -470,83 +474,51 @@ export interface JurnalEngine {
   postingEvent(eventCode: string, payload: EventPayload, ctx: JurnalContext): Promise<Jurnal>;
 }
 
-const BELUM = "not implemented";
-
 /**
- * The one implementation site. Returns an engine whose every method throws
- * until the backend agent implements it.
+ * The one implementation site. The engine itself lives in ./service.ts; this
+ * stays the single named entry point so nothing outside the module has to know
+ * which file the logic is in.
+ *
+ * The import below closes a cycle (contract -> service -> kesalahan ->
+ * contract). It is safe, and it is kept safe on purpose: neither ./service.ts
+ * nor ./kesalahan.ts touches a runtime binding of this file at module
+ * evaluation time, so nothing here is read while it is still in its temporal
+ * dead zone. ./kesalahan.ts says so at its message catalogue, which is written
+ * with string-literal keys for exactly that reason.
  */
 export function createJurnalEngine(deps: JurnalEngineDeps): JurnalEngine {
-  void deps;
-  return {
-    async buatJurnal() {
-      throw new Error(BELUM);
-    },
-    async ubahJurnalDraft() {
-      throw new Error(BELUM);
-    },
-    async verifikasiJurnal() {
-      throw new Error(BELUM);
-    },
-    async postingJurnal() {
-      throw new Error(BELUM);
-    },
-    async batalkanJurnalDraft() {
-      throw new Error(BELUM);
-    },
-    async reversalJurnal() {
-      throw new Error(BELUM);
-    },
-    async postingBatch() {
-      throw new Error(BELUM);
-    },
-    async postingEvent() {
-      throw new Error(BELUM);
-    },
-  };
+  return buatEngineJurnal(deps);
 }
 
 // ---------------------------------------------------------------------------
-// Spec 6.1 free-function surface. App-level wiring over an engine built from
-// the core DbPort adapter; see the file header for why the engine object, not
-// these, is what the tests drive.
+// Spec 6.1 free-function surface. App-level wiring over the engine the
+// composition root registered (see ./index.ts's createJurnalModule and the
+// note at the bottom of ./service.ts); the engine object, not these, is what
+// the tests drive, for the reason given in the file header.
 // ---------------------------------------------------------------------------
 
 export async function buatJurnal(input: BuatJurnalInput, ctx: JurnalContext): Promise<Jurnal> {
-  void input;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().buatJurnal(input, ctx);
 }
 
 export async function verifikasiJurnal(id: string, ctx: JurnalContext): Promise<Jurnal> {
-  void id;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().verifikasiJurnal(id, ctx);
 }
 
 export async function postingJurnal(id: string, ctx: JurnalContext): Promise<Jurnal> {
-  void id;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().postingJurnal(id, ctx);
 }
 
 export async function batalkanJurnalDraft(id: string, ctx: JurnalContext): Promise<void> {
-  void id;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().batalkanJurnalDraft(id, ctx);
 }
 
 export async function reversalJurnal(id: string, alasan: string, ctx: JurnalContext): Promise<Jurnal> {
-  void id;
-  void alasan;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().reversalJurnal(id, alasan, ctx);
 }
 
 export async function postingBatch(ids: string[], ctx: JurnalContext): Promise<Jurnal[]> {
-  void ids;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().postingBatch(ids, ctx);
 }
 
 export async function postingEvent(
@@ -554,8 +526,5 @@ export async function postingEvent(
   payload: EventPayload,
   ctx: JurnalContext,
 ): Promise<Jurnal> {
-  void eventCode;
-  void payload;
-  void ctx;
-  throw new Error(BELUM);
+  return engineJurnalTerpasang().postingEvent(eventCode, payload, ctx);
 }

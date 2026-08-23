@@ -47,3 +47,29 @@ if (testUrl) {
   );
   delete process.env.DATABASE_URL;
 }
+
+// ---------------------------------------------------------------------------
+// Native fetch-API constructors, captured before happy-dom replaces them.
+//
+// Preload order in bunfig.toml is ["./tools/test-env.ts",
+// "./apps/web/src/happydom.ts"], so THIS FILE runs while `Request`,
+// `Response` and `Headers` are still Bun's own. That order is what makes the
+// capture below possible, and it is why this block lives here rather than in a
+// helper under apps/api.
+//
+// Why it is needed: happy-dom implements the browser fetch spec, including the
+// forbidden-header list. Its `Request` silently drops `Cookie`, and its
+// `Response` constructor silently drops `Set-Cookie` from a headers init. Both
+// are correct for a page script and fatal for an API test: a session cookie
+// could neither be sent nor observed, so authentication and authorisation
+// would be untestable exactly where they matter (spec section 2 rule 4 demands
+// calling endpoints directly with the wrong role).
+//
+// apps/api's test harness reads these to build real requests. Nothing in
+// production ever touches them; the property is only defined under `bun test`.
+Object.defineProperty(globalThis, "__BUN_NATIVE_FETCH__", {
+  value: Object.freeze({ Request, Response, Headers, fetch }),
+  writable: false,
+  enumerable: false,
+  configurable: false,
+});

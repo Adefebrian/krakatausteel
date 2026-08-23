@@ -144,7 +144,9 @@
      the header is sticky, and the figures use the numeric font tokens. */
   --table-font-size: var(--text-caption);
   --table-row-height: 36px;
-  --table-header-height: 36px;
+  /* The header is the one row in a table that is tappable (the sort control),
+     so it carries the 44px touch target floor while the data rows stay dense. */
+  --table-header-height: 44px;
   --table-cell-pad-x: var(--space-3);
   --table-cell-pad-y: var(--space-2);
   --table-row-hover: var(--color-surface);

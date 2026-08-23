@@ -682,12 +682,19 @@ h3 {
   color: var(--color-text-muted);
 }
 
+/* Stacked blocks on a single column page share one measure, so two cards in
+   the same vertical run never end at different right edges. */
+.page > .empty,
+.page > .panel,
+.page > .page-note {
+  max-width: 860px;
+}
+
 .page-note {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
   margin: 0;
-  max-width: 90ch;
   font-size: var(--text-caption);
   line-height: var(--leading-caption);
   color: var(--color-text-muted);
@@ -730,6 +737,26 @@ h3 {
   font-size: var(--text-caption);
   line-height: var(--leading-caption);
   font-weight: var(--weight-medium);
+}
+
+/* ================================================== template baris laporan */
+
+.template-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 640px;
+}
+
+.template-lines {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
 }
 
 /* ========================================================== breakpoints */

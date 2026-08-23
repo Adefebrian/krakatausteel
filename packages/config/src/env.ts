@@ -29,6 +29,16 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().default(""),
   OPENAI_API_KEY: z.string().default(""),
   CORS_ORIGINS: z.string().default("http://localhost:3000"),
+  // How many reverse proxies sit in front of this process, counted from the
+  // socket inwards. Only the hops OUR proxies appended to X-Forwarded-For may
+  // be believed; see apps/api/src/core/client-ip.ts for the whole argument.
+  // Default 0 = ignore X-Forwarded-For entirely and use the socket address,
+  // which is the only safe default for an unknown topology. The production
+  // stack sets 1, matching its single Caddy.
+  TRUSTED_PROXY_COUNT: z.coerce.number().int().min(0).max(16).default(0),
+  // Optional alternative to the count: CIDR blocks that are our own
+  // infrastructure, for a topology where the proxy depth varies.
+  TRUSTED_PROXY_CIDRS: z.string().default(""),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -64,8 +64,9 @@ export function normaliseIp(raw: string): string | null {
     const close = value.indexOf("]");
     if (close < 0) return null;
     value = value.slice(1, close);
-  } else if (value.includes(".") && value.includes(":")) {
-    // "1.2.3.4:5678" -> "1.2.3.4" (a bare IPv6 also contains ':' but no '.')
+  } else if (value.includes(".") && value.split(":").length === 2) {
+    // "1.2.3.4:5678" -> "1.2.3.4". Exactly one colon, because an
+    // IPv4-mapped IPv6 ("::ffff:1.2.3.4") also has dots and has more.
     value = value.slice(0, value.indexOf(":"));
   }
   // IPv4-mapped IPv6, which is what a dual-stack socket reports for a v4 peer.
@@ -79,7 +80,9 @@ export function isIpv4(value: string): boolean {
   if (!m) return false;
   return m.slice(1).every((part) => {
     const n = Number(part);
-    return n <= 255 && String(n) === String(Number(part));
+    // `String(n) === part` also rejects a leading zero ("010"), which is how
+    // an octal-parsing bypass is written: some parsers read 010 as 8.
+    return n <= 255 && String(n) === part;
   });
 }
 

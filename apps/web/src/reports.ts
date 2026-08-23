@@ -201,7 +201,7 @@ export const REPORTS: readonly ReportMeta[] = [
     slug: "laporan-aktivitas",
     nama: "Laporan Aktivitas",
     kolomKunci:
-      "Perubahan Aset Neto Tidak Terikat (Pendapatan lalu Beban), Perubahan Aset Neto Terikat Temporer",
+      "Pendapatan lalu Beban per kelompok aset neto, nama barisnya dari template laporan aktif",
     pengelompokan: "Format entitas nirlaba, kolom tahun ini dan tahun lalu bersebelahan",
   },
   {
@@ -218,7 +218,8 @@ export const REPORTS: readonly ReportMeta[] = [
     group: "akuntansi",
     slug: "laporan-posisi-keuangan",
     nama: "Laporan Posisi Keuangan",
-    kolomKunci: "Aset Lancar, Aset Tidak Lancar, Liabilitas, Aset Neto",
+    kolomKunci:
+      "Aset Lancar, Aset Tidak Lancar, Liabilitas, Aset Neto, dengan nama baris aset neto dari template laporan aktif",
     pengelompokan:
       "Kolom tahun ini dan tahun lalu. Total Aset wajib sama dengan Liabilitas plus Aset Neto",
   },
@@ -228,7 +229,7 @@ export const REPORTS: readonly ReportMeta[] = [
     slug: "perubahan-aset-neto",
     nama: "Laporan Perubahan Aset Neto",
     kolomKunci: "Saldo awal, kenaikan atau penurunan, saldo akhir",
-    pengelompokan: "Per kategori aset neto",
+    pengelompokan: "Per kategori aset neto, nama kategorinya dari template laporan aktif",
   },
   {
     no: 21,

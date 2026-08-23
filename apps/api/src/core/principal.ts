@@ -72,34 +72,45 @@ export function setPrincipal(c: Context, principal: Principal): void {
  *
  * Called with the `cabang_id` of the row (or of the request body) being
  * touched. Admin Pusat and Auditor pass for any branch; everyone else passes
- * only for their own. The caller is responsible for having READ the row's
- * real cabang_id from the database rather than trusting one sent by the
- * client, which is what makes URL id manipulation fail.
+ * only for a branch in `cabangTersedia` (their own, plus any branch granted
+ * explicitly through `user_role.scope_cabang_id`). The caller is responsible
+ * for having READ the row's real cabang_id from the database rather than
+ * trusting one sent by the client, which is what makes URL id manipulation
+ * fail: the id in the URL selects the row, the row states its own branch.
  */
 export function assertCabangAllowed(principal: Principal, cabangId: string | null | undefined): void {
   if (principal.lintasCabang) return;
   if (!cabangId) {
     throw forbidden("Data tanpa cabang tidak dapat diakses oleh peran yang terikat cabang");
   }
-  if (cabangId !== principal.cabang.id) {
-    // Deliberately does not say which branch the row belongs to: that would
-    // turn a 403 into an oracle for enumerating other branches' data.
+  if (!principal.cabangTersedia.some((cabang) => cabang.id === cabangId)) {
+    // Deliberately does not say which branch the row belongs to, and is the
+    // same message whether the row exists or not: otherwise a 403 becomes an
+    // oracle for enumerating another branch's data.
     throw forbidden("Data ini berada di luar cabang Anda");
   }
 }
 
+/** Branch ids this principal may act in. Empty means "no restriction". */
+export function allowedCabangIds(principal: Principal): string[] {
+  return principal.lintasCabang ? [] : principal.cabangTersedia.map((cabang) => cabang.id);
+}
+
 /**
  * SQL fragment for scoping a query to what the principal may see.
- * `{ sql: "TRUE" }` for lintasCabang, otherwise an equality on the branch.
- * Returned as a fragment plus params so callers cannot forget to parameterise.
+ * `{ sql: "TRUE" }` for lintasCabang, otherwise membership in the allowed
+ * branch list. Returned as a fragment plus params so a caller cannot forget
+ * to parameterise, and as `= ANY(...)` so the shape does not change when a
+ * user holds a cross-branch role grant.
  */
 export function cabangScopeFilter(
   principal: Principal,
   column = "cabang_id",
   nextParamIndex = 1,
 ): { sql: string; params: unknown[] } {
-  if (principal.lintasCabang) return { sql: "TRUE", params: [] };
-  return { sql: `${column} = $${nextParamIndex}`, params: [principal.cabang.id] };
+  const ids = allowedCabangIds(principal);
+  if (ids.length === 0) return { sql: "TRUE", params: [] };
+  return { sql: `${column} = ANY($${nextParamIndex}::uuid[])`, params: [ids] };
 }
 
 /**
@@ -118,4 +129,15 @@ export interface Guards {
   requirePermission: (...permissions: string[]) => MiddlewareHandler;
   /** Rejects every non-GET request from a read-only role. */
   rejectReadOnlyMutation: MiddlewareHandler;
+  /**
+   * GLOBAL structural guard for read-only roles, registered once in
+   * core/app.ts before any route. Resolves the session only when it matters
+   * (a mutating method with a session cookie present) and refuses it if the
+   * caller's roles are all read-only.
+   *
+   * This is what makes spec 16 scenario 23 ("Auditor: tidak ada satu pun
+   * tombol yang mengubah data") true for routes nobody has written yet: a
+   * POST added in Fase 3 is read-only-safe before its author thinks about it.
+   */
+  enforceReadOnlyRoles: MiddlewareHandler;
 }

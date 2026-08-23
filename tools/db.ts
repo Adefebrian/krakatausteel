@@ -11,7 +11,8 @@
 //   bun tools/db.ts migrate        migrations up on DATABASE_URL      (dev)
 //   bun tools/db.ts migrate:test   migrations up on TEST_DATABASE_URL (test)
 //   bun tools/db.ts reset          wipe + re-migrate TEST_DATABASE_URL
-//   bun tools/db.ts seed           seed data (placeholder, filled per phase)
+//   bun tools/db.ts seed           seed data on TEST_DATABASE_URL
+//   bun tools/db.ts seed:dev       seed data on DATABASE_URL (dev)
 //   bun tools/db.ts status         which URLs resolve to what, no writes
 //
 // `reset` drops and recreates the `public` schema rather than dropping the
@@ -117,14 +118,27 @@ async function reset(): Promise<void> {
   console.log("test database reset: schema dropped, all migrations replayed.");
 }
 
-async function seed(): Promise<void> {
-  const url = requireTestUrl();
-  // Placeholder on purpose. Seeds are phase-scoped (Fase 0 master data, Fase 9
-  // 24 months of transactions per docs/BUILD-PLAN.md) and belong in
-  // tools/seed/*.ts as they are written. This command is the stable entry
-  // point those phases hook into, so nothing downstream has to change later.
-  console.log(`seed: nothing to seed yet (target ${redact(url)}).`);
-  console.log("      Phase seeds land in tools/seed/ and get wired in here.");
+/**
+ * Runs the phase seed modules against `url`.
+ *
+ * The seed itself lives in apps/api/src/seed/ rather than in tools/, because
+ * it seeds through the same DbPort and the same permission catalogue the API
+ * uses: a seed that hand-writes its own INSERTs drifts from the application's
+ * idea of what a role is. This function only chooses the target database and
+ * hands over.
+ *
+ * Two commands, same code path:
+ *   seed      -> TEST_DATABASE_URL (default; safe, wiped by db:reset anyway)
+ *   seed:dev  -> DATABASE_URL      (explicit, because it is not disposable)
+ */
+async function seed(url: string, label: string): Promise<void> {
+  console.log(`seed on ${label} (${redact(url)})`);
+  // DATABASE_URL is what the adapter in apps/api reads, so point it at the
+  // chosen target for this process only.
+  process.env.DATABASE_URL = url;
+  const { seedFase0 } = await import(`${ROOT}apps/api/src/seed/index.ts`);
+  await seedFase0({ log: (line: string) => console.log(line) });
+  console.log("seed selesai.");
 }
 
 function status(): void {
@@ -150,13 +164,16 @@ async function main(): Promise<void> {
       await reset();
       break;
     case "seed":
-      await seed();
+      await seed(requireTestUrl(), "test DB");
+      break;
+    case "seed:dev":
+      await seed(requireDevUrl(), "dev DB");
       break;
     case "status":
       status();
       break;
     default:
-      console.error("Usage: bun tools/db.ts <migrate|migrate:test|reset|seed|status>");
+      console.error("Usage: bun tools/db.ts <migrate|migrate:test|reset|seed|seed:dev|status>");
       process.exit(1);
   }
 }

@@ -78,6 +78,10 @@ services:
       AI_ENABLED: ${AI_ENABLED:-false}
       SESSION_SECRET: ${SESSION_SECRET}
       CORS_ORIGINS: https://${APP_DOMAIN}
+      # One Caddy in front of the api container, so exactly one X-Forwarded-For
+      # hop is ours. See apps/api/src/core/client-ip.ts: anything to the left of
+      # that hop is client-supplied text and is ignored.
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
     expose:
       - "3001"
     healthcheck:

@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { Button, Field, Icon, PasswordInput, TextInput } from "@krakatausteel/ui";
 import { ApiUnreachableError, DEMO_USERNAMES, UnauthorizedError } from "../api/auth";
+import { DASAR_HUKUM } from "../regulasi";
 import { useSession } from "../session";
 
 interface FieldErrors {
@@ -117,7 +118,7 @@ export function Login() {
         ) : null}
 
         <p className="login-foot">
-          Mengacu pada Peraturan Menteri BUMN Nomor PER-05/MBU/04/2021. Aplikasi ini mencatat
+          Mengacu pada Peraturan Menteri BUMN Nomor {DASAR_HUKUM.nomor}. Aplikasi ini mencatat
           jurnal atas peristiwa yang sudah terjadi, tidak memindahkan dana.
         </p>
       </div>

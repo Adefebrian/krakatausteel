@@ -69,6 +69,8 @@ Isi `.env.prod` di server, file ini tidak pernah di-commit:
 | `S3_REGION` | region S3, default `us-east-1`, MinIO tidak peduli nilainya tapi SDK butuh diisi |
 | `OPENAI_API_KEY` | boleh kosong kalau layer AI dimatikan |
 | `AI_ENABLED` | `false` sampai fase AI benar benar dipakai |
+| `TRUSTED_PROXY_COUNT` | jumlah reverse proxy di depan API, dihitung dari socket ke dalam. Topologi di `infra/docker-compose.prod.yml` cuma punya satu Caddy, jadi `1` (nilai default kalau key ini tidak diisi). Naikkan HANYA kalau benar benar ada proxy tambahan (misal CDN di depan Caddy). Salah setting bikin rate limit dan `audit_log.ip` memakai alamat palsu yang dikirim klien, lihat `apps/api/src/core/client-ip.ts` |
+| `TRUSTED_PROXY_CIDRS` | opsional, alternatif `TRUSTED_PROXY_COUNT` untuk topologi dengan kedalaman proxy tidak tetap: daftar CIDR milik infrastruktur sendiri, dipisah koma |
 
 Lalu naikkan stack dan jalankan migrasi:
 

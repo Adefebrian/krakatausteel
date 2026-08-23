@@ -21,7 +21,16 @@ function groupIdForPath(groups: readonly NavGroup[], path: string): string | nul
   const prefixed = groups.find((group) =>
     group.items.some((item) => item.path !== "/" && path.startsWith(item.path)),
   );
-  return prefixed?.id ?? null;
+  if (prefixed) return prefixed.id;
+  // Fall back to the first path segment, so a page that is reachable by URL but
+  // not listed in the nav (every one of the 31 report pages) still lights up
+  // and expands the group it belongs to.
+  const segment = path.split("/")[1] ?? "";
+  if (segment === "") return null;
+  const bySegment = groups.find((group) =>
+    group.items.some((item) => item.path.split("/")[1] === segment),
+  );
+  return bySegment?.id ?? null;
 }
 
 export function SideNav({ permissions, onNavigate }: SideNavProps) {

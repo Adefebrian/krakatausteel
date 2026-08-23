@@ -123,10 +123,19 @@ export const errorHandler: ErrorHandler = (err, c: Context) => {
   }
   const mapped = mapDatabaseError(err);
   if (mapped) {
-    // Logged because a guard firing means the service-layer mirror let
-    // something through, which is a bug worth seeing even though the response
-    // is a clean 409.
-    console.error(`[db-guard] ${c.req.method} ${c.req.path}:`, err);
+    if (mapped.status >= 500 || mapped.code === "KONFLIK" || mapped.code === "SEGREGASI_TUGAS") {
+      // A guard firing means the service-layer mirror let something through,
+      // which is a bug worth the full stack even though the response is a
+      // clean 409.
+      console.error(`[db-guard] ${c.req.method} ${c.req.path}:`, err);
+    } else {
+      // Client-caused (a malformed id in the URL, a bad enum value). One line:
+      // logging a whole pg error object per bad request is how a log becomes
+      // unreadable during an incident.
+      console.warn(
+        `[db-input] ${c.req.method} ${c.req.path}: ${(err as { code?: string }).code ?? "?"} ${mapped.message}`,
+      );
+    }
     return c.json(mapped.toBody(), mapped.status as 409);
   }
   if (err instanceof HTTPException) {

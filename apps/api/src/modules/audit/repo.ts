@@ -109,7 +109,10 @@ export function createAuditRepo(): AuditRepo {
       if (filter.hasil) add("hasil = $?", filter.hasil);
       params.push(filter.limit);
       return runner.query<AuditRow>(
-        `SELECT id::text AS id, waktu, user_id::text AS user_id, ip::text AS ip,
+        // host(ip), not ip::text: casting INET to text appends the netmask
+        // ("203.0.113.7/32"), which is not what anyone reading an audit trail
+        // wants and is not what the writer put in.
+        `SELECT id::text AS id, waktu, user_id::text AS user_id, host(ip) AS ip,
                 user_agent, aksi, entitas, entitas_id, nilai_lama_json,
                 nilai_baru_json, hasil, keterangan
            FROM audit_log

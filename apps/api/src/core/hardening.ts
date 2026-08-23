@@ -6,6 +6,7 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
+import { setCookieFlush } from "./cookies";
 import {
   loadTrustedProxyConfig,
   normaliseIp,
@@ -193,6 +194,9 @@ export const rateLimitMiddleware: MiddlewareHandler = rateLimit();
 export function applyHardening(app: {
   use: (path: string, ...handlers: MiddlewareHandler[]) => unknown;
 }): void {
+  // First registered = outermost = last to touch the response. Cookies are
+  // written there so no middleware downstream can drop them; see ./cookies.ts.
+  app.use("*", setCookieFlush);
   app.use("*", secureHeadersMiddleware);
   app.use("*", corsMiddleware);
   app.use("*", originGuard);

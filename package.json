@@ -22,6 +22,7 @@
     "db:migrate:test": "bun tools/db.ts migrate:test",
     "db:reset": "bun tools/db.ts reset",
     "db:seed": "bun tools/db.ts seed",
+    "db:seed:dev": "bun tools/db.ts seed:dev",
     "db:status": "bun tools/db.ts status"
   },
   "dependencies": {
