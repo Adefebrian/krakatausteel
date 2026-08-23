@@ -22,6 +22,15 @@ services:
       - caddy-config:/config
     environment:
       APP_DOMAIN: ${APP_DOMAIN}
+    # Caddy's admin API on loopback:2019 is the only endpoint that answers
+    # without a valid public hostname and TLS. Probing :80 instead would just
+    # measure Caddy's HTTP-to-HTTPS redirect, which answers even when the
+    # config failed to load.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     depends_on:
       - web
       - api
@@ -38,6 +47,13 @@ services:
       API_BASE_URL: http://api:3001
     expose:
       - "3000"
+    # The SPA server has no /health route; it serves index.html for any path,
+    # so a 200 on / means the build is present and the server is up.
+    healthcheck:
+      test: ["CMD", "bun", "--eval", "await fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
       api:
         condition: service_healthy

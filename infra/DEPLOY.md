@@ -23,14 +23,19 @@ mesin dipakai langsung:
 Perintah harian:
 
 ```bash
-bun install && bun tools/migrate.ts up && bun run dev
+bun install && bun run db:migrate && bun run dev
 ```
 
-Gate sebelum apa pun dianggap jadi:
+Gate sebelum apa pun dianggap jadi, satu perintah:
 
 ```bash
-bun run build && bun test && bun run check:boundaries
+bun run verify
 ```
+
+`verify` menjalankan reset schema plus migrasi di `tjsl_test`, lalu `bun run build`,
+`bun test`, `bun run check:boundaries`, dan `bun run check:compose`, berhenti di
+kegagalan pertama dengan ringkasan PASS/FAIL per langkah. Detail lingkungan lokal,
+resep psql, dan cara menjalankan sebagian test ada di `docs/DEV.md`.
 
 `infra/docker-compose.yml` (Postgres plus Redis saja) tersedia kalau suatu saat
 mau dev di dalam container, tapi bukan jalur default sekarang.
@@ -61,6 +66,7 @@ Isi `.env.prod` di server, file ini tidak pernah di-commit:
 | `SESSION_SECRET` | acak minimal 32 byte, hasilkan dengan `openssl rand -hex 32` |
 | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | kredensial object storage |
 | `S3_BUCKET` | nama bucket, default `tjsl` |
+| `S3_REGION` | region S3, default `us-east-1`, MinIO tidak peduli nilainya tapi SDK butuh diisi |
 | `OPENAI_API_KEY` | boleh kosong kalau layer AI dimatikan |
 | `AI_ENABLED` | `false` sampai fase AI benar benar dipakai |
 
@@ -118,6 +124,16 @@ sungguhan. Backup yang belum pernah direstore bukan backup.
   klien, sedangkan yang benar adalah hop yang diisi proxy tepercaya, yaitu Caddy
   di stack ini. Ini dicatat sebagai temuan untuk pass keamanan, harus diperbaiki
   sebelum portal publik dibuka.
-- CI di `.github/workflows/ci.yml` jalan di runner GitHub biasa dan hanya
-  menjalankan typecheck, lint, test, build, dan cek boundary. CI tidak pernah
-  menyentuh server. Deploy tetap manual dari server lewat `git pull`.
+- CI di `.github/workflows/ci.yml` jalan di runner GitHub biasa (bukan self
+  hosted). Postgres 15 dan Redis 7 dipakai sebagai service container, migrasi
+  diterapkan lebih dulu, lalu typecheck, lint, test, build, cek boundary, dan
+  cek statis compose. CI tidak pernah menyentuh server dan tidak pernah
+  memegang kredensial yang bisa menjangkaunya. Deploy tetap manual dari server
+  lewat `git pull`.
+- `docker compose ... config` belum pernah dijalankan untuk file ini karena
+  Docker tidak hidup di mesin dev. Gantinya `bun run check:compose` memvalidasi
+  file secara statis (YAML valid, setiap `${VAR}` terdokumentasi di sini dan ada
+  di `.env.example`, tidak ada layanan stateful yang mem-publish port, semua
+  service punya healthcheck, tidak ada secret hardcoded). Jalankan
+  `docker compose -f infra/docker-compose.prod.yml --env-file .env.prod config`
+  sekali di server sebelum deploy pertama.

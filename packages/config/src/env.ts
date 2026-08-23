@@ -13,6 +13,14 @@ import { z } from "zod";
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.string().url().default("postgres://user:password@localhost:5432/app"),
+  // Tests need a real Postgres, not a fake: the accounting invariants of this
+  // system (Bagian 3 of the spec) are enforced by triggers and check
+  // constraints inside the database, so a stubbed repository proves nothing.
+  // TEST_DATABASE_URL is that database, always a separate one whose name ends
+  // in _test, wiped and re-migrated by `bun run db:reset`. It is optional here
+  // because the server never reads it; tools/db.ts and tools/test-env.ts are
+  // the consumers, and both fail loudly when it is missing or misnamed.
+  TEST_DATABASE_URL: z.string().url().optional(),
   REDIS_URL: z.string().url().default("redis://localhost:6379"),
   S3_ENDPOINT: z.string().url().default("http://localhost:9000"),
   S3_REGION: z.string().min(1).default("us-east-1"),

@@ -18,4 +18,6 @@
 peer = true
 
 [test]
-preload = ["./apps/web/src/happydom.ts"]
+# Order matters: tools/test-env.ts rewrites DATABASE_URL to
+# TEST_DATABASE_URL before any module under test can build a pool from it.
+preload = ["./tools/test-env.ts", "./apps/web/src/happydom.ts"]

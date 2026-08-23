@@ -76,6 +76,22 @@ Sebelum sebuah fase dinyatakan selesai, semua ini harus lulus:
 | `LAPORAN.md` | 6 |
 | `SEED.md` | 9 |
 
+## Dampak temuan regulasi ke kemampuan engine
+
+Riset di `docs/REGULASI.md` menemukan spesifikasi mengacu ke peraturan yang sudah dicabut. Konsekuensinya bukan "ganti angka default", tapi "engine harus punya dua mode" di beberapa titik. Semua di bawah ini wajib dibangun sebagai kemampuan, dengan mode aktif dipilih lewat tabel `konfigurasi`, bukan lewat deploy.
+
+| Titik | Yang diminta spec | Yang ditemukan berlaku | Kemampuan yang harus ada |
+|---|---|---|---|
+| Jasa administrasi | FLAT 3 persen per tahun | PER-1/MBU/03/2023 Pasal 22 ayat (2): 3 persen efektif per tahun, atau flat yang ekuivalen dengan 3 persen efektif, tenor maksimum 3 tahun | Tiga metode (FLAT, EFEKTIF, ANUITAS) memang sudah diminta spec Bagian 7.1, jadi enginenya sama. Tambahan: fungsi konversi "flat yang ekuivalen dengan rate efektif" supaya rate flat bisa diturunkan dari 3 persen efektif, bukan diketik manual. Test fixture spec 7.5 nomor 1 tetap dipakai sebagai test metode FLAT, bukan sebagai klaim kepatuhan |
+| Batas tenor | `tenor_max_bulan` konfigurable | Maksimum 3 tahun | Default `tenor_max_bulan` = 36 |
+| Penyisihan | Tabel rate 0, 25, 75, 100 persen per kolektibilitas | Pedoman Akuntansi PKBL dan praktik audited: penurunan nilai kolektif berbasis tingkat penagihan historis, minimum data 2 tahun | Dua mode: `RATE_TABLE` (default, sesuai spec, demoable hari pertama) dan `KOLEKTIF_HISTORIS` (menghitung rate dari histori penerimaan per bucket kolektibilitas). Snapshot menyimpan rate yang benar benar dipakai, supaya laporan periode lampau tetap reproducible saat mode diganti |
+| Format laporan | Aset Neto Tidak Terikat dan Terikat Temporer (istilah PSAK 45) | ISAK 35, dinomori ulang jadi ISAK 335 sejak 1 Januari 2024: tanpa pembatasan dan dengan pembatasan. Amendemen ISAK 335 disahkan 3 Juni 2026 untuk PSAK 118, berlaku 1 Januari 2027 | `baris_laporan` harus menampung lebih dari satu template laporan yang hidup bersamaan, dan `akun.klasifikasi_laporan` menunjuk baris per template, bukan satu format tunggal. Seed dua template: gaya spec (PSAK 45) sebagai default demo, dan ISAK 335 sebagai alternatif |
+| Hapus buku | `HAPUS_BUKU_PIUTANG` mendebet Penyisihan sebesar seluruh outstanding | SK-277/MBU/10/2023: istilah resminya penghapusbukuan dan penghapustagihan, dua peristiwa berbeda | Event terpisah untuk penghapustagihan, plus jalur untuk kekurangan penyisihan: kalau saldo penyisihan lebih kecil dari outstanding yang dihapus buku, sisanya jadi beban periode itu, bukan mendebet penyisihan sampai negatif |
+| Pinjaman aktif per mitra | `maks_pinjaman_aktif_per_mitra` = 1 | Plafon Rp250 juta plus tambahan jangka pendek Rp100 juta | Konfigurasi tambahan untuk mengizinkan top-up jangka pendek di atas akad aktif, default mati |
+| Pelaporan ke Kementerian | Tidak disebut spec | Pasal 33: laporan triwulanan dan tahunan, audit KAP terpisah | Dicatat sebagai backlog di `OPEN-QUESTIONS.md`, tidak dibangun tanpa keputusan pemilik |
+
+Batas kepercayaan temuan: riset dilakukan tanpa bisa membuka dokumen primer secara langsung, jadi setiap temuan diberi label tingkat keyakinan di `docs/REGULASI.md` dan enam dokumen primer yang harus dibuka manual sudah didaftar di sana. Keputusan kebijakan akuntansi (metode jasa, dasar penyisihan, format laporan) adalah wewenang tim keuangan klien dan KAP-nya, bukan tim pembangun. Sampai ada keputusan, default mengikuti spec supaya prototype tetap bisa didemokan, dan setiap default ditandai di `ASSUMPTIONS.md`.
+
 ## Batas scope (Bagian 15)
 
 Tidak dibangun: payment gateway atau integrasi bank apa pun, aplikasi mobile native, UI multi tenant, multi mata uang, modul di luar TJSL, realtime atau websocket, design system baru dari nol, fitur AI di luar delapan yang disebut Bagian 12, hard delete data keuangan, optimasi performa prematur.

@@ -1,13 +1,72 @@
 name: CI
 
+# Runs on a GitHub-hosted runner. There is no self-hosted runner and no deploy
+# step anywhere in this workflow, by design: deploy is manual from the server
+# (git pull + docker compose up -d --build, see infra/DEPLOY.md), and CI never
+# holds a credential that can reach the server.
+#
+# What it proves: a clean clone installs, the schema migrates from zero onto a
+# real Postgres 15, and typecheck, lint, the test suite, the build, the module
+# boundary check and the static compose check all pass. Any failing step fails
+# the job.
+
 on:
   push:
     branches: ["**"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Postgres 15 to match the dev machine (15.17) and the server image
+    # (postgres:15-alpine). Redis 7 matches redis:7-alpine in the prod stack.
+    # The database is named tjsl_test because tools/db.ts refuses to touch any
+    # database whose name does not end in _test.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: tjsl
+          POSTGRES_PASSWORD: tjsl
+          POSTGRES_DB: tjsl_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tjsl -d tjsl_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # CI has no .env file. Everything the app and the tools read is declared
+      # here explicitly, so a missing key fails loudly instead of falling back
+      # to a schema default that hides the mistake.
+      TEST_DATABASE_URL: postgres://tjsl:tjsl@localhost:5432/tjsl_test
+      DATABASE_URL: postgres://tjsl:tjsl@localhost:5432/tjsl_test
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-only-not-a-real-secret
+      AI_ENABLED: "false"
+      OPENAI_API_KEY: ""
+      CORS_ORIGINS: http://localhost:3000
+      TURBO_TELEMETRY_DISABLED: "1"
+      DO_NOT_TRACK: "1"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,11 +76,46 @@ jobs:
         with:
           bun-version: "1.3.14"
 
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck, lint, test, build
-        run: bunx turbo typecheck lint test build
+      # Migrations run before anything that touches the database. This also
+      # doubles as a migration smoke test: a syntax error or a broken trigger
+      # in migrations/*.sql fails the job here, before any test output can
+      # confuse the cause.
+      - name: Apply migrations to the test database
+        run: bun run db:migrate:test
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
 
       - name: Module boundary check
         run: bun run check:boundaries
+
+      - name: Static compose check
+        run: bun run check:compose

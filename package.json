@@ -8,13 +8,21 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "turbo run dev --parallel",
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "bun test",
+    "test:fresh": "bun run db:reset && bun test",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
-    "dev": "turbo run dev --parallel",
+    "verify": "bun tools/verify.ts",
     "check:boundaries": "bun tools/check-boundaries.ts",
-    "migrate": "bun tools/migrate.ts"
+    "check:compose": "bun tools/check-compose.ts",
+    "migrate": "bun tools/migrate.ts",
+    "db:migrate": "bun tools/db.ts migrate",
+    "db:migrate:test": "bun tools/db.ts migrate:test",
+    "db:reset": "bun tools/db.ts reset",
+    "db:seed": "bun tools/db.ts seed",
+    "db:status": "bun tools/db.ts status"
   },
   "dependencies": {
     "pg": "^8.13.0"
