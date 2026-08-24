@@ -286,6 +286,13 @@ membandingkannya dengan pokok pinjaman awal pasti gagal.
 **Dampak kalau salah:** kalau klien memastikan reschedule tidak pernah mengubah pokok, trigger
 bisa diperluas ke semua versi (lebih ketat, migrasi mudah).
 
+**STATUS: SUDAH DITUTUP oleh migrasi 0019.** Celah ini tidak lagi diserahkan ke engine. Dasar
+pokok untuk versi di atas 1 ternyata bisa diketahui database lewat tautan
+`pumk_jadwal_versi.reschedule_id` yang sudah ada sejak 0008: dasarnya adalah
+`coalesce(pokok_baru, outstanding_pokok_sebelum)` dari baris reschedule yang melahirkan versi itu
+(`TJSL-JDW-006`, deferred, sama pola dengan versi 1). Sekaligus menaikkan "versi di atas 1 hanya
+lahir dari reschedule" dari harapan menjadi aturan (`TJSL-JDW-004`). Lihat ADR 0011.
+
 ## A-20. NIK mitra unik bila diisi
 
 **Diasumsikan:** `mitra.nik` unik untuk baris yang belum dihapus, tetapi boleh NULL (calon mitra
@@ -468,3 +475,99 @@ konsolidasi induk.
 batas baris harus diukur empiris di database uji lebih dulu. Ini setelan, bukan skema, tetapi
 mengubahnya tanpa mengukur batas baris adalah cara paling pasti menghasilkan periode yang
 setengah terkirim.
+
+---
+
+# Semantik status jurnal setelah perbaikan 0018
+
+## A-33. REVERSED berarti "masih di buku, sudah diimbangi", bukan "ditarik"
+
+**Diasumsikan:** baris jurnal dari jurnal berstatus `REVERSED` **tetap ikut** dihitung dalam
+setiap agregat buku besar, karena baris itu masih entri riil dan sudah diimbangi oleh baris
+jurnal pembaliknya (yang berstatus `POSTED`). Predikat resmi "baris ini masuk buku besar" adalah
+`status IN ('POSTED','REVERSED') AND deleted_at IS NULL`, dan dinyatakan satu kali di view
+`v_ledger_baris` (migrasi 0018).
+
+**Kenapa:** koreksi memakai jurnal pembalik (invarian 4, Bagian 6.3) menambah dua baris dan tidak
+pernah menghapus satu pun. Menyaring `POSTED` saja hanya menghitung satu sisi dari pasangan
+koreksi, sehingga efek setiap pembalikan terhitung dua kali. Ini bukan insiden, ini kelas
+kesalahan: dua bug yang dilaporkan tim engine (guard periode menolak pembalikan, dan rekonsiliasi
+piutang menghitung ganda) berakar pada asumsi yang sama.
+
+**Dampak kalau salah:** kalau klien ternyata menginginkan jurnal `REVERSED` hilang dari buku besar
+(artinya pembalikan dianggap membatalkan, bukan mengimbangi), maka jurnal pembalik tidak boleh
+dibuat sama sekali, dan itu bertentangan dengan invarian 4 serta menghapus jejak audit di kedua
+sisi. Jadi asumsi ini tidak berdiri sendiri: mengubahnya berarti mengubah kebijakan koreksi,
+bukan sekadar mengubah satu `WHERE`.
+
+**Dampak operasional yang harus diperhatikan tim aplikasi:** setiap query buku besar baru wajib
+membaca `v_ledger_baris`. Yang paling berisiko adalah engine closing yang menulis
+`saldo_akun_periode`: snapshot itu dibekukan, jadi kalau ia menyaring `POSTED` saja, angka salahnya
+menjadi permanen dan tidak terlihat oleh view mana pun (lihat OPEN-QUESTIONS butir 20).
+
+## A-34. Transisi POSTED ke REVERSED dikecualikan dari guard periode CLOSED
+
+**Diasumsikan:** menandai jurnal asli `POSTED -> REVERSED` boleh dilakukan meskipun periode jurnal
+asli sudah CLOSED, selama tanggal transaksi dan periode_id-nya tidak berubah. Jurnal pembaliknya
+sendiri tetap divalidasi penuh saat INSERT, jadi tetap wajib bertanggal di periode yang terbuka.
+
+**Kenapa:** Bagian 6.3 justru mengharuskan kasus ini jalan, dengan alasan eksplisit "periode asli
+mungkin sudah tutup". Tanpa pengecualian ini, jurnal yang periodenya sudah ditutup tidak bisa
+dikoreksi dengan cara apa pun.
+
+**Dampak kalau salah:** kalau klien ingin pembalikan atas periode CLOSED harus lewat reopen
+periode lebih dulu (kebijakan yang lebih ketat dan sah), pengecualian ini harus dihapus dan alur
+koreksi wajib melewati reopen. Konsekuensinya reopen menjadi operasi rutin, bukan operasi
+pengecualian, dan itu keputusan tim akuntansi.
+
+---
+
+# Penegakan jalur posting dan penghapusan fisik (migrasi 0020, 0021)
+
+## A-35. Guard jalur posting adalah tripwire, bukan batas keamanan
+
+**Diasumsikan:** trigger `BEFORE INSERT` pada `jurnal` dan `jurnal_baris` yang mewajibkan
+`tjsl.jalur_posting = '<jalur>:' || txid_current()` **bisa** dilewati oleh pemanggil yang memang
+berniat: modul apa pun yang bisa menjalankan SQL juga bisa menjalankan `set_config` yang sama di
+dalam transaksinya sendiri. Database tidak tahu modul mana yang memanggil.
+
+**Kenapa tetap dibangun:** yang realistis terjadi bukan sabotase, tetapi kelalaian. Seseorang
+menulis INSERT langsung karena praktis, lalu angkanya masuk buku tanpa lewat engine dan tanpa
+peringatan apa pun. Guard ini membuat kelalaian itu gagal seketika dengan pesan yang menyebut
+aturannya, dan ia menjangkau jalur yang tidak bisa dilihat oleh pemeriksa statis: sesi psql,
+skrip sekali pakai, `tools/`, `core/`, seed, dan berkas apa pun di luar
+`apps/api/src/modules/**`. Nonce transaksi menutup kebocoran nilai antar transaksi, termasuk
+akibat salah tulis `SET` alih alih `SET LOCAL`.
+
+**Dampak kalau salah dipahami:** kalau guard ini diperlakukan sebagai jaminan keamanan, review
+kode bisa jadi lengah. Penegakan utama tetap `tools/check-boundaries.ts` di CI; batas yang
+sebenarnya adalah pemisahan role database (REVOKE plus SECURITY DEFINER), lihat OPEN-QUESTIONS
+butir 22 dan ADR 0012.
+
+## A-36. Jalur non-engine yang sah dibuat kelihatan di data, bukan disembunyikan di kode
+
+**Diasumsikan:** selain `engine`, hanya `seed` dan `import_saldo_awal` yang sah, dan nilainya
+**dicap ke baris** (`jurnal.jalur_posting`) sehingga bisa dikueri, bukan hanya berupa konstanta di
+kode.
+
+**Kenapa:** nilai sah kedua yang hanya hidup di kode akan menyebar lewat salin tempel tanpa jejak.
+Kalau ia menyebar sebagai kolom, penyebarannya terlihat: `SELECT * FROM
+v_jurnal_jalur_bukan_engine` menjawab "apa saja yang masuk bukan lewat engine" untuk semua periode.
+
+**Dampak kalau salah:** kalau ternyata ada jalur sah lain (misalnya migrasi dari sistem lain di
+luar import saldo awal), daftar nilai di CHECK harus ditambah lewat migrasi eksplisit. Itu memang
+disengaja: menambah pintu masuk ke buku besar harus terlihat di riwayat migrasi.
+
+## A-37. Yang tidak bisa direkonstruksi adalah yang tidak boleh dihapus
+
+**Diasumsikan:** proteksi TRUNCATE hanya dipasang pada tabel bukti (buku besar, jejak audit,
+periode, COA, jadwal angsuran, jejak ekspor), tidak pada snapshot turunan
+(`saldo_akun_periode`, `kolektibilitas_snapshot`, `saldo_akun_eksternal`).
+
+**Kenapa:** spesifikasi 8.4 mendefinisikan reopen periode sebagai menghapus snapshot saldo
+periode itu, dan angka yang bisa dihitung ulang dari ledger bukan bukti. Memproteksi semuanya
+akan membuat operasi yang sah menjadi mustahil.
+
+**Dampak kalau salah:** kalau auditor klien menganggap snapshot periode tertutup juga bukti,
+proteksi harus diperluas dan mekanisme reopen harus diganti dengan pengarsipan berlapis, bukan
+penghapusan. Lihat OPEN-QUESTIONS butir 7 yang sudah mencatat pertanyaan itu.

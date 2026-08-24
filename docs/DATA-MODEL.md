@@ -1,6 +1,6 @@
 # TJSL Online data model
 
-74 tables and 11 views, created by `migrations/0002` through `migrations/0017`. This document is
+74 tables and 13 views, created by `migrations/0002` through `migrations/0021`. This document is
 the map; the migrations are the source of truth and every non-obvious column is commented there.
 
 Sections 1 to 13 are the core system, which works standalone and holds the books.
@@ -20,6 +20,21 @@ Read this first:
   `app_user`, spec `role` is `app_role`.
 - **Spec's `uploaded_by` / `uploaded_at`** (on `mitra_dokumen` and `lampiran`) are the audit
   block's `created_by` / `created_at`, not extra columns.
+- **A `REVERSED` journal is still in the ledger.** Correction is by reversing entry, which adds
+  two rows and removes none, so a ledger sum counts a journal when its status is `POSTED` **or**
+  `REVERSED`. Filtering `POSTED` alone counts one half of a correction pair and doubles its
+  effect. Read `v_ledger_baris` (0018) instead of re-deriving that filter; see ADR 0010.
+- **Journals may only be written through the engine.** `jurnal` and `jurnal_baris` reject any
+  INSERT unless the transaction declares its path:
+  `select set_config('tjsl.jalur_posting', 'engine:' || txid_current(), true)`. The nonce makes a
+  blessing worth exactly one transaction. This is a tripwire against mistakes, not a boundary
+  against intent (a caller can bless its own transaction), so the static check in
+  `tools/check-boundaries.ts` remains the primary enforcement; see ADR 0012. The path is stamped
+  onto `jurnal.jalur_posting`, and `v_jurnal_jalur_bukan_engine` lists everything that entered
+  another way.
+- **What cannot be reconstructed cannot be removed.** Ledger and audit tables carry both a
+  row-level DELETE guard and a statement-level TRUNCATE guard (ADR 0013); derived snapshots carry
+  neither, because reopening a period is defined as dropping them.
 - **The database enforces the accounting invariants**, not just the service layer. See
   `docs/adr/0002`. Guard errors carry stable codes (`TJSL-JRN-031`, `TJSL-PER-001`, ...).
 
@@ -126,7 +141,7 @@ transaction date fall in", shared by the journal guard and the closing engine.
 
 | Table | Purpose |
 |---|---|
-| `jurnal` | Journal header. `total_debit` / `total_kredit` are maintained by trigger from the lines, never trusted from a caller. `kunci_idempotensi` makes closing re-runs safe. Guards: period resolution, closed-period block, POSTED immutability, delete block. |
+| `jurnal` | Journal header. `jalur_posting` records which sanctioned path wrote it (ENGINE, SEED, IMPORT_SALDO_AWAL, or LEGACY for rows predating 0020), stamped by trigger. `total_debit` / `total_kredit` are maintained by trigger from the lines, never trusted from a caller. `kunci_idempotensi` makes closing re-runs safe. Guards: period resolution, closed-period block, POSTED immutability, delete block. |
 | `jurnal_baris` | Journal line. One side only (CHECK), account must be postable (FK to the generated column), optional mitra and akad for the receivable sub-ledger, analytic dimensions as JSON. |
 | `event_jurnal_mapping` | The spec 6.4 event-to-account mapping, as configuration (ADR 0004). |
 
@@ -155,7 +170,9 @@ transaction date fall in", shared by the journal guard and the closing engine.
 
 | View | Purpose |
 |---|---|
-| `v_rekonsiliasi_piutang` | Spec 8.4 check 10, the most important reconciliation in the system: per akad, sub-ledger outstanding versus general ledger. Any non-zero `selisih` blocks period closing. The receivable account is read from `event_jurnal_mapping`, not hardcoded. |
+| `v_jurnal_jalur_bukan_engine` | Journals that did not come from the engine. Expected empty in production once the opening-balance import has run. Added in 0020. |
+| `v_ledger_baris` | The canonical set of ledger lines (journal `POSTED` or `REVERSED`, nothing soft-deleted), with `debit - kredit` precomputed. Every ledger aggregate must read this rather than re-deriving the status filter (ADR 0010). Added in 0018. |
+| `v_rekonsiliasi_piutang` | Spec 8.4 check 10, the most important reconciliation in the system: per akad, sub-ledger outstanding versus general ledger. Any non-zero `selisih` blocks period closing. The receivable account is read from `event_jurnal_mapping`, not hardcoded. Rebuilt on `v_ledger_baris` in 0018, which fixed a double-count of every reversal. |
 | `v_integritas_jurnal` | Journals whose lines do not balance, or have fewer than 2 lines, or disagree with the header totals. Computed from the lines. Should only ever contain in-progress DRAFT journals. |
 | `v_integritas_jadwal` | Active version 1 schedules whose principal does not add up to the loan. |
 | `v_integritas_snapshot` | Duplicate collectibility snapshots. Should always be empty. |
@@ -250,7 +267,7 @@ sistem_eksternal ──┬── pemetaan_akun_eksternal ──► akun(postable
 
 | Report or check | Index |
 |---|---|
-| Any report header (branch + date range) | `jurnal_cabang_tanggal_idx` (partial on POSTED) |
+| Any report header (branch + date range) | `jurnal_ledger_cabang_tanggal_idx` (partial on POSTED or REVERSED, added 0018); `jurnal_cabang_tanggal_idx` remains for POSTED-only queries |
 | Rekap Jurnal, Neraca Lajur, closing prerequisites | `jurnal_periode_status_idx`, `jurnal_periode_jenis_idx` |
 | "Are there DRAFT journals in this period" (spec 8.4 check 2) | `jurnal_draft_idx` |
 | Buku Besar per account | `jurnal_baris_akun_jurnal_idx` |
@@ -261,6 +278,8 @@ sistem_eksternal ──┬── pemetaan_akun_eksternal ──► akun(postable
 | Penyaluran by province / sector / bidang | `mitra_kota_idx`, `mitra_sektor_idx`, `pumk_proposal_sektor_idx`, `nonpumk_proposal_bidang_idx` |
 | Provision reports per class | `kolektibilitas_snapshot_kelas_idx`, `kolektibilitas_snapshot_sektor_idx` |
 | Audit trail by user / entity / rejection | `audit_log_user_idx`, `audit_log_entitas_idx`, `audit_log_ditolak_idx` |
+| Journals that entered outside the engine | `jurnal_jalur_posting_idx` (partial, added 0020) |
+| Closing idempotency, per tenant | `jurnal_idempotensi_uq` on `(bumn_id, kunci_idempotensi)` (rescoped in 0020) |
 | Export worklist, retries, stuck sends | `jurnal_ekspor_status_idx`, `jurnal_ekspor_gagal_idx`, `jurnal_ekspor_inflight_idx` |
 | Sent journals due for re-verification against a mutable remote | `jurnal_ekspor_verifikasi_idx` |
 | External balance reconciliation and drift | `saldo_akun_eksternal_periode_idx`, `pengambilan_saldo_eksternal_periode_idx` |

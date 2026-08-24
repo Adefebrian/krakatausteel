@@ -275,3 +275,78 @@ uang selain rupiah dan Bagian 15 menyatakan multi mata uang tidak dibangun.
 
 **Perlu konfirmasi:** bahwa database Accurate tujuan memang berbasis rupiah. Kalau tidak, push akan
 menghasilkan konversi implisit, dan itu temuan audit.
+
+## 20. Apakah engine closing menghitung jurnal REVERSED saat menulis `saldo_akun_periode`?
+
+**Bukan pertanyaan kebijakan, ini pemeriksaan yang harus dilakukan sebelum periode pertama
+ditutup.** Perbaikan 0018 menutup dua kebocoran di sisi skema (guard periode menolak pembalikan,
+dan `v_rekonsiliasi_piutang` menghitung ganda), tetapi `saldo_akun_periode` **ditulis oleh kode**,
+bukan oleh view.
+
+Kalau engine closing menjumlahkan baris jurnal dengan filter `status = 'POSTED'` saja, maka setiap
+pembalikan terhitung dua kali di neraca lajur periode itu. Karena snapshot itu dibekukan dan
+menjadi sumber laporan periode lampau (invarian 14), angka salahnya menjadi **permanen dan tidak
+terlihat**: `v_rekonsiliasi_eksternal` membaca snapshot itu dan akan melaporkan angka salah
+tersebut dengan setia.
+
+**Yang harus dilakukan:** engine closing wajib membaca `v_ledger_baris` (migrasi 0018), atau
+memakai predikat `status IN ('POSTED','REVERSED') AND deleted_at IS NULL` secara eksplisit. Sudah
+disampaikan ke pemilik engine closing lewat ADR 0010; dicatat di sini karena skema tidak bisa
+memaksanya.
+
+**Uji yang membuktikannya:** tutup satu periode yang memuat satu jurnal POSTED dan satu pasangan
+pembalikan, lalu pastikan `saldo_akun_periode.saldo_akhir` sama dengan hasil agregat
+`v_ledger_baris` untuk periode itu. Kalau berbeda, snapshot-nya salah, bukan view-nya.
+
+---
+
+## Scope cabang untuk audit trail: siapa boleh lihat baris siapa
+
+`GET /audit` sekarang terikat scope cabang (Bagian 2 aturan 3): peran yang
+terikat cabang hanya melihat baris yang **pelakunya** ada di cabangnya, karena
+`audit_log` tidak punya kolom `cabang_id` dan pelaku (`user_id` ->
+`app_user.cabang_id`) adalah satu satunya fakta cabang yang dibawa satu baris.
+
+Dua konsekuensi yang perlu keputusan pemilik, bukan tebakan tim pembangun:
+
+1. **Baris yang pelakunya di cabang Anda tetapi objeknya di cabang lain tetap
+   terlihat.** Contoh: Admin Pusat memindahkan data cabang B sambil "bertindak
+   sebagai" seseorang di cabang A. Menyaring berdasarkan objek berarti join per
+   entitas (`entitas`, `entitas_id` bersifat polimorfik), dan itu keputusan
+   desain yang lebih besar daripada satu predikat.
+2. **Baris anonim (`user_id IS NULL`, misal login gagal) terlihat oleh semua
+   pemegang `audit.view`.** Menyembunyikannya berarti menyembunyikan justru
+   bukti percobaan penyusupan; mengatribusikannya ke satu cabang tidak mungkin,
+   karena tidak diketahui siapa pelakunya.
+
+Pertanyaan ke klien: apakah Auditor cabang (kalau nanti ada peran itu) boleh
+melihat percobaan login gagal untuk seluruh entitas, atau harus dibatasi?
+Sampai dijawab, default-nya seperti di atas dan `audit.view` hanya dipegang
+Auditor dan Admin Pusat, yang keduanya lintas cabang.
+
+## 22. Pemisahan role database: menjadikan guard jalur posting sebagai batas, bukan tripwire
+
+**Ini keputusan devops, bukan migrasi.** Guard di migrasi 0020 mewajibkan setiap penulisan jurnal
+mendeklarasikan jalurnya, dan itu menangkap kelalaian dengan andal. Tetapi ia **tidak** menangkap
+niat: modul yang bisa menjalankan SQL bisa menyetel penanda yang sama di transaksinya sendiri
+(dibuktikan sengaja di output psql). Selama aplikasi terhubung sebagai pemilik tabel, tidak ada
+cara membuatnya lebih kuat dari dalam skema.
+
+**Batas yang sebenarnya:**
+
+1. buat role aplikasi terpisah, misalnya `tjsl_app`, yang bukan pemilik tabel;
+2. `REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON jurnal, jurnal_baris FROM tjsl_app`;
+3. sediakan satu fungsi `SECURITY DEFINER` milik role pemilik sebagai satu satunya pintu tulis
+   jurnal, dan `GRANT EXECUTE` ke `tjsl_app`;
+4. arahkan `DATABASE_URL` aplikasi ke role baru itu.
+
+Setelah itu spoofing tidak mungkin karena role aplikasi memang tidak punya hak tulis, dan finding
+F-5 (TRUNCATE) juga tertutup di lapisan hak akses, bukan hanya oleh trigger.
+
+**Konsekuensi yang harus disadari:** migrasi tetap dijalankan sebagai pemilik (dua kredensial,
+bukan satu), fungsi `SECURITY DEFINER` menjadi permukaan yang wajib direview ketat, dan pengujian
+lokal butuh role yang sama supaya perilaku dev dan produksi tidak berbeda.
+
+**Sampai keputusan itu diambil:** trigger 0020 adalah kontrolnya, `tools/check-boundaries.ts`
+adalah penegakan utama di CI, dan keduanya didokumentasikan apa adanya di ADR 0012. Jangan
+menuliskan di dokumen mana pun bahwa jalur posting "tidak bisa dilewati", karena hari ini bisa.
