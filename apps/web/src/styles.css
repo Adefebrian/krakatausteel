@@ -88,6 +88,19 @@ h3 {
   color: var(--color-text-muted);
 }
 
+/* Verbatim message from the server, kept visually secondary to the sentence
+   above it so the plain-language explanation stays the primary reading. */
+.boot-detail {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
 .boot-panel > .btn:last-child {
   margin-bottom: 0;
 }
@@ -175,29 +188,10 @@ h3 {
   line-height: var(--leading-caption);
 }
 
-.login-demo {
-  padding: var(--space-3);
-  border: var(--border-weight) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-}
-
-.login-demo-title {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-caption);
-  line-height: var(--leading-caption);
-  font-weight: var(--weight-semibold);
-}
-
-.login-demo-body,
 .login-foot {
   margin: 0;
   font-size: var(--text-caption);
   line-height: var(--leading-caption);
-  color: var(--color-text-muted);
-}
-
-.login-foot {
   color: var(--color-text-subtle);
 }
 
@@ -296,12 +290,6 @@ h3 {
 
 .chip-val {
   font-weight: var(--weight-medium);
-}
-
-.chip.is-demo {
-  border-color: var(--color-warning-border);
-  background: var(--color-warning-weak);
-  color: var(--color-warning);
 }
 
 .shell-user {

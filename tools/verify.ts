@@ -56,6 +56,14 @@ const steps: Step[] = [
     cmd: ["bun", "tools/db.ts", "reset"],
     skipIf: postgresReachable,
   },
+  // Typecheck is its own step, and it runs before build and test on purpose.
+  // apps/api defines `build` as `echo ... && exit 0` (the API ships as
+  // TypeScript source for the Bun runtime), so without this step the largest
+  // package in the repo got zero type checking in the one command everyone
+  // treats as the gate: a type error surfaced later as a confusing test
+  // failure, or not at all. Fastest signal first, before build and test spend
+  // time on code that does not typecheck.
+  { name: "typecheck", cmd: ["bun", "run", "typecheck"] },
   { name: "build", cmd: ["bun", "run", "build"] },
   { name: "test", cmd: ["bun", "test"] },
   { name: "check:boundaries", cmd: ["bun", "run", "check:boundaries"] },

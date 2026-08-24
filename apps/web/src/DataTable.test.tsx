@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { DataTable, type Column } from "@krakatausteel/ui";
+import { afterEach, describe, expect, test } from "bun:test";
+import { DataTable, UNPARSEABLE, type Column } from "@krakatausteel/ui";
 import { clickOn, mount, textOf } from "./testing";
 
 interface Row {
@@ -43,6 +43,32 @@ describe("<DataTable />", () => {
     for (const cell of cells) expect(cell.className).toContain("is-numeric");
     expect(cells.map(textOf)).toEqual(["2.500.000,00", "12.000.000,50", "0,00"]);
     view.unmount();
+  });
+
+  test("a figure that cannot be read is marked, never rendered as 0,00", async () => {
+    // The failure mode this guards: a silent zero in place of a real figure is
+    // indistinguishable from a real zero balance on a report an auditor signs.
+    // formatMoney throws outside production, so this is the production path.
+    const realNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const broken: readonly Row[] = [
+        { kode: "MB-004", nama: "Data Rusak", outstanding: "dua juta" },
+      ];
+      const view = await mount(
+        <DataTable columns={columns} rows={broken} rowKey={(row) => row.kode} />,
+      );
+      const cell = bodyRows(view.container)[0].cells[2];
+      expect(textOf(cell)).toBe(UNPARSEABLE);
+      expect(textOf(cell)).not.toBe("0,00");
+      expect(textOf(cell)).not.toContain("0");
+      // The value that actually arrived stays reachable for whoever chases it.
+      expect(cell.querySelector(".cell-invalid")?.getAttribute("title")).toContain("dua juta");
+      view.unmount();
+    } finally {
+      if (realNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = realNodeEnv;
+    }
   });
 
   test("sorts ascending on the first header click and descending on the second", async () => {

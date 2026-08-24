@@ -7,6 +7,7 @@ import type { Context, MiddlewareHandler, Next } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { setCookieFlush } from "./cookies";
+import { forbidden } from "./http";
 import {
   loadTrustedProxyConfig,
   normaliseIp,
@@ -17,7 +18,13 @@ import { createRateLimiterAdapter } from "./adapters/ratelimit";
 import type { RateLimiterPort } from "./ports/ratelimit";
 
 const DEFAULT_ORIGINS = ["http://localhost:3000"];
-const MAX_BODY_BYTES = 1_000_000; // 1 MB. File uploads land in Fase 3 behind their own route.
+/**
+ * Hard cap on a request body, in bytes. Handed to `Bun.serve` in index.ts, so
+ * the runtime enforces it before any JS runs; `bodySizeGuard` only mirrors the
+ * declared-length case for a nicer error. File uploads land in Fase 3 behind
+ * their own route and their own (larger) limit.
+ */
+export const MAX_BODY_BYTES = 1_000_000; // 1 MB
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -83,16 +90,46 @@ export const originGuard: MiddlewareHandler = async (c: Context, next: Next) => 
   if (SAFE_METHODS.has(c.req.method)) return next();
   const origin = c.req.header("origin");
   if (origin && !corsAllowlist().includes(origin)) {
-    return c.json({ error: "Origin tidak diizinkan" }, 403);
+    // Thrown, not returned: the shared error handler is what writes the
+    // DITOLAK row for a refusal (core/http.ts), and a cross-origin write
+    // attempt is exactly the kind of thing that belongs in the audit trail.
+    throw forbidden("Origin tidak diizinkan");
   }
   return next();
 };
 
-/** Rejects any request whose declared Content-Length exceeds the limit. */
+/**
+ * Cheap, early rejection of a body whose DECLARED length is over the limit.
+ *
+ * The real cap is enforced one layer down, by the runtime: `index.ts` passes
+ * `maxRequestBodySize: MAX_BODY_BYTES` to `Bun.serve`, which refuses an
+ * oversized body (declared OR chunked) with a 413 before a single line of
+ * application code runs, so nothing is ever buffered. That is the only place a
+ * byte cap can be honest: `Content-Length` is a claim, and with
+ * `Transfer-Encoding: chunked` there is no claim at all.
+ *
+ * This middleware therefore does two small things the runtime does not:
+ *   - answers with the API's own JSON error shape instead of the runtime's bare
+ *     413, for the common honest case where the client declared its size;
+ *   - rejects a malformed `Content-Length` as a 400 rather than shrugging.
+ *
+ * An earlier version of this guard buffered the stream itself and handed the
+ * bytes back through Hono's `bodyCache`, an internal whose published type does
+ * not match its runtime contract. Pushing the cap into `Bun.serve` removes that
+ * coupling entirely and covers the chunked case better than the guard could.
+ */
 export const bodySizeGuard: MiddlewareHandler = async (c: Context, next: Next) => {
-  const contentLength = c.req.header("content-length");
-  if (contentLength && Number(contentLength) > MAX_BODY_BYTES) {
-    return c.json({ error: "Payload too large" }, 413);
+  const declared = c.req.header("content-length");
+  if (declared !== undefined) {
+    const length = Number(declared);
+    // A non-numeric or negative Content-Length is a malformed request, not
+    // something to shrug at and pass on.
+    if (!Number.isFinite(length) || length < 0) {
+      return c.json({ error: "Content-Length tidak valid" }, 400);
+    }
+    if (length > MAX_BODY_BYTES) {
+      return c.json({ error: "Payload too large" }, 413);
+    }
   }
   return next();
 };

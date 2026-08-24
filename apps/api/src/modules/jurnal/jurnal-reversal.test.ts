@@ -274,13 +274,19 @@ describe("spec 6.3 INTEGRATION POINT: reversal harus membalik state bisnis di tr
     const draft = await mesin.buatJurnal(jurnalPeristiwaBisnis(rp(7_000_000)), d.ctx.approver);
     const asli = await mesin.postingJurnal(draft.id, d.ctx.approver);
 
-    let gagal = false;
+    // Asserted on the MESSAGE, not on "something threw": a bare catch also
+    // passes when the fixture itself breaks, which would turn this test into a
+    // green light for a rollback that never happened. The handler's own message
+    // proves the failure came from the business module, and that the engine
+    // let it through unchanged instead of dressing it up as a domain code.
+    let ditangkap: unknown;
     try {
       await mesin.reversalJurnal(asli.id, "coba reversal", d.ctx.approver);
-    } catch {
-      gagal = true;
+    } catch (e) {
+      ditangkap = e;
     }
-    expect(gagal).toBe(true);
+    expect(ditangkap).toBeInstanceOf(Error);
+    expect((ditangkap as Error).message).toContain("modul bisnis menolak pembalikan");
 
     // Nothing moved: no reversing journal, original still POSTED, business
     // state exactly as before.

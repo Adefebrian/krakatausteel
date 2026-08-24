@@ -155,9 +155,10 @@ describe("POST /auth/login failure", () => {
 });
 
 describe("login rate limiting", () => {
-  test("trips well before the global limiter and answers 429 with Retry-After", async () => {
-    // The global limiter is 120 per minute; login is 4 per username here (5 in
-    // production), which is the "stricter on auth endpoints" rule.
+  test("wrong passwords for one username run out of budget and become 429", async () => {
+    // The global limiter is 120 per minute; four FAILED guesses per username
+    // here (five in production), which is the "stricter on auth endpoints"
+    // rule.
     const f = await createFixture({
       loginLimiter: createMemoryRateLimiter(),
       loginLimits: { perIp: 50, perUsername: 4, windowSeconds: 300 },
@@ -169,6 +170,41 @@ describe("login rate limiting", () => {
     }
     expect(statuses.slice(0, 4)).toEqual([401, 401, 401, 401]);
     expect(statuses.slice(4)).toEqual([429, 429]);
+  });
+
+  test("a burned-out username budget can NEVER refuse the correct password", async () => {
+    // The account-lockout weapon this endpoint used to be: the per-username
+    // counter was consumed before the password was checked, so anyone could
+    // spend a victim's budget with wrong guesses and the victim's own correct
+    // password came back 429 for the rest of the window, from any address.
+    const f = await createFixture({
+      loginLimiter: createMemoryRateLimiter(),
+      loginLimits: { perIp: 50, perUsername: 1, windowSeconds: 300 },
+    });
+    // Attacker exhausts the budget: one wrong guess is the whole allowance
+    // here, so every further guess is refused with 429.
+    expect((await f.tryLogin(f.users.ADMIN_PUSAT.username, "salah")).status).toBe(401);
+    expect((await f.tryLogin(f.users.ADMIN_PUSAT.username, "salah")).status).toBe(429);
+    expect((await f.tryLogin(f.users.ADMIN_PUSAT.username, "salah")).status).toBe(429);
+    // Owner arrives with the right password and gets in.
+    const ok = await f.tryLogin(f.users.ADMIN_PUSAT.username, TEST_PASSWORD);
+    expect(ok.status).toBe(200);
+    // And the successful login cleared the budget, so their next fumble is a
+    // 401 again rather than an immediate lockout.
+    expect((await f.tryLogin(f.users.ADMIN_PUSAT.username, "salah")).status).toBe(401);
+  });
+
+  test("case folding cannot be used to spend another spelling's budget", async () => {
+    // Matching is case-insensitive, so MAKER.X and maker.x are one account and
+    // must share one budget; that sharing is only safe because a correct
+    // password ignores the budget entirely.
+    const f = await createFixture({
+      loginLimiter: createMemoryRateLimiter(),
+      loginLimits: { perIp: 50, perUsername: 1, windowSeconds: 300 },
+    });
+    expect((await f.tryLogin(f.users.MAKER.username.toUpperCase(), "salah")).status).toBe(401);
+    expect((await f.tryLogin(f.users.MAKER.username, "salah")).status).toBe(429);
+    expect((await f.tryLogin(f.users.MAKER.username, TEST_PASSWORD)).status).toBe(200);
   });
 
   test("the 429 body says how long to wait and audit_log records the refusal", async () => {
@@ -183,8 +219,24 @@ describe("login rate limiting", () => {
     expect(body.code).toBe("TERLALU_BANYAK_PERMINTAAN");
     expect(body.error).toMatch(/Coba lagi dalam \d+ detik/);
 
+    // Both refusals are recorded: the 401 with its real reason, and the 429.
     const denied = await f.auditRows({ aksi: "auth.login", hasil: "DITOLAK" });
-    expect(denied.some((r) => (r.keterangan ?? "").includes("rate limit"))).toBe(true);
+    expect(denied.some((r) => (r.keterangan ?? "").includes("kata sandi salah"))).toBe(true);
+  });
+
+  test("the per-IP limit is consumed by every attempt, success included", async () => {
+    // This is the counter that bounds argon2 work per source, so it cannot be
+    // conditional on the outcome.
+    const f = await createFixture({
+      loginLimiter: createMemoryRateLimiter(),
+      loginLimits: { perIp: 2, perUsername: 50, windowSeconds: 300 },
+    });
+    expect((await f.tryLogin(f.users.MAKER.username, TEST_PASSWORD)).status).toBe(200);
+    expect((await f.tryLogin(f.users.MAKER.username, TEST_PASSWORD)).status).toBe(200);
+    const third = await f.tryLogin(f.users.MAKER.username, TEST_PASSWORD);
+    expect(third.status).toBe(429);
+    const denied = await f.auditRows({ aksi: "auth.login", hasil: "DITOLAK" });
+    expect(denied.some((r) => (r.keterangan ?? "").includes("per IP"))).toBe(true);
   });
 
   test("the per-IP limit stops one host spraying many different accounts", async () => {

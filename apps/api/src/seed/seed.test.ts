@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "../core/app";
 import { createDbAdapter } from "../core/adapters/db";
 import { nativeFetchApi } from "../testing/native-fetch";
-import { DEMO_CABANG, DEMO_MITRA, DEMO_PASSWORD, DEMO_USERS, seedDemo } from "./demo";
+import { DEMO_CABANG, DEMO_MITRA, DEMO_PASSWORD, DEMO_USERS, databaseBolehDemo, seedDemo } from "./demo";
 import { seedKonfigurasiTambahan } from "./konfigurasi";
 import { seedRbac } from "./rbac";
 import { ROLE_CODES, PERMISSIONS, PERMISSIONS_BY_ROLE } from "../modules/auth";
@@ -221,4 +221,57 @@ describe("demo accounts (spec 14: bisa login dengan semua role)", () => {
     expect(rows[0]!.password_hash).toStartWith("$argon2id$");
     expect(rows[0]!.password_hash).not.toContain(DEMO_PASSWORD);
   });
+});
+
+describe("demo seed refuses anything that is not obviously disposable", () => {
+  test("only a _dev / _test / _local / _demo database qualifies", () => {
+    expect(databaseBolehDemo("postgres://localhost:5432/tjsl_test")).toBe(true);
+    expect(databaseBolehDemo("postgres://localhost:5432/tjsl_dev")).toBe(true);
+    expect(databaseBolehDemo("postgres://u:p@host/tjsl_local")).toBe(true);
+    expect(databaseBolehDemo("postgres://u:p@host/tjsl_demo")).toBe(true);
+    // Production shapes, including the compose default.
+    expect(databaseBolehDemo("postgres://tjsl:secret@postgres:5432/tjsl")).toBe(false);
+    expect(databaseBolehDemo("postgres://u:p@host/tjsl_prod")).toBe(false);
+    expect(databaseBolehDemo("postgres://u:p@host/production")).toBe(false);
+    expect(databaseBolehDemo("postgres://u:p@host/tjsl?sslmode=require")).toBe(false);
+  });
+
+  test("seedDemo throws rather than writing public credentials to such a database", async () => {
+    // The credentials in demo.ts are printed in SEED.md. Writing them to a
+    // real database hands Admin Pusat to anyone who can read the repo.
+    await expect(
+      seedDemo(db, { passwordOptions: FAST, targetUrl: "postgres://tjsl:secret@postgres:5432/tjsl" }),
+    ).rejects.toThrow(/Menolak menulis akun demo/);
+  });
+
+  test("refuses to overwrite an account it does not own, instead of resetting its password", async () => {
+    // `maker` is an ordinary word: a real deployment can already have one.
+    // Re-running the seed used to reset that person's password to the public
+    // demo password and replace their roles.
+    await seedAll();
+    const kode = `RL${crypto.randomUUID().slice(0, 6)}`;
+    const bumn = await db.query<{ id: string }>(
+      "INSERT INTO bumn (kode, nama) VALUES ($1, $1) RETURNING id::text AS id",
+      [kode],
+    );
+    const cabang = await db.query<{ id: string }>(
+      "INSERT INTO cabang (bumn_id, kode, nama) VALUES ($1, '01', 'Cabang Nyata') RETURNING id::text AS id",
+      [bumn[0]!.id],
+    );
+    // Take over the `checker` username with a NON-demo email, the way a real
+    // account would look.
+    expect(cabang[0]!.id).toBeDefined();
+    await db.query(
+      `UPDATE app_user SET email = $1 WHERE lower(username) = 'checker' AND deleted_at IS NULL`,
+      [`orang.nyata.${kode}@perusahaan.co.id`],
+    );
+    try {
+      await expect(seedDemo(db, { passwordOptions: FAST })).rejects.toThrow(/bukan milik seed demo/);
+    } finally {
+      await db.query(
+        `UPDATE app_user SET email = 'checker@demo.tjsl.local'
+          WHERE lower(username) = 'checker' AND deleted_at IS NULL`,
+      );
+    }
+  }, 20_000);
 });

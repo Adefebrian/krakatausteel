@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createMemoryRateLimiter } from "./adapters/ratelimit";
+import { errorHandler } from "./http";
 import {
   applyHardening,
   bodySizeGuard,
@@ -135,8 +136,12 @@ describe("rate limiter keying with one trusted proxy", () => {
 });
 
 describe("origin guard", () => {
+  // The guard THROWS a 403 AppError rather than returning a response, so the
+  // refusal flows through the shared error handler and gets an audit row in the
+  // real app (core/http.ts). A probe app therefore needs that handler too.
   const app = (() => {
     const base = new Hono();
+    base.onError(errorHandler);
     base.use("*", originGuard);
     return base.post("/x", (c) => c.json({ ok: true })).get("/x", (c) => c.json({ ok: true }));
   })();
@@ -171,16 +176,127 @@ describe("origin guard", () => {
 });
 
 describe("body size guard", () => {
-  test("rejects an oversized declared Content-Length with 413", async () => {
+  const app = (() => {
     const base = new Hono();
+    base.onError(errorHandler);
     base.use("*", bodySizeGuard);
-    const app = base.post("/x", (c) => c.json({ ok: true }));
+    return base.post("/x", async (c) => {
+      const body = await c.req.json<{ n?: number }>().catch(() => ({}) as { n?: number });
+      return c.json({ ok: true, n: body.n ?? null });
+    });
+  })();
+
+  test("rejects an oversized declared Content-Length with 413", async () => {
     const res = await send(app as unknown as Hono, "/x", {
       method: "POST",
       headers: { "content-length": "99999999" },
       body: "{}",
     });
     expect(res.status).toBe(413);
+  });
+
+  test("rejects a malformed Content-Length with 400 rather than ignoring it", async () => {
+    const res = await send(app as unknown as Hono, "/x", {
+      method: "POST",
+      headers: { "content-length": "banyak" },
+      body: "{}",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("a normal body passes and stays readable by the handler", async () => {
+    const res = await send(app as unknown as Hono, "/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ n: 7 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, n: 7 });
+  });
+});
+
+describe("the REAL byte cap, enforced by Bun.serve as index.ts configures it", () => {
+  // The header check above is a courtesy. This is the guarantee: a real server
+  // with the same `maxRequestBodySize` the entrypoint passes refuses a body
+  // with NO declared length (chunked) before any application code sees it. A
+  // middleware cannot do this honestly without buffering the stream itself,
+  // which is what the previous version of the guard did.
+  //
+  // The handler here is a plain function using the RUNTIME's own Response, not
+  // the Hono app: this suite registers happy-dom's globals, so a Hono handler
+  // would hand `Bun.serve` a happy-dom Response and it would refuse to serve
+  // it ("Expected a Response object"). That is a test-environment artefact
+  // only, and the live boot check covers the real runtime path. What is under
+  // test here is the cap, which fires before any handler runs either way.
+  const CAP = 64 * 1024;
+  const { fetch: nativeFetch, Response: NativeResponse } = nativeFetchApi();
+
+  async function withServer<T>(fn: (url: string) => Promise<T>): Promise<T> {
+    const server = Bun.serve({
+      port: 0,
+      maxRequestBodySize: CAP,
+      async fetch(req) {
+        const text = await req.text();
+        return new NativeResponse(JSON.stringify({ bytes: text.length }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    try {
+      return await fn(`http://127.0.0.1:${server.port}`);
+    } finally {
+      server.stop(true);
+    }
+  }
+
+  function chunked(bytes: number): ReadableStream<Uint8Array> {
+    const chunk = new TextEncoder().encode("x".repeat(1024));
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= bytes) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+        sent += chunk.byteLength;
+      },
+    });
+  }
+
+  test("an oversized CHUNKED body is refused with 413, declaring no length at all", async () => {
+    const status = await withServer(async (url) => {
+      const res = await nativeFetch(`${url}/x`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: chunked(CAP * 4),
+        // @ts-expect-error duplex is required by the runtime for a stream body
+        duplex: "half",
+      });
+      return res.status;
+    });
+    expect(status).toBe(413);
+  });
+
+  test("an oversized declared body is refused with 413 too", async () => {
+    const status = await withServer(async (url) => {
+      const res = await nativeFetch(`${url}/x`, { method: "POST", body: "x".repeat(CAP * 4) });
+      return res.status;
+    });
+    expect(status).toBe(413);
+  });
+
+  test("a body under the cap is delivered whole, not truncated", async () => {
+    const body = await withServer(async (url) => {
+      const res = await nativeFetch(`${url}/x`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "y".repeat(CAP - 1024),
+      });
+      expect(res.status).toBe(200);
+      return res.json();
+    });
+    expect(body).toEqual({ bytes: CAP - 1024 });
   });
 });
 

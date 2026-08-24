@@ -3,7 +3,8 @@
   "tasks": {
     "build": {
       "dependsOn": [
-        "^build"
+        "^build",
+        "typecheck"
       ],
       "outputs": [
         "dist/**"
@@ -34,7 +35,8 @@
     },
     "@krakatausteel/api#build": {
       "dependsOn": [
-        "^build"
+        "^build",
+        "typecheck"
       ],
       "outputs": []
     },

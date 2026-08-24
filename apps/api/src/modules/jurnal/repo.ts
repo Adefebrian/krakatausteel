@@ -1,8 +1,18 @@
 // Every statement the journal engine issues, in one file. No business rules
 // live here; the engine decides, the repo reads and writes.
 //
-// THREE DRIVER FACTS THIS FILE IS BUILT AROUND (all verified against the
-// Bun Postgres client, 1.3.x, before a line of the engine was written):
+// THIS FILE RUNS ON TWO DRIVERS. The tests build their port on `bun:sql`
+// (the engine needed a transaction while core/ was mid-flight); the server
+// builds it on node-postgres through core/adapters/db.ts. Every cast below is
+// correct on both, but the reasons were originally written from `bun:sql`
+// observations only, so read them as "why the cast is here", not as "how the
+// driver behaves". Where the two differ at all (the SQLSTATE field), the
+// difference is handled in ./kesalahan.ts, in one place.
+//
+// THREE DRIVER FACTS THIS FILE IS BUILT AROUND (verified against `bun:sql`
+// 1.3.x before a line of the engine was written; each cast is also the correct
+// and portable form for node-postgres, which is why nothing here changes when
+// the port is swapped):
 //
 //  1. A `jsonb` parameter bound from a JS STRING is stored as a JSON string
 //     SCALAR, not as an object: `insert ... values ($1::jsonb)` with
@@ -173,9 +183,42 @@ export interface JurnalRepo {
   tandaiVerified(tx: JurnalTx, id: string, userId: string, waktu: string): Promise<boolean>;
   tandaiReversed(tx: JurnalTx, id: string, reversalId: string, userId: string): Promise<boolean>;
   softDeleteDraft(tx: JurnalTx, id: string, userId: string, waktu: string): Promise<boolean>;
+  paksaCekBalance(tx: JurnalTx): Promise<void>;
 }
 
 export function createJurnalRepo(): JurnalRepo {
+  // One `SET LOCAL` per transaction, keyed on the transaction handle itself.
+  // Both adapters hand out exactly one runner object per transaction, so the
+  // WeakSet is a faithful "have I already marked this transaction" and the
+  // entry disappears with the handle.
+  const sudahDitandai = new WeakSet<JurnalTx>();
+
+  /**
+   * INVARIANT 11'S STRUCTURAL HALF. `tools/check-boundaries.ts` reads import
+   * specifiers, so it cannot see an `insert into jurnal_baris` in a module that
+   * imports nothing. This marks the transaction as coming through the engine so
+   * the database can refuse ledger writes that did not, which is the only
+   * enforcement that survives a Fase 4 agent copying raw SQL from the nearest
+   * test file.
+   *
+   * The setting is transaction-scoped: it cannot leak to the next request on a
+   * pooled connection (verified: it reads back NULL after COMMIT), and it
+   * carries this transaction's id so that even a session-scoped slip cannot
+   * bless a later one. The matching trigger is
+   * `trg_jurnal_05_jalur_posting` / `trg_jurnal_baris_05_jalur_posting`
+   * (migrations/0020), which also stamps `jurnal.jalur_posting = 'ENGINE'`.
+   */
+  async function tandaiJalurEngine(tx: JurnalTx): Promise<void> {
+    if (sudahDitandai.has(tx)) return;
+    // The NONCE form, not a bare 'engine'. migration 0020 accepts both, but
+    // only this one is leak-proof: a one-word slip from SET LOCAL to plain SET
+    // would otherwise bless a pooled connection for every later transaction on
+    // it, and Postgres cannot tell the two apart from inside the trigger. With
+    // the transaction id in the value, a leaked blessing simply stops matching.
+    await tx.query(`select set_config('tjsl.jalur_posting', 'engine:' || txid_current(), true)`);
+    sudahDitandai.add(tx);
+  }
+
   return {
     async periodeUntukTanggal(tx, bumnId, tanggal) {
       const r = await tx.query<PeriodeBaris>(
@@ -317,6 +360,7 @@ export function createJurnalRepo(): JurnalRepo {
     },
 
     async sisipkanHeader(tx, h) {
+      await tandaiJalurEngine(tx);
       const r = await tx.query<{ id: string }>(
         `insert into jurnal
            (bumn_id, cabang_id, no_jurnal, jenis, tanggal_transaksi, periode_id, keterangan,
@@ -346,6 +390,7 @@ export function createJurnalRepo(): JurnalRepo {
     },
 
     async sisipkanBaris(tx, jurnalId, b, userId) {
+      await tandaiJalurEngine(tx);
       await tx.query(
         `insert into jurnal_baris
            (jurnal_id, urutan, akun_id, debit, kredit, keterangan, mitra_id, akad_id,
@@ -432,6 +477,20 @@ export function createJurnalRepo(): JurnalRepo {
         [id, reversalId, userId],
       );
       return r.length === 1;
+    },
+
+    async paksaCekBalance(tx) {
+      // Fires the DEFERRED balance/min-2-lines guard NOW instead of at COMMIT.
+      // Needed only when the transaction belongs to the caller: the engine can
+      // translate a refusal it receives inside its own call, but it cannot
+      // translate one that arrives when someone else commits, and raw
+      // trigger text reaching that caller is exactly what the contract forbids.
+      // Named, not `ALL`: forcing every deferred constraint in a caller's
+      // transaction would fire other modules' guards before they are done
+      // writing. The guard stays immediate for the rest of that transaction,
+      // which is safe because the engine always writes header, then lines,
+      // then the POSTED flip, so the row is complete whenever it is checked.
+      await tx.query(`set constraints trg_jurnal_90_balance immediate`);
     },
 
     async softDeleteDraft(tx, id, userId, waktu) {

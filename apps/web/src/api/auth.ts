@@ -1,24 +1,35 @@
-// Thin auth client. The only network module the Fase 0 UI has.
+// Thin auth client. The only network module the Fase 0 UI has, and it has no
+// fallback: every answer on this screen comes from apps/api.
 //
-// Contract with apps/api (owned by another agent, not yet shipped):
+// Contract with apps/api (apps/api/src/modules/auth/routes.ts):
 //
-//   POST /auth/login    { username, password }  -> 200 Session | 401
-//   GET  /auth/session                          -> 200 Session | 401
-//   POST /auth/logout                           -> 204
+//   POST /auth/login    { username, password }  -> 200 SessionPayload | 400 | 401 | 429
+//   GET  /auth/session                          -> 200 SessionPayload | 401
+//   POST /auth/logout                           -> 204 (also on an invalid cookie)
 //
-// Session is the shape below. `permissions` is authoritative: the UI never
-// derives permissions from the role name, it reads the array the server sends.
+// The session lives in an HttpOnly SameSite=Lax cookie that this module can
+// never read, so `credentials: "include"` is what carries it and there is no
+// client side session state to go stale.
 //
-// While /auth/* does not exist, the DEMO STUB at the bottom of this file
-// answers instead, and only on localhost. Deleting the one marked block turns
-// this module into a plain fetch client with no fallback left behind.
-import { PERMISSIONS_BY_ROLE, type Role } from "../permissions";
+// `permissions` is authoritative: the UI never derives permissions from the
+// role name, it reads the array the server sends.
+//
+// THREE OUTCOMES, NEVER CONFLATED
+//   200  a session. Render the shell.
+//   401  no session. Render the login screen ("silakan masuk").
+//   anything else, including a thrown fetch, a 502 from the proxy, or a body
+//        that is not JSON: the server could not answer. Render the retry
+//        screen ("server tidak dapat dihubungi"). An accounting user has to be
+//        able to tell "log in again" from "the server is down", so 401 maps to
+//        UnauthorizedError and nothing else ever does.
+import type { Role } from "../permissions";
 
 export interface SessionUser {
   id: string;
   username: string;
+  /** Primary role, for display. The permission array is what gates the UI. */
+  role: Role | string;
   nama: string;
-  role: Role;
 }
 
 export interface SessionCabang {
@@ -40,8 +51,10 @@ export interface Session {
   cabangTersedia: readonly SessionCabang[];
   periode: SessionPeriode;
   permissions: readonly string[];
-  /** True while the demo stub is answering instead of the API. */
-  demo?: boolean;
+  /** Every role held. `user.role` is the primary one. */
+  roles: readonly string[];
+  readOnly: boolean;
+  lintasCabang: boolean;
 }
 
 /** Thrown on a 401. The UI must show the login screen, never a fake session. */
@@ -52,7 +65,7 @@ export class UnauthorizedError extends Error {
   }
 }
 
-/** Thrown when the API could not be reached at all. */
+/** Thrown when the API could not be reached, or answered something else. */
 export class ApiUnreachableError extends Error {
   constructor(message = "Server tidak dapat dihubungi") {
     super(message);
@@ -60,13 +73,23 @@ export class ApiUnreachableError extends Error {
   }
 }
 
-// Same origin by default, so the app works on whatever port it is served
-// from. Override by setting `globalThis.__TJSL_API_BASE__` before the bundle
-// runs, for a deployment where the API sits on another host.
-const API_BASE =
-  (globalThis as { __TJSL_API_BASE__?: string }).__TJSL_API_BASE__ ??
-  globalThis.location?.origin ??
-  "";
+/** Thrown when the API refused the request for a reason the user can act on. */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
+// The API sits behind the same origin under /api, both in production (Caddy
+// strips the prefix, see infra/Caddyfile) and in development (apps/web/server.ts
+// proxies the same prefix). One origin means the session cookie is a first
+// party cookie and CORS never enters the picture. Override by setting
+// `globalThis.__TJSL_API_BASE__` before the bundle runs for a deployment where
+// the API sits on another host.
+const API_BASE = (globalThis as { __TJSL_API_BASE__?: string }).__TJSL_API_BASE__ ?? "/api";
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
   try {
@@ -76,172 +99,70 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
     });
   } catch {
+    // DNS failure, connection refused, offline, TLS error. Not a credential
+    // problem, so it must never surface as "please log in".
     throw new ApiUnreachableError();
   }
 }
 
+function isJson(res: Response): boolean {
+  return (res.headers.get("content-type") ?? "").includes("json");
+}
+
+/** The API's error envelope, core/http.ts's `AppErrorBody`. */
+async function messageOf(res: Response, fallback: string): Promise<string> {
+  if (!isJson(res)) return fallback;
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    return typeof body.error === "string" && body.error.trim() !== "" ? body.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /**
- * True when the response is not the JSON the auth contract promises, which is
- * how "the endpoint does not exist yet" actually shows up in development: the
- * SPA server answers any unmatched path with index.html and a 200, so the
- * status code alone does not reveal a missing route.
+ * Turn a 200 into a Session, or throw. A body that is not JSON means something
+ * other than the API answered (a misconfigured proxy serving index.html, a
+ * captive portal), which is an unreachable API, not a rejected login.
  */
-function isMissingEndpoint(res: Response): boolean {
-  if (res.status === 404) return true;
-  const type = res.headers.get("content-type") ?? "";
-  return !type.includes("json");
+async function readSession(res: Response): Promise<Session> {
+  if (!isJson(res)) throw new ApiUnreachableError("Server tidak menjawab dengan data sesi");
+  return (await res.json()) as Session;
 }
 
 export async function fetchSession(): Promise<Session> {
-  let res: Response;
-  try {
-    res = await request("/auth/session");
-  } catch (error) {
-    const stub = stubSessionFromStorage();
-    if (stub) return stub;
-    throw error;
-  }
-
-  // A 401 is a real answer: the user is not signed in. Never substitute a stub
-  // session for it, that would mean faking a login the server refused.
+  const res = await request("/auth/session");
+  // A 401 is a real answer: the user is not signed in. This is the ordinary
+  // first load of the app, not an error worth a screen of its own.
   if (res.status === 401) throw new UnauthorizedError();
-
-  if (isMissingEndpoint(res)) {
-    const stub = stubSessionFromStorage();
-    if (stub) return stub;
-    // No endpoint and no demo session: the honest state is "not signed in".
-    throw new UnauthorizedError();
-  }
-
-  if (!res.ok) throw new ApiUnreachableError(`Gagal memuat sesi (${res.status})`);
-  return (await res.json()) as Session;
+  if (!res.ok) throw new ApiUnreachableError(await messageOf(res, `Gagal memuat sesi (${res.status})`));
+  return readSession(res);
 }
 
 export async function login(username: string, password: string): Promise<Session> {
-  let res: Response;
-  try {
-    res = await request("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    });
-  } catch {
-    return stubLogin(username, password);
-  }
+  const res = await request("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
 
-  if (res.status === 401) throw new UnauthorizedError("Nama pengguna atau kata sandi salah");
-  if (isMissingEndpoint(res)) return stubLogin(username, password);
-  if (!res.ok) throw new ApiUnreachableError(`Gagal masuk (${res.status})`);
-  return (await res.json()) as Session;
+  if (res.status === 401) {
+    throw new UnauthorizedError(await messageOf(res, "Nama pengguna atau kata sandi salah"));
+  }
+  // 400 validation and 429 rate limit both carry an Indonesian sentence the
+  // user can act on, so pass the server's own wording through rather than
+  // flattening them into "server tidak dapat dihubungi".
+  if (res.status === 400 || res.status === 429 || res.status === 403) {
+    throw new ApiRequestError(res.status, await messageOf(res, "Permintaan masuk ditolak"));
+  }
+  if (!res.ok) throw new ApiUnreachableError(await messageOf(res, `Gagal masuk (${res.status})`));
+  return readSession(res);
 }
 
+/**
+ * Ends the server side session. The API answers 204 even for an already
+ * invalid cookie, and clears the cookie either way, so there is nothing to
+ * retry and nothing left client side to clear.
+ */
 export async function logout(): Promise<void> {
-  clearStubSession();
-  try {
-    await request("/auth/logout", { method: "POST" });
-  } catch {
-    // Nothing to do: the local session is already cleared either way.
-  }
-}
-
-// ===========================================================================
-// DEMO STUB, DELETE THIS BLOCK WHEN apps/api SHIPS /auth/*
-// ---------------------------------------------------------------------------
-// It exists so Fase 0 UI is reviewable before the API lands, and it is fenced
-// three ways so it can never stand in for real authentication:
-//
-//   1. It only answers when the endpoint is unreachable or does not answer with
-//      JSON at all. A real 401 always surfaces as a failed login.
-//   2. It only runs on localhost, so a deployed build has no stub path at all.
-//   3. Every session it mints carries `demo: true`, and the shell renders a
-//      visible "Mode demo" marker whenever that flag is set.
-//
-// Removing this block leaves the fetch client above with no fallback.
-// ===========================================================================
-
-const STUB_STORAGE_KEY = "tjsl.demo.session";
-
-const STUB_CABANG: readonly SessionCabang[] = [
-  { id: "cbg-pusat", kode: "00", nama: "Kantor Pusat" },
-  { id: "cbg-clg", kode: "01", nama: "Cabang Cilegon" },
-  { id: "cbg-srg", kode: "02", nama: "Cabang Serang" },
-];
-
-/** Demo accounts, one per role, so nav filtering can be reviewed per role. */
-const STUB_USERS: readonly { username: string; nama: string; role: Role; cabang: string }[] = [
-  { username: "maker", nama: "Pengguna Demo Maker", role: "MAKER", cabang: "cbg-clg" },
-  { username: "checker", nama: "Pengguna Demo Checker", role: "CHECKER", cabang: "cbg-clg" },
-  { username: "approver", nama: "Pengguna Demo Approver", role: "APPROVER", cabang: "cbg-clg" },
-  {
-    username: "admincabang",
-    nama: "Pengguna Demo Admin Cabang",
-    role: "ADMIN_CABANG",
-    cabang: "cbg-clg",
-  },
-  {
-    username: "adminpusat",
-    nama: "Pengguna Demo Admin Pusat",
-    role: "ADMIN_PUSAT",
-    cabang: "cbg-pusat",
-  },
-  { username: "auditor", nama: "Pengguna Demo Auditor", role: "AUDITOR", cabang: "cbg-pusat" },
-];
-
-export const DEMO_USERNAMES = STUB_USERS.map((user) => user.username);
-
-function stubAllowed(): boolean {
-  const host = globalThis.location?.hostname ?? "";
-  return host === "localhost" || host === "127.0.0.1" || host === "" || host === "[::1]";
-}
-
-function buildStubSession(user: (typeof STUB_USERS)[number]): Session {
-  const cabang = STUB_CABANG.find((entry) => entry.id === user.cabang) ?? STUB_CABANG[0];
-  const lintas = user.role === "ADMIN_PUSAT" || user.role === "AUDITOR";
-  const now = new Date();
-  return {
-    user: { id: `demo-${user.username}`, username: user.username, nama: user.nama, role: user.role },
-    cabang,
-    cabangTersedia: lintas ? STUB_CABANG : [cabang],
-    periode: { tahun: now.getFullYear(), bulan: now.getMonth() + 1, status: "OPEN" },
-    permissions: PERMISSIONS_BY_ROLE[user.role],
-    demo: true,
-  };
-}
-
-function stubLogin(username: string, password: string): Session {
-  if (!stubAllowed()) throw new ApiUnreachableError();
-  const user = STUB_USERS.find(
-    (candidate) => candidate.username === username.trim().toLowerCase(),
-  );
-  if (!user || password.trim() === "") {
-    throw new UnauthorizedError("Nama pengguna atau kata sandi salah");
-  }
-  const session = buildStubSession(user);
-  try {
-    globalThis.sessionStorage?.setItem(STUB_STORAGE_KEY, user.username);
-  } catch {
-    // sessionStorage unavailable, the demo session simply will not survive a
-    // reload. Not worth failing the login over.
-  }
-  return session;
-}
-
-function stubSessionFromStorage(): Session | null {
-  if (!stubAllowed()) return null;
-  let username: string | null = null;
-  try {
-    username = globalThis.sessionStorage?.getItem(STUB_STORAGE_KEY) ?? null;
-  } catch {
-    return null;
-  }
-  if (!username) return null;
-  const user = STUB_USERS.find((candidate) => candidate.username === username);
-  return user ? buildStubSession(user) : null;
-}
-
-function clearStubSession(): void {
-  try {
-    globalThis.sessionStorage?.removeItem(STUB_STORAGE_KEY);
-  } catch {
-    // Nothing to clear.
-  }
+  await request("/auth/logout", { method: "POST" });
 }

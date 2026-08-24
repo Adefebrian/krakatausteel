@@ -13,7 +13,7 @@
 // harness at the top of each authorisation test file. Another agent running
 // `db:reset` mid-run wipes it; the next file that needs it puts it back.
 import { PERMISSIONS, PERMISSIONS_BY_ROLE, NAMA_ROLE, ROLE_CODES, permissionGroup } from "../modules/auth";
-import type { DbPort } from "../core/ports/db";
+import type { DbPort, QueryRunner } from "../core/ports/db";
 
 export interface SeedRbacResult {
   permissions: number;
@@ -85,4 +85,35 @@ export async function seedRbac(db: DbPort): Promise<SeedRbacResult> {
 
     return { permissions, roles, grants };
   });
+}
+
+/**
+ * The permissions a role actually holds, read from the database.
+ *
+ * EXISTS SO A TEST FIXTURE NEVER HARDCODES A PERMISSION ARRAY. A fixture that
+ * writes `permissions: ["jurnal.create", "jurnal.post"]` into a context object
+ * is asserting against its own opinion, not against the grant matrix, so a
+ * permission the engine checks but no role is granted (exactly what happened
+ * with `jurnal.update` and `jurnal.delete`) still looks green. Resolve through
+ * this instead and a missing grant fails the test that needs it.
+ *
+ * Takes a `QueryRunner`, so a fixture can pass its own transactional handle.
+ */
+export async function permissionsForRole(runner: QueryRunner, roleKode: string): Promise<string[]> {
+  const rows = await runner.query<{ kode: string }>(
+    `SELECT p.kode
+       FROM app_role r
+       JOIN role_permission rp ON rp.role_id = r.id
+       JOIN permission p ON p.id = rp.permission_id
+      WHERE r.kode = $1 AND r.deleted_at IS NULL AND p.aktif
+      ORDER BY p.kode`,
+    [roleKode],
+  );
+  if (rows.length === 0) {
+    throw new Error(
+      `permissionsForRole: role "${roleKode}" tidak punya permission di database. ` +
+        "Jalankan seedRbac lebih dulu (atau periksa ejaan kode role).",
+    );
+  }
+  return rows.map((row) => row.kode);
 }

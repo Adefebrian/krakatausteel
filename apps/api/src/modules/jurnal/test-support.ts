@@ -381,6 +381,11 @@ export async function buatDunia(): Promise<DuniaJurnal> {
     VERIFIKASI: "jurnal.verify",
     POSTING: "jurnal.post",
     HAPUS: "jurnal.delete",
+    // Reversal is a right of its own (see PERMISSION_JURNAL.REVERSAL), and the
+    // shipped APPROVER role in modules/auth holds it alongside jurnal.post.
+    // Granting it here keeps this fixture's Approver a faithful stand-in for
+    // that role; the refusal cases still use Maker, who holds neither.
+    REVERSAL: "jurnal.reversal",
   });
   for (const kode of kodePermission) {
     await db.query(
@@ -411,13 +416,13 @@ export async function buatDunia(): Promise<DuniaJurnal> {
   await buatRole("Checker", ["jurnal.verify"], checker);
   await buatRole(
     "Approver",
-    ["jurnal.create", "jurnal.update", "jurnal.post", "jurnal.delete"],
+    ["jurnal.create", "jurnal.update", "jurnal.post", "jurnal.delete", "jurnal.reversal"],
     approver,
   );
   await buatRole("Auditor", [], auditor);
   await buatRole(
     "ApproverLain",
-    ["jurnal.create", "jurnal.update", "jurnal.post", "jurnal.delete"],
+    ["jurnal.create", "jurnal.update", "jurnal.post", "jurnal.delete", "jurnal.reversal"],
     approverLain.id,
   );
 
@@ -624,6 +629,7 @@ export async function buatDunia(): Promise<DuniaJurnal> {
         "jurnal.update",
         "jurnal.post",
         "jurnal.delete",
+        "jurnal.reversal",
       ]),
       auditor: ctxUntuk(auditor, cabang.id, []),
       approverCabangLain: ctxUntuk(approverLain.id, cabangLain.id, [
@@ -631,6 +637,7 @@ export async function buatDunia(): Promise<DuniaJurnal> {
         "jurnal.update",
         "jurnal.post",
         "jurnal.delete",
+        "jurnal.reversal",
       ]),
     },
     async tutupPeriode(periode: Periode): Promise<void> {

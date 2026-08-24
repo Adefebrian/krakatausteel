@@ -32,9 +32,10 @@ Gate sebelum apa pun dianggap jadi, satu perintah:
 bun run verify
 ```
 
-`verify` menjalankan reset schema plus migrasi di `tjsl_test`, lalu `bun run build`,
-`bun test`, `bun run check:boundaries`, dan `bun run check:compose`, berhenti di
-kegagalan pertama dengan ringkasan PASS/FAIL per langkah. Detail lingkungan lokal,
+`verify` menjalankan reset schema plus migrasi di `tjsl_test`, lalu
+`bun run typecheck`, `bun run build`, `bun test`, `bun run check:boundaries`, dan
+`bun run check:compose`, berhenti di kegagalan pertama dengan ringkasan PASS/FAIL
+per langkah. Detail lingkungan lokal,
 resep psql, dan cara menjalankan sebagian test ada di `docs/DEV.md`.
 
 `infra/docker-compose.yml` (Postgres plus Redis saja) tersedia kalau suatu saat
@@ -63,7 +64,6 @@ Isi `.env.prod` di server, file ini tidak pernah di-commit:
 |---|---|
 | `APP_DOMAIN` | domain publik tanpa skema, misal `tjsl.domainku.com` |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | kredensial database, password acak panjang |
-| `SESSION_SECRET` | acak minimal 32 byte, hasilkan dengan `openssl rand -hex 32` |
 | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | kredensial object storage |
 | `S3_BUCKET` | nama bucket, default `tjsl` |
 | `S3_REGION` | region S3, default `us-east-1`, MinIO tidak peduli nilainya tapi SDK butuh diisi |
@@ -118,7 +118,8 @@ sungguhan. Backup yang belum pernah direstore bukan backup.
 
 - Tidak ada layanan stateful yang mem-publish port ke host. Akses Postgres dari
   laptop lewat SSH tunnel, jangan membuka 5432 ke internet.
-- `SESSION_SECRET` dan password database wajib berbeda antara lokal dan server.
+- Password database wajib berbeda antara lokal dan server.
+- Tidak ada `SESSION_SECRET`: sesi disimpan di server (id acak 256 bit di cookie, isinya di Redis), jadi tidak ada yang perlu ditandatangani. Kalau menemukan key itu di file env lama, hapus saja.
 - Console MinIO (port 9001) tidak diproxy Caddy. Kalau perlu diakses, lewat SSH
   tunnel.
 - Rate limit aplikasi di `apps/api/src/core/hardening.ts` mengambil IP dari

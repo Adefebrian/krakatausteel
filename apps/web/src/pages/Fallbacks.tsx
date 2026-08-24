@@ -48,18 +48,29 @@ export function Forbidden({ title }: { title: string }) {
   );
 }
 
+/**
+ * Shown only when the API could not answer at all. Deliberately worded so it
+ * cannot be mistaken for a rejected login: there is no form here and no
+ * mention of a password, because nothing the user types would help.
+ */
 export function SessionUnreachable() {
   const { error, retry } = useSession();
+  const heading = "Server tidak dapat dihubungi";
+  // Only shown when the server said something more specific than the heading,
+  // so the panel never repeats the same sentence twice.
+  const detail = error && error !== heading ? error : null;
   return (
     <main className="boot">
       <div className="boot-panel">
-        <h1 className="boot-title">Tidak dapat memuat sesi</h1>
+        <h1 className="boot-title">{heading}</h1>
         <p className="boot-body">
-          {error ?? "Server tidak dapat dihubungi"}. Data Anda tidak terpengaruh. Coba muat ulang
-          sesi, atau hubungi administrator bila kondisi ini berlanjut.
+          Ini bukan masalah nama pengguna atau kata sandi, jadi masuk ulang tidak akan menolong.
+          Data Anda tidak terpengaruh. Coba hubungkan ulang, atau hubungi administrator bila
+          kondisi ini berlanjut.
         </p>
+        {detail ? <p className="boot-detail">{detail}</p> : null}
         <Button variant="primary" onClick={retry}>
-          Coba lagi
+          Coba hubungkan ulang
         </Button>
       </div>
     </main>

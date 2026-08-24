@@ -133,9 +133,10 @@ const ADMIN_CABANG: Permission[] = [
 const ADMIN_PUSAT: Permission[] = [...PERMISSIONS];
 
 /**
- * Frontend mirror of the server side role to permission mapping. Used by the
- * demo stub in ./api/auth.ts and by the tests. The signed in session's own
- * permission array always wins over this table.
+ * Frontend mirror of the server side role to permission mapping, kept only so
+ * the nav tests can assert "what a Maker sees" without standing up the API.
+ * Runtime never reads it: the signed in session's own `permissions` array is
+ * the only thing that gates the UI.
  */
 export const PERMISSIONS_BY_ROLE: Record<Role, readonly Permission[]> = {
   MAKER: MAKER,
@@ -145,6 +146,15 @@ export const PERMISSIONS_BY_ROLE: Record<Role, readonly Permission[]> = {
   ADMIN_PUSAT: ADMIN_PUSAT,
   AUDITOR: READ_ONLY,
 };
+
+/**
+ * Role label for display. The API types `user.role` as a plain string and can
+ * answer "TANPA_ROLE" for an account whose roles were revoked, so an unknown
+ * value has to render as words rather than as an empty gap in the header.
+ */
+export function namaRole(role: string): string {
+  return (NAMA_ROLE as Record<string, string | undefined>)[role] ?? "Tanpa role";
+}
 
 export function hasPermission(
   permissions: readonly string[],

@@ -1,11 +1,12 @@
 // Login screen. Two inputs, one primary action, and an honest error line.
 //
-// The demo hint only renders when the demo stub is reachable (localhost with
-// no API), so a deployed build shows a plain login form with no credentials
-// printed on it.
+// Every answer here comes from POST /auth/login. There is no local fallback
+// and no credential printed on the screen: a rejected password says so, and a
+// server that cannot be reached says that instead, because the two send the
+// user to two different people.
 import { useState } from "react";
 import { Button, Field, Icon, PasswordInput, TextInput } from "@krakatausteel/ui";
-import { ApiUnreachableError, DEMO_USERNAMES, UnauthorizedError } from "../api/auth";
+import { ApiRequestError, ApiUnreachableError, UnauthorizedError } from "../api/auth";
 import { DASAR_HUKUM } from "../regulasi";
 import { useSession } from "../session";
 
@@ -13,11 +14,6 @@ interface FieldErrors {
   username?: string;
   password?: string;
 }
-
-const DEMO_VISIBLE = (() => {
-  const host = globalThis.location?.hostname ?? "";
-  return host === "localhost" || host === "127.0.0.1" || host === "";
-})();
 
 export function Login() {
   const { login } = useSession();
@@ -42,9 +38,13 @@ export function Login() {
     } catch (cause) {
       if (cause instanceof UnauthorizedError) {
         setFormError("Nama pengguna atau kata sandi salah. Periksa kembali lalu coba lagi.");
+      } else if (cause instanceof ApiRequestError) {
+        // 400, 403, and 429 carry a sentence from the server that names the
+        // real reason (rate limit, origin), which is more useful than ours.
+        setFormError(cause.message);
       } else if (cause instanceof ApiUnreachableError) {
         setFormError(
-          "Server tidak dapat dihubungi. Coba lagi beberapa saat, atau hubungi administrator.",
+          "Server tidak dapat dihubungi. Ini bukan masalah kata sandi. Coba lagi beberapa saat, atau hubungi administrator.",
         );
       } else {
         setFormError("Terjadi kesalahan tak terduga saat masuk.");
@@ -105,17 +105,6 @@ export function Login() {
             Masuk
           </Button>
         </form>
-
-        {DEMO_VISIBLE ? (
-          <div className="login-demo">
-            <p className="login-demo-title">Mode demo lokal</p>
-            <p className="login-demo-body">
-              API belum tersedia, jadi sesi dilayani stub lokal untuk meninjau tampilan. Masuk
-              dengan salah satu nama pengguna berikut dan kata sandi apa pun yang tidak kosong:{" "}
-              {DEMO_USERNAMES.join(", ")}.
-            </p>
-          </div>
-        ) : null}
 
         <p className="login-foot">
           Mengacu pada Peraturan Menteri BUMN Nomor {DASAR_HUKUM.nomor}. Aplikasi ini mencatat

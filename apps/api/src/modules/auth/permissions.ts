@@ -3,14 +3,31 @@
 // typo in the UI into a type error (its own header says so, and spec 2 rule 4
 // says the check that matters is this one).
 //
-// The 39 codes below are exactly the codes the SPA renders its navigation
-// from, so they cannot be renamed unilaterally. Spec 4.1 names its examples
-// slightly differently (`pumk.proposal.create`, `periode.close`,
-// `periode.reopen`), and rather than pick a winner and break one of the two,
-// those spec spellings are registered as ALIASES: `requirePermission` resolves
-// an alias to its canonical code before checking, so both spellings work and
-// only the canonical set is ever sent to the client. Adding a genuinely new
-// finer-grained permission later means adding a canonical code, not an alias.
+// The codes below are the ones the SPA renders its navigation from
+// (apps/web/src/permissions.ts must contain every code it checks), so a
+// canonical code is not renamed unilaterally.
+//
+// SPEC 4.1 SPELLINGS ARE DOCUMENTED, NOT ALIASED.
+// Spec 4.1 gives its examples as `pumk.proposal.create`, `jurnal.post`,
+// `periode.close`, `periode.reopen`. Only `jurnal.post` is spelled that way
+// here; the others map onto canonical codes as follows:
+//
+//   spec 4.1                  canonical code here
+//   pumk.proposal.create  ->  pumk.create
+//   pumk.proposal.review  ->  pumk.review
+//   pumk.proposal.approve ->  pumk.approve
+//   periode.close         ->  admin.closing.periode
+//   periode.reopen        ->  admin.periode.reopen
+//   kolektibilitas.close  ->  admin.closing.kolektibilitas
+//
+// Those were briefly registered as runtime ALIASES. They are not any more, on
+// review: nothing called them, and an alias table full of codes with no call
+// sites makes `canonicalPermission` look like it validates more than it does,
+// which is precisely how a missing permission (jurnal.update / jurnal.delete)
+// went unnoticed. `PERMISSION_ALIASES` stays as a mechanism, currently empty,
+// for a genuine future RENAME of a code the SPA already ships, where both
+// spellings must work during one deploy. Anything else is a new canonical
+// code, so that `resolveRequiredPermissions` can reject a typo at boot.
 
 export const PERMISSIONS = [
   "dashboard.view",
@@ -37,8 +54,21 @@ export const PERMISSIONS = [
 
   "jurnal.view",
   "jurnal.create",
+  // Editing and cancelling a DRAFT journal are separate actions from creating
+  // one: the journal engine gates `ubahJurnalDraft` and `batalkanJurnalDraft`
+  // on exactly these two codes (modules/jurnal/service.ts). They were missing
+  // from this catalogue, which meant NO role could hold them, not even Admin
+  // Pusat (built as a spread of PERMISSIONS), so editing or cancelling a draft
+  // would have been a 403 for every user in the system on the day the journal
+  // screens shipped. Do not remove without changing the engine.
+  "jurnal.update",
+  "jurnal.delete",
   "jurnal.verify",
   "jurnal.post",
+  // Reversing a POSTED journal. Deliberately NOT the same code as jurnal.post:
+  // posting adds a new entry, reversal rewrites the meaning of one that is
+  // already in the ledger and in a possibly-reported period, which is the
+  // heavier privilege of the two (spec invariant 4, spec 6.3).
   "jurnal.reversal",
 
   "laporan.view",
@@ -51,7 +81,14 @@ export const PERMISSIONS = [
   "konfigurasi.master",
   "konfigurasi.coa",
   "konfigurasi.user",
+  // Reading the parameter set and CHANGING it are different privileges: a
+  // parameter is evidence for how a number was calculated, so read is wide
+  // (the Auditor needs it), while write moves money in every future
+  // calculation. Previously `konfigurasi.update` was an alias of
+  // `konfigurasi.parameter`, which made the two call sites read as though
+  // they were separate when they were not.
   "konfigurasi.parameter",
+  "konfigurasi.update",
 
   "portal.view",
   "portal.konversi",
@@ -68,21 +105,15 @@ export type Permission = (typeof PERMISSIONS)[number];
 const PERMISSION_SET: ReadonlySet<string> = new Set<string>(PERMISSIONS);
 
 /**
- * Spec spellings that mean an existing canonical permission. Kept small and
- * explicit: an alias is a naming compromise, not a place to invent policy.
+ * Renames in flight: old spelling -> current canonical code.
+ *
+ * EMPTY ON PURPOSE, and that is the healthy state. The only thing that belongs
+ * here is a code the SPA (or a saved role definition, or another module)
+ * already ships under an old name while a rename rolls out. It is not a place
+ * to make a second name for an existing permission, and it is not a substitute
+ * for adding a canonical code: see the spec 4.1 note in this file's header.
  */
-export const PERMISSION_ALIASES: Readonly<Record<string, Permission>> = {
-  // spec 4.1 examples
-  "pumk.proposal.create": "pumk.create",
-  "pumk.proposal.review": "pumk.review",
-  "pumk.proposal.approve": "pumk.approve",
-  "periode.close": "admin.closing.periode",
-  "periode.reopen": "admin.periode.reopen",
-  "kolektibilitas.close": "admin.closing.kolektibilitas",
-  // spec 9.4 / this phase's brief: the konfigurasi write permission
-  "konfigurasi.update": "konfigurasi.parameter",
-  "konfigurasi.view": "konfigurasi.parameter",
-};
+export const PERMISSION_ALIASES: Readonly<Record<string, Permission>> = {};
 
 /** Canonical form of a permission string, or null if it names nothing. */
 export function canonicalPermission(code: string): Permission | null {
@@ -174,6 +205,11 @@ const MAKER: Permission[] = [
   "nonpumk.penyaluran",
   "nonpumk.lpj",
   "jurnal.create",
+  // The Maker owns its own DRAFT journals, so it must be able to correct and
+  // cancel one before a Checker verifies it. Neither touches a POSTED entry:
+  // the engine refuses that, and correction after posting is a reversal.
+  "jurnal.update",
+  "jurnal.delete",
   "portal.konversi",
   "tools.import",
 ];
@@ -197,6 +233,11 @@ const APPROVER: Permission[] = [
   "admin.closing.periode",
 ];
 
+// Everything the three operational roles can do, in ONE branch, plus branch
+// user management. Deliberately NOT konfigurasi.parameter/update: spec 2 puts
+// master data and parameters with Admin Pusat, and a branch admin who can
+// change the jasa administrasi rate is a branch admin who can change every
+// future journal in that branch.
 const ADMIN_CABANG: Permission[] = [
   ...new Set<Permission>([...MAKER, ...CHECKER, ...APPROVER, "konfigurasi.user", "tools.integritas"]),
 ];

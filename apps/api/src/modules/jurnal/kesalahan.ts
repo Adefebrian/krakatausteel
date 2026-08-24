@@ -48,6 +48,8 @@ const PESAN: Record<KodeJurnal, string> = {
   JURNAL_SUDAH_REVERSED: "Jurnal ini sudah pernah dibalik.",
   POSTING_BENTROK: "Jurnal ini sedang diposting oleh permintaan lain. Muat ulang untuk melihat hasilnya.",
   BATCH_GAGAL: "Satu jurnal dalam batch tidak sah, jadi tidak ada satu pun yang diposting.",
+  JURNAL_IDEMPOTENSI_DUPLIKAT:
+    "Jurnal untuk lingkup ini sudah pernah dibuat, jadi tidak dibuat lagi. Mengulang langkah yang sama tidak menambah jurnal.",
 
   TIDAK_BERWENANG: "Pengguna ini tidak punya wewenang untuk tindakan tersebut pada jurnal.",
   MAKER_TIDAK_BOLEH_CHECKER: "Pembuat jurnal tidak boleh memverifikasi jurnalnya sendiri.",
@@ -115,16 +117,47 @@ const PETA_CONSTRAINT: Record<string, KodeJurnal> = {
   jurnal_baris_akun_id_fkey: "AKUN_TIDAK_VALID",
   jurnal_reversal_of_uq: "JURNAL_SUDAH_REVERSED",
   jurnal_reversed_by_uq: "JURNAL_SUDAH_REVERSED",
+  // Invariant 13. The closing engine owns idempotency, but a second journal
+  // for the same (event, periode, cabang) scope must not escape from here as an
+  // unexplained fault while waiting for it.
+  jurnal_idempotensi_uq: "JURNAL_IDEMPOTENSI_DUPLIKAT",
 };
 
 interface KesalahanDb {
   message?: unknown;
+  /** Bun's `SQL` puts the SQLSTATE here. */
   errno?: unknown;
+  /** node-postgres' `DatabaseError` puts the SQLSTATE here. */
+  code?: unknown;
   constraint?: unknown;
 }
 
 /** SQLSTATEs that mean "a lock could not be taken / the row moved under us". */
 const SQLSTATE_KONKURENSI = new Set(["40001", "40P01", "55P03"]);
+
+const POLA_SQLSTATE = /^[0-9A-Z]{5}$/;
+
+/**
+ * THE TWO DRIVERS THIS REPO ACTUALLY RUNS ON PUT THE SQLSTATE IN DIFFERENT
+ * PLACES, and reading only one of them is how a whole branch of this file
+ * became dead code in production:
+ *
+ *   - `bun:sql`'s PostgresError -> `errno` (the tests build their port on it,
+ *     because the engine needs a transaction and core/ was mid-flight);
+ *   - node-postgres' DatabaseError -> `code` (this is what
+ *     core/adapters/db.ts, and therefore the running server, uses).
+ *
+ * `code` on a Bun PostgresError is NOT a SQLSTATE (it is
+ * "ERR_POSTGRES_SERVER_ERROR"), so the shape test matters: take whichever
+ * field actually looks like a five-character SQLSTATE. core/http.ts reads
+ * `.code`; between the two files, every driver is now covered.
+ */
+function sqlstateDari(e: KesalahanDb): string {
+  for (const kandidat of [e.errno, e.code]) {
+    if (typeof kandidat === "string" && POLA_SQLSTATE.test(kandidat)) return kandidat;
+  }
+  return "";
+}
 
 /**
  * Maps anything thrown by the driver onto a `JurnalError`, or returns null when
@@ -136,7 +169,7 @@ export function terjemahkanKesalahanDb(err: unknown): JurnalError | null {
   if (err === null || typeof err !== "object") return null;
   const e = err as KesalahanDb;
   const pesan = typeof e.message === "string" ? e.message : "";
-  const sqlstate = typeof e.errno === "string" ? e.errno : "";
+  const sqlstate = sqlstateDari(e);
   const constraint = typeof e.constraint === "string" ? e.constraint : "";
 
   for (const [prefiks, kode] of Object.entries(PETA_KODE_TRIGGER)) {

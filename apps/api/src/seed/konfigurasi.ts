@@ -22,7 +22,9 @@ export async function seedKonfigurasiTambahan(db: DbPort): Promise<{ inserted: n
     const rows = await db.query<{ id: string }>(
       `INSERT INTO konfigurasi
          (bumn_id, grup, kunci, nilai, tipe_data, pilihan_json, deskripsi, perlu_konfirmasi)
-       VALUES (NULL, $1, $2, $3, $4, $5::jsonb, $6, true)
+       -- $5::text::jsonb: see the note in modules/audit/repo.ts. A bun:sql
+       -- runner would otherwise store pilihan_json as a JSON string scalar.
+       VALUES (NULL, $1, $2, $3, $4, $5::text::jsonb, $6, true)
        ON CONFLICT (bumn_id, grup, kunci) WHERE deleted_at IS NULL DO NOTHING
        RETURNING id::text AS id`,
       [

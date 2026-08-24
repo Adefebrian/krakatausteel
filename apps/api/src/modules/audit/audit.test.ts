@@ -2,7 +2,9 @@
 // (every authorisation denial is recorded), spec 10.4 report 31 for the
 // property that nobody can delete it.
 import { describe, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { createDbAdapter } from "../../core/adapters/db";
+import type { QueryRunner } from "./ports";
 import { createFixture } from "../../testing/harness";
 import { createAuditService } from "./service";
 
@@ -25,6 +27,144 @@ describe("append-only, enforced by the database", () => {
   test("a DELETE is refused", async () => {
     const id = await audit.record({ aksi: "uji.append", entitas: "uji", hasil: "SUKSES" });
     await expect(db.query("DELETE FROM audit_log WHERE id = $1", [id])).rejects.toThrow(/TJSL-AUD-001/);
+  });
+});
+
+describe("the payload is stored as queryable jsonb, not as a string scalar", () => {
+  // THE REGRESSION THIS PINS. `$n::jsonb` bound from a JS string behaves
+  // differently per driver: node-postgres stores an object, bun:sql stores a
+  // JSON STRING SCALAR. In the scalar case the row still looks right in a
+  // listing and `nilai_baru_json->>'key'` silently returns NULL, so every
+  // before/after comparison and every filter on the audit-trail report (spec
+  // 10.4 #31) quietly finds nothing. The repo therefore binds
+  // `$n::text::jsonb`, and these tests assert on the INSIDE of the payload,
+  // because the earlier tests passed against the bug by only ever looking at
+  // `aksi`, `entitas_id` and `hasil`.
+
+  async function bacaPayload(entitasId: string, runner = db) {
+    return (
+      await runner.query<{
+        tipe_lama: string | null;
+        tipe_baru: string | null;
+        status_lama: string | null;
+        status_baru: string | null;
+        nested: string | null;
+      }>(
+        `SELECT jsonb_typeof(nilai_lama_json) AS tipe_lama,
+                jsonb_typeof(nilai_baru_json) AS tipe_baru,
+                nilai_lama_json->>'status'    AS status_lama,
+                nilai_baru_json->>'status'    AS status_baru,
+                nilai_baru_json#>>'{detail,plafon}' AS nested
+           FROM audit_log WHERE entitas_id = $1`,
+        [entitasId],
+      )
+    )[0];
+  }
+
+  test("through the pooled adapter: jsonb_typeof is object and keys resolve", async () => {
+    const entitasId = crypto.randomUUID();
+    await audit.record({
+      aksi: "uji.jsonb",
+      entitas: "pumk_proposal",
+      entitasId,
+      nilaiLama: { status: "DRAFT" },
+      nilaiBaru: { status: "DISETUJUI", detail: { plafon: "25000000.00" } },
+      hasil: "SUKSES",
+    });
+    const row = await bacaPayload(entitasId);
+    expect(row).toMatchObject({
+      tipe_lama: "object",
+      tipe_baru: "object",
+      status_lama: "DRAFT",
+      status_baru: "DISETUJUI",
+      nested: "25000000.00",
+    });
+  });
+
+  test("through a bun:sql runner, which is where the scalar bug came from", async () => {
+    // The journal engine builds its own transactional port on bun:sql and can
+    // hand it to `audit.record(entry, tx)`, so the repo has to be correct under
+    // BOTH drivers, not just the one core/adapters/db.ts uses.
+    const sql = new SQL(process.env.DATABASE_URL ?? "");
+    const runner: QueryRunner = {
+      async query<T>(text: string, params: unknown[] = []): Promise<T[]> {
+        return (await sql.unsafe(text, params as never[])) as T[];
+      },
+    };
+    try {
+      const entitasId = crypto.randomUUID();
+      await audit.record(
+        {
+          aksi: "uji.jsonb.bunsql",
+          entitas: "pumk_proposal",
+          entitasId,
+          nilaiLama: { status: "DRAFT" },
+          nilaiBaru: { status: "DISETUJUI", detail: { plafon: "25000000.00" } },
+          hasil: "SUKSES",
+        },
+        runner,
+      );
+      const row = await bacaPayload(entitasId);
+      expect(row!.tipe_baru).toBe("object");
+      expect(row!.tipe_lama).toBe("object");
+      expect(row!.status_baru).toBe("DISETUJUI");
+      expect(row!.nested).toBe("25000000.00");
+    } finally {
+      await sql.end();
+    }
+  });
+
+  test("an array payload stays an array, and null stays SQL NULL", async () => {
+    const entitasId = crypto.randomUUID();
+    await audit.record({
+      aksi: "uji.jsonb.array",
+      entitas: "sesi",
+      entitasId,
+      nilaiBaru: ["MAKER", "CHECKER"],
+      hasil: "SUKSES",
+    });
+    const rows = await db.query<{ tipe: string | null; lama: string | null; pertama: string | null }>(
+      `SELECT jsonb_typeof(nilai_baru_json) AS tipe,
+              jsonb_typeof(nilai_lama_json) AS lama,
+              nilai_baru_json->>0 AS pertama
+         FROM audit_log WHERE entitas_id = $1`,
+      [entitasId],
+    );
+    expect(rows[0]).toMatchObject({ tipe: "array", lama: null, pertama: "MAKER" });
+  });
+
+  test("the konfigurasi write path stores a queryable payload too", async () => {
+    // Same binding shape, same trap: the before/after values of a parameter
+    // change are the evidence for why a number moved.
+    const f = await createFixture();
+    await f.ctx.konfigurasi.update({
+      bumnId: f.bumnId,
+      grup: "batasan",
+      kunci: "tenor_max_bulan",
+      nilai: "18",
+      userId: f.users.ADMIN_PUSAT.id,
+    });
+    const rows = await db.query<{ lama: string | null; baru: string | null; tipe: string | null }>(
+      `SELECT nilai_lama_json->>'nilai' AS lama, nilai_baru_json->>'nilai' AS baru,
+              jsonb_typeof(nilai_baru_json) AS tipe
+         FROM audit_log
+        WHERE aksi = 'konfigurasi.update' AND user_id = $1
+        ORDER BY id DESC LIMIT 1`,
+      [f.users.ADMIN_PUSAT.id],
+    );
+    expect(rows[0]).toMatchObject({ lama: "36", baru: "18", tipe: "object" });
+  });
+
+  test("konfigurasi.pilihan_json is written as a real jsonb array", async () => {
+    // The seed writes it with the same cast; an ENUM whose options are a string
+    // scalar cannot be rendered as a select box by the config UI.
+    const rows = await db.query<{ tipe: string; n: number }>(
+      `SELECT jsonb_typeof(pilihan_json) AS tipe, jsonb_array_length(pilihan_json) AS n
+         FROM konfigurasi
+        WHERE grup = 'akuntansi' AND kunci = 'mode_penyisihan' AND deleted_at IS NULL
+        LIMIT 1`,
+    );
+    expect(rows[0]).toMatchObject({ tipe: "array", n: 2 });
   });
 });
 

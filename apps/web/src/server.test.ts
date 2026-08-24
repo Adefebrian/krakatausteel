@@ -29,7 +29,7 @@ describe("web server", () => {
     if (!existsSync(distIndex)) {
       await import("../build");
     }
-    const { default: app } = await import("../server");
+    const { app } = await import("../server");
     server = Bun.serve({ fetch: app.fetch, port: 0 });
   });
 

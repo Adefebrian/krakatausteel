@@ -513,6 +513,16 @@
   white-space: nowrap;
 }
 
+/* A figure that could not be read. Flat, no icon, no colour fill: it has to be
+   unmistakably not a number, and it must not be mistakable for a valid figure
+   with a status. */
+.cell-invalid {
+  font-family: var(--font-sans);
+  font-variant-numeric: normal;
+  font-style: italic;
+  color: var(--color-danger);
+}
+
 .table tbody td {
   height: var(--table-row-height);
   padding: 0 var(--table-cell-pad-x);

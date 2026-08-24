@@ -61,10 +61,11 @@ Isinya, berurutan, berhenti di kegagalan pertama dan keluar non-zero:
 | Langkah | Perintah | Kenapa |
 |---|---|---|
 | 1 | `bun tools/db.ts reset` | schema test dibuang, seluruh `migrations/*.sql` diputar ulang dari 0001, jadi test selalu mulai dari schema yang diketahui |
-| 2 | `bun run build` | SPA benar benar terbangun |
-| 3 | `bun test` | seluruh suite, termasuk yang memakai Postgres nyata |
-| 4 | `bun run check:boundaries` | tidak ada deep import antar modul, infra selalu di balik port |
-| 5 | `bun run check:compose` | validasi statis `infra/docker-compose.prod.yml` tanpa Docker |
+| 2 | `bun run typecheck` | `tsc --noEmit` di semua workspace. Langkah tersendiri dan paling awal karena `apps/api` tidak punya build step nyata (`echo ... && exit 0`, API dikirim sebagai sumber TypeScript), jadi tanpa langkah ini paket terbesar di repo tidak pernah dicek tipenya di gate |
+| 3 | `bun run build` | SPA benar benar terbangun |
+| 4 | `bun test` | seluruh suite, termasuk yang memakai Postgres nyata |
+| 5 | `bun run check:boundaries` | tidak ada deep import antar modul, infra selalu di balik port, dan tidak ada tulis mentah ke `jurnal` / `jurnal_baris` di luar `modules/jurnal/**` (invarian 11) |
+| 6 | `bun run check:compose` | validasi statis `infra/docker-compose.prod.yml` tanpa Docker |
 
 Ringkasan PASS/FAIL per langkah dicetak di akhir. Langkah 1 berubah jadi `SKIP` (bukan gagal) kalau Postgres tidak bisa dihubungi, dan ringkasannya menyebutkan itu, supaya tidak ada gate yang lulus diam diam tanpa database.
 
@@ -138,13 +139,27 @@ bun test apps/api/src/index.test.ts      # satu file
 
 `cd apps/api && bun test` juga bekerja, tapi tanpa pagar `tools/test-env.ts`, jadi jangan dipakai untuk test yang menyentuh database.
 
+## 4b. Aturan tulis ledger (invarian 11)
+
+`bun run check:boundaries` menolak `insert into` / `update` / `delete from` terhadap tabel `jurnal` dan `jurnal_baris` di file mana pun di bawah `apps/api/src/modules/**` (kecuali `modules/jurnal/**`), `apps/api/src/core/**`, dan direktori seed. Setiap event yang berkonsekuensi keuangan harus lewat `postingEvent` dari `modules/jurnal`, satu jalur, atau buku besar tidak bisa direkonsiliasi.
+
+Penjaga utamanya adalah trigger database (bergantung pada `SET LOCAL tjsl.jalur_posting` di dalam transaksi). Pengecekan statis ini garis kedua: menangkap hasil copy-paste di gate, sebelum sampai ke Postgres.
+
+Yang tidak dikecualikan: `*.test.ts` dan `test-support.ts` di luar `modules/jurnal/**`. Kalau sebuah fixture benar benar butuh menulis baris jurnal langsung, pakai pengecualian eksplisit satu baris tepat di atas statementnya:
+
+```ts
+// boundary-allow: ledger-write alasan yang jelas, minimal 10 karakter
+```
+
+Satu pengecualian berlaku untuk satu statement saja, dan setiap pengecualian yang aktif dicetak di setiap run supaya tidak menumpuk tanpa terlihat.
+
 ## 5. Perintah lain
 
 ```bash
 bun run typecheck        # tsc --noEmit di semua workspace, via turbo
 bun run lint             # lint per workspace, via turbo
 bun run build            # build semua workspace, via turbo
-bun run check:boundaries # pengecekan batas modul
+bun run check:boundaries # batas modul + aturan tulis ledger
 bun run check:compose    # validasi statis compose produksi
 ```
 
@@ -158,7 +173,7 @@ Prasyarat: `docker compose version` bekerja.
 # 1. env produksi terpisah, jangan pakai .env
 cp .env.example .env.prod
 # isi APP_DOMAIN (boleh localhost untuk uji lokal), POSTGRES_PASSWORD,
-# MINIO_ROOT_USER, MINIO_ROOT_PASSWORD, SESSION_SECRET=$(openssl rand -hex 32)
+# MINIO_ROOT_USER, MINIO_ROOT_PASSWORD=$(openssl rand -hex 32)
 
 # 2. validasi compose secara nyata (ini yang tidak bisa dijalankan tanpa daemon)
 docker compose -f infra/docker-compose.prod.yml --env-file .env.prod config

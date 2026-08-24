@@ -12,7 +12,7 @@
 // `pumk.approve` to a role, the diff shows exactly which cell moved.
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createFixture, type Fixture } from "../../testing/harness";
-import { PERMISSIONS_BY_ROLE, ROLE_CODES, type RoleCode } from "./permissions";
+import { PERMISSIONS, PERMISSIONS_BY_ROLE, ROLE_CODES, type RoleCode } from "./permissions";
 
 let f: Fixture;
 const cookies = new Map<RoleCode | "MAKER_B", string>();
@@ -184,9 +184,12 @@ describe("Auditor is read only, structurally", () => {
     { method: "POST", path: "/konfigurasi/batasan/tenor_max_bulan", body: { nilai: "24" } },
     { method: "DELETE", path: "/konfigurasi/batasan/tenor_max_bulan" },
     { method: "PATCH", path: "/konfigurasi/batasan/tenor_max_bulan", body: { nilai: "24" } },
-    // A route in another module entirely, with no explicit read-only guard on
-    // it: proof the block is structural and not per-route bookkeeping.
-    { method: "POST", path: "/example", body: { name: "coba" } },
+    // A path with no route at all: the guard runs BEFORE routing, so a
+    // read-only role is refused with 403 rather than reaching a 404. Proof
+    // that the block is structural, not per-route bookkeeping, and that a
+    // route added in a later phase is covered before its author thinks about
+    // it.
+    { method: "POST", path: "/belum-ada-di-fase-ini", body: { apa: "saja" } },
   ];
   for (const mutation of mutations) {
     test(`${mutation.method} ${mutation.path} as Auditor is refused`, async () => {
@@ -202,11 +205,16 @@ describe("Auditor is read only, structurally", () => {
     });
   }
 
-  test("an unauthenticated POST to the same route is NOT blocked by the read-only guard", async () => {
+  test("an anonymous mutation is NOT blocked by the read-only guard", async () => {
     // The guard is about roles, not about anonymity: a public portal
-    // submission in Fase 7 must still be able to POST.
-    const res = await f.request("/example", { method: "POST", body: { name: "anonim" } });
-    expect(res.status).toBe(201);
+    // submission in Fase 7 must still be able to POST. With no cookie there is
+    // no principal to be read-only, so the request continues and is refused by
+    // the route's own session guard (401) rather than by this one (403).
+    const res = await f.request("/konfigurasi/batasan/tenor_max_bulan", {
+      method: "PUT",
+      body: { nilai: "24" },
+    });
+    expect(res.status).toBe(401);
   });
 
   test("a refused mutation writes a DITOLAK row naming the role and the method", async () => {
@@ -332,6 +340,46 @@ describe("cabang scoping (spec 2 rule 3, spec 16 scenario 24)", () => {
     expect(body.error).not.toContain("invalid input syntax");
   });
 
+  test("a cross-branch refusal writes a DITOLAK row (spec 2 rule 5)", async () => {
+    // This denial is thrown by a SERVICE (assertCabangAllowed), after the
+    // guard chain has already let the request through on permissions, so the
+    // guard never sees it. It used to leave no trace at all: the one denial
+    // spec 16 scenario 24 exists to prove was the one denial that was not
+    // recorded. The shared error handler now writes it.
+    const before = await f.auditRows({ hasil: "DITOLAK", userId: f.users.CHECKER.id });
+    const res = await f.request(`/organisasi/karyawan/${f.karyawanB}`, { cookie: as("CHECKER") });
+    expect(res.status).toBe(403);
+
+    const after = await f.auditRows({ hasil: "DITOLAK", userId: f.users.CHECKER.id });
+    expect(after.length).toBe(before.length + 1);
+    const row = after[0]!;
+    expect(row.aksi).toBe("auth.otorisasi");
+    expect(row.hasil).toBe("DITOLAK");
+    expect(row.user_id).toBe(f.users.CHECKER.id);
+    expect(row.keterangan).toContain("TIDAK_BERWENANG");
+    expect(JSON.stringify(row.nilai_baru_json)).toContain("/organisasi/karyawan/");
+  });
+
+  test("a cross-branch list filter refusal is recorded too", async () => {
+    const before = await f.auditRows({ hasil: "DITOLAK", userId: f.users.APPROVER.id });
+    const res = await f.request(`/organisasi/karyawan?cabangId=${f.cabangB.id}`, {
+      cookie: as("APPROVER"),
+    });
+    expect(res.status).toBe(403);
+    const after = await f.auditRows({ hasil: "DITOLAK", userId: f.users.APPROVER.id });
+    expect(after.length).toBe(before.length + 1);
+  });
+
+  test("a permission refusal is recorded exactly ONCE, not twice", async () => {
+    // The guard writes its own row and flags the request; the error handler
+    // must not add a second one for the same denial.
+    const before = await f.auditRows({ hasil: "DITOLAK", userId: f.users.MAKER.id });
+    const res = await f.request("/audit", { cookie: as("MAKER") });
+    expect(res.status).toBe(403);
+    const after = await f.auditRows({ hasil: "DITOLAK", userId: f.users.MAKER.id });
+    expect(after.length).toBe(before.length + 1);
+  });
+
   test("every refusal above is in audit_log as DITOLAK", async () => {
     const rows = await f.auditRows({ hasil: "DITOLAK", userId: f.users.MAKER.id });
     expect(rows.length).toBeGreaterThan(0);
@@ -398,6 +446,65 @@ describe("permission catalogue integrity", () => {
       const allowed = PERMISSIONS_BY_ROLE[row.role as RoleCode] as readonly string[];
       expect(allowed).toContain(row.kode);
     }
+  });
+
+  test("the server knows every permission the SPA checks (and every one the engines check)", async () => {
+    // The failure this catches: a permission string that some caller gates on
+    // but no role can hold, because it is absent from the catalogue that
+    // ADMIN_PUSAT is built from. That is exactly how `jurnal.update` and
+    // `jurnal.delete` came to be uncheckable by every user in the system.
+    //
+    // apps/web/src/permissions.ts is the SPA's MIRROR of this catalogue. If
+    // this fails after a frontend change, the fix is to add the code here (and
+    // grant it to a role), not to delete it there.
+    const web = await Bun.file(
+      new URL("../../../../web/src/permissions.ts", import.meta.url).pathname,
+    ).text();
+    const blok = /export const PERMISSIONS = \[([\s\S]*?)\] as const;/.exec(web);
+    expect(blok).not.toBeNull();
+    const kodeSpa = [...blok![1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+    expect(kodeSpa.length).toBeGreaterThan(30);
+
+    const dikenal = new Set<string>(PERMISSIONS);
+    const tidakDikenal = kodeSpa.filter((kode) => !dikenal.has(kode));
+    expect(tidakDikenal).toEqual([]);
+
+    // And every canonical code must be reachable: something has to be able to
+    // hold it, or it is a permanent 403 waiting for a screen to be built.
+    const dipegang = new Set<string>(Object.values(PERMISSIONS_BY_ROLE).flat());
+    expect([...dikenal].filter((kode) => !dipegang.has(kode))).toEqual([]);
+  });
+
+  test("the journal engine's permission codes are all in the catalogue and granted", () => {
+    // Read straight out of the engine's own constant list so a new gate there
+    // fails here rather than in production. The engine gates draft edit and
+    // cancel on these two, which nothing could hold until they were added.
+    for (const kode of ["jurnal.create", "jurnal.update", "jurnal.verify", "jurnal.post", "jurnal.delete"]) {
+      expect(PERMISSIONS as readonly string[]).toContain(kode);
+    }
+    // Maker owns its drafts, so it must be able to correct and cancel one.
+    expect(PERMISSIONS_BY_ROLE.MAKER as readonly string[]).toContain("jurnal.update");
+    expect(PERMISSIONS_BY_ROLE.MAKER as readonly string[]).toContain("jurnal.delete");
+    // Posting and reversal stay with the Approver, and reversal is its own
+    // code because rewriting a posted entry is the heavier privilege.
+    expect(PERMISSIONS_BY_ROLE.APPROVER as readonly string[]).toContain("jurnal.post");
+    expect(PERMISSIONS_BY_ROLE.APPROVER as readonly string[]).toContain("jurnal.reversal");
+    expect(PERMISSIONS_BY_ROLE.MAKER as readonly string[]).not.toContain("jurnal.post");
+    expect(PERMISSIONS_BY_ROLE.CHECKER as readonly string[]).not.toContain("jurnal.post");
+  });
+
+  test("reading config and WRITING it are different permissions", () => {
+    // They were the same code behind an alias, which made the two call sites
+    // read as though a read/write split existed when it did not.
+    expect(PERMISSIONS as readonly string[]).toContain("konfigurasi.update");
+    expect(PERMISSIONS_BY_ROLE.ADMIN_PUSAT as readonly string[]).toContain("konfigurasi.update");
+    expect(PERMISSIONS_BY_ROLE.ADMIN_CABANG as readonly string[]).not.toContain("konfigurasi.update");
+    expect(PERMISSIONS_BY_ROLE.AUDITOR as readonly string[]).not.toContain("konfigurasi.update");
+  });
+
+  test("the alias table is empty, so a typo cannot resolve to something else", () => {
+    const { PERMISSION_ALIASES } = require("./permissions") as typeof import("./permissions");
+    expect(Object.keys(PERMISSION_ALIASES)).toEqual([]);
   });
 
   test("requirePermission refuses an unknown permission code at wiring time", () => {

@@ -10,8 +10,8 @@
 // The top bar carries the four things a user needs at all times: the app name,
 // the active cabang, the active periode, and their own account.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Icon, formatPeriode, type IconName } from "@krakatausteel/ui";
-import { NAMA_ROLE } from "../permissions";
+import { Icon, formatPeriode, useToast, type IconName } from "@krakatausteel/ui";
+import { namaRole } from "../permissions";
 import { hasPermission } from "../permissions";
 import { findRoute } from "../nav";
 import { Link, useRouter } from "../router";
@@ -38,6 +38,7 @@ const TABS: readonly Tab[] = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { session, logout } = useSession();
   const { path, navigate } = useRouter();
+  const toast = useToast();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -62,6 +63,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     setSheetOpen(false);
     setMenuOpen(false);
   }, [path]);
+
+  // Logging out is a server side action: the Redis session has to actually be
+  // destroyed. If the request never lands, the session is still live, so the
+  // user is told instead of being shown a login screen that would be a lie.
+  async function keluar() {
+    try {
+      await logout();
+    } catch {
+      toast.error(
+        "Gagal keluar",
+        "Server tidak dapat dihubungi, jadi sesi Anda belum ditutup. Coba lagi.",
+      );
+    }
+  }
 
   if (!session) return null;
 
@@ -97,7 +112,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               cabang={`${session.cabang.kode} ${session.cabang.nama}`}
               periode={formatPeriode(session.periode.tahun, session.periode.bulan)}
               periodeStatus={session.periode.status}
-              demo={session.demo}
             />
           </div>
 
@@ -114,7 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               <span className="shell-user-text">
                 <span className="shell-user-name">{session.user.nama}</span>
-                <span className="shell-user-role">{NAMA_ROLE[session.user.role]}</span>
+                <span className="shell-user-role">{namaRole(session.user.role)}</span>
               </span>
               <Icon name="chevronDown" size={16} />
             </button>
@@ -126,7 +140,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </p>
                 <p className="shell-menu-line">
                   <span className="shell-menu-key">Role</span>
-                  <span className="shell-menu-val">{NAMA_ROLE[session.user.role]}</span>
+                  <span className="shell-menu-val">{namaRole(session.user.role)}</span>
                 </p>
                 <p className="shell-menu-line">
                   <span className="shell-menu-key">Cabang</span>
@@ -144,7 +158,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
-                    void logout();
+                    void keluar();
                   }}
                 >
                   <Icon name="logout" size={16} />
@@ -160,7 +174,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             cabang={`${session.cabang.kode} ${session.cabang.nama}`}
             periode={formatPeriode(session.periode.tahun, session.periode.bulan)}
             periodeStatus={session.periode.status}
-            demo={session.demo}
           />
         </div>
       </header>
@@ -196,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </p>
               <p className="shell-menu-line">
                 <span className="shell-menu-key">Role</span>
-                <span className="shell-menu-val">{NAMA_ROLE[session.user.role]}</span>
+                <span className="shell-menu-val">{namaRole(session.user.role)}</span>
               </p>
               <p className="shell-menu-line">
                 <span className="shell-menu-key">Cabang</span>
@@ -213,7 +226,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className="shell-menu-action"
                 onClick={() => {
                   setSheetOpen(false);
-                  void logout();
+                  void keluar();
                 }}
               >
                 <Icon name="logout" size={16} />
@@ -259,12 +272,10 @@ function ContextChips({
   cabang,
   periode,
   periodeStatus,
-  demo,
 }: {
   cabang: string;
   periode: string;
   periodeStatus: string;
-  demo?: boolean;
 }) {
   const statusLabel =
     periodeStatus === "OPEN"
@@ -285,7 +296,6 @@ function ContextChips({
         <span className="chip-val">{periode}</span>
         <span className="chip-status">{statusLabel}</span>
       </span>
-      {demo ? <span className="chip is-demo">Mode demo, data belum terhubung</span> : null}
     </>
   );
 }

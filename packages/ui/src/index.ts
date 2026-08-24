@@ -38,6 +38,7 @@ export {
   formatPeriode,
   formatRupiah,
   NAMA_BULAN,
+  UNPARSEABLE,
 } from "./money";
 export type { MoneyFormatOptions } from "./money";
 

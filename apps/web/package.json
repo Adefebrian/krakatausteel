@@ -19,11 +19,11 @@
   },
   "devDependencies": {
     "@krakatausteel/api": "workspace:*",
-    "@happy-dom/global-registrator": "^15.11.0",
+    "@happy-dom/global-registrator": "^20.11.6",
     "@types/bun": "^1.1.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "puppeteer-core": "^23.10.0",
+    "puppeteer-core": "^25.8.0",
     "typescript": "^5.7.0"
   }
 }

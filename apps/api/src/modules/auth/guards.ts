@@ -10,7 +10,7 @@
 // append-only (migrations/0014), so there is no path that rewrites this later.
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { getCookie } from "hono/cookie";
-import { AppError, forbidden, unauthenticated } from "../../core/http";
+import { AppError, forbidden, markDenialLogged, unauthenticated } from "../../core/http";
 import { clientIp } from "../../core/hardening";
 import { getPrincipal, setPrincipal, type Guards, type Principal } from "../../core/principal";
 import type { AuditService } from "../audit";
@@ -52,6 +52,9 @@ export function createGuards({ auth, audit }: GuardDeps): Guards {
       hasil: "DITOLAK",
       keterangan: entry.keterangan,
     });
+    // Tells the error handler (core/http.ts) that this request's denial is
+    // already in audit_log, so it does not write a second row.
+    markDenialLogged(c);
     throw error;
   }
 

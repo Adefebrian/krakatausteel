@@ -33,18 +33,20 @@
 // BigInt minor units, never by parseFloat.
 //
 // -------------------------------------------------------------------------
-// WHY THE SPEC 6.1 SURFACE IS EXPOSED TWICE
+// WHY SPEC 6.1'S SEVEN NAMES ARE METHODS AND NOT FREE FUNCTIONS
 // -------------------------------------------------------------------------
-// Spec 6.1 names seven free functions. They are declared below verbatim, and
-// they are ALSO the method set of `JurnalEngine`, which is what
-// `createJurnalEngine(deps)` returns. The engine object is the unit under
-// test: the tests must inject a real transactional DB port (the accounting
-// invariants live in Postgres triggers, so a fake proves nothing), and a free
-// function cannot have a port injected. The free functions are thin app-level
-// wiring over an engine built from the core DbPort; there is exactly one
-// implementation site, `createJurnalEngine`.
+// Spec 6.1 writes the surface as seven free functions. They exist here as the
+// method set of `JurnalEngine`, which `createJurnalEngine(deps)` returns, and
+// NOT also as module-level functions. There was a second, free-function
+// surface; it delegated to a module-global engine that whichever `createApp`
+// ran last had re-pointed, so with a per-fixture app (testing/harness.ts) the
+// free functions could act on another fixture's pool. A ledger API whose
+// target depends on construction order is not worth the convenience of
+// skipping one argument. The engine is a dependency: build it once in the
+// composition root, pass it where it is needed.
 
-import { buatEngineJurnal, engineJurnalTerpasang } from "./service";
+import type { DbPort, QueryRunner } from "../../core/ports/db";
+import { buatEngineJurnal } from "./service";
 
 // ---------------------------------------------------------------------------
 // Money
@@ -94,6 +96,16 @@ export const PERMISSION_JURNAL = {
   VERIFIKASI: "jurnal.verify",
   POSTING: "jurnal.post",
   HAPUS: "jurnal.delete",
+  /**
+   * Reversal is its OWN right, not a by-product of `jurnal.post`. The auth
+   * catalogue carries `jurnal.reversal` and a nav item is driven by it, so
+   * checking `jurnal.post` here would have left that permission granting
+   * nothing while every posting right silently included the power to reverse a
+   * posted journal. In the shipped RBAC the Approver role holds both, so this
+   * changes no real user's ability today; what it changes is that the two can
+   * be separated tomorrow, which is the whole reason the code exists.
+   */
+  REVERSAL: "jurnal.reversal",
 } as const;
 
 /**
@@ -120,8 +132,13 @@ export const KUNCI_KONFIGURASI = {
  * raw trigger string like
  *   'TJSL-JRN-031: jurnal UMUM/202602/00001 tidak balance: ...'
  * must never reach a caller, an HTTP response, or a log line that a user
- * reads. The Bun Postgres driver exposes the SQLSTATE as `err.errno` and the
- * constraint name as `err.constraint`; map on those, not on message text.
+ * reads. Map on the SQLSTATE and the constraint name, not on message text, and
+ * READ THE SQLSTATE FROM BOTH DRIVER SHAPES: `bun:sql` (the tests' port) puts
+ * it in `err.errno`, node-postgres (core/adapters/db.ts, i.e. the running
+ * server) puts it in `err.code`, and `err.code` on a `bun:sql` error is not a
+ * SQLSTATE at all. ./kesalahan.ts does this in one place; an earlier version
+ * read only `errno`, which left the whole concurrency branch dead in
+ * production while every test stayed green.
  */
 export const KODE_JURNAL = {
   // spec 6.2 validations, in the order the spec lists them
@@ -143,6 +160,10 @@ export const KODE_JURNAL = {
   JURNAL_SUDAH_REVERSED: "JURNAL_SUDAH_REVERSED", // spec 6.6.7
   POSTING_BENTROK: "POSTING_BENTROK", // spec 6.6.9, the losing concurrent post
   BATCH_GAGAL: "BATCH_GAGAL", // spec 6.6.8
+  // Invariant 13: a second journal for a scope that already has one. The
+  // closing engine owns the idempotency logic; this code exists so the
+  // database's unique index cannot surface as an unexplained fault meanwhile.
+  JURNAL_IDEMPOTENSI_DUPLIKAT: "JURNAL_IDEMPOTENSI_DUPLIKAT",
 
   // authorisation
   TIDAK_BERWENANG: "TIDAK_BERWENANG", // spec 6.3, missing jurnal.post etc.
@@ -337,28 +358,33 @@ export interface EventPayload {
 // Ports the engine consumes
 // ---------------------------------------------------------------------------
 
-/** A handle that runs statements on ONE connection inside ONE transaction. */
-export interface JurnalTx {
-  query<T = unknown>(sql: string, params?: unknown[]): Promise<T[]>;
-}
-
 /**
- * The database port the engine needs. Wider than `core/ports/db.ts` on
- * purpose: this engine cannot be built on autocommit queries.
+ * ONE definition, not two. These are now ALIASES of `core/ports/db.ts`, which
+ * grew the identical `transaction<T>` after this contract was written.
  *
+ * The names stay because they say what the engine needs them for, and because
+ * the tests and `test-support.ts` are written against them; the shapes are the
+ * core port's, so there is nothing left to drift. Keeping a second structurally
+ * identical declaration is how two error layers in this repo ended up
+ * disagreeing about which driver they were on, which is a bug class worth
+ * removing at the root rather than commenting about.
+ *
+ * What the engine needs from the port, and why autocommit queries cannot serve:
  *   - `postingBatch` is "atomik, semua atau tidak ada" (spec 6.1).
  *   - Reversal must revert business state IN THE SAME TRANSACTION (spec 6.3,
  *     called out as the number one source of corrupt data).
  *   - The balance/min-2-lines check is a DEFERRED CONSTRAINT TRIGGER, so it
- *     fires at COMMIT, not at the offending statement. `transaction()` must
- *     therefore surface a COMMIT failure as a rejected promise, and the engine
- *     must translate it into `TIDAK_BALANCE` / `MINIMAL_DUA_BARIS`.
+ *     fires at COMMIT, not at the offending statement, so `transaction()` must
+ *     surface a COMMIT failure as a rejected promise and the engine must
+ *     translate it into `TIDAK_BALANCE` / `MINIMAL_DUA_BARIS`.
  *   - The concurrent-post guard needs `SELECT ... FOR UPDATE` on one
  *     connection (spec 6.6.9).
  */
-export interface JurnalDbPort extends JurnalTx {
-  transaction<T>(jalankan: (tx: JurnalTx) => Promise<T>): Promise<T>;
-}
+/** A handle that runs statements on ONE connection inside ONE transaction. */
+export type JurnalTx = QueryRunner;
+
+/** The database port the engine consumes. */
+export type JurnalDbPort = DbPort;
 
 /**
  * Spec 6.3, the business-state half of a reversal: "Kalau jurnal berasal dari
@@ -381,6 +407,42 @@ export interface PembalikStateBisnis {
   ): Promise<void>;
 }
 
+/**
+ * The audit trail, as a port. Structurally satisfied by
+ * `modules/audit`'s `AuditService`, so the composition root passes that
+ * instance straight in and this module never imports it.
+ *
+ * Optional on purpose: the engine must be constructible with a database and
+ * nothing else (the tests do exactly that), and a ledger write must never be
+ * lost because an audit sink was not wired. What IS guaranteed when it is
+ * wired: the audit row is written on the SAME handle as the ledger change, so
+ * a rolled back posting leaves no audit row claiming it happened.
+ *
+ * `ip` and `userAgent` are absent from every entry this engine writes, and
+ * that is the boundary, not an omission: the engine records WHAT happened to
+ * the ledger, the HTTP layer records WHO asked and from where (it is the only
+ * layer that has a request). Rejections are the HTTP layer's to record for the
+ * same reason, and because a refused operation has no transaction left to
+ * write into.
+ */
+export interface PencatatAudit {
+  record(
+    entry: {
+      userId?: string | null;
+      ip?: string | null;
+      userAgent?: string | null;
+      aksi: string;
+      entitas: string;
+      entitasId?: string | null;
+      nilaiLama?: unknown;
+      nilaiBaru?: unknown;
+      hasil: "SUKSES" | "DITOLAK";
+      keterangan?: string | null;
+    },
+    runner?: JurnalTx,
+  ): Promise<string>;
+}
+
 export interface JurnalEngineDeps {
   db: JurnalDbPort;
   /**
@@ -390,6 +452,55 @@ export interface JurnalEngineDeps {
    */
   jam?: () => Date;
   pembalikStateBisnis?: readonly PembalikStateBisnis[];
+  audit?: PencatatAudit;
+}
+
+// ---------------------------------------------------------------------------
+// Combined event posting (spec 7.2 step 8)
+// ---------------------------------------------------------------------------
+
+/**
+ * One component of a combined journal, named by its spec 6.4 event code. The
+ * ACCOUNTS still come from `event_jurnal_mapping` (invariant 11); a component
+ * only says which event it is and how much.
+ */
+export interface KomponenEvent {
+  eventCode: string;
+  nilai: Uang;
+  /** Written to the piutang sub-ledger columns on this component's receivable leg only. */
+  mitraId?: string | null;
+  akadId?: string | null;
+  /** Supplies the leg whose mapping row has `debit_dari_payload = true`. */
+  akunDebitId?: string;
+  /** Supplies the leg whose mapping row has `kredit_dari_payload = true`. */
+  akunKreditId?: string;
+  keterangan?: string | null;
+  dimensi?: DimensiBaris;
+}
+
+export interface PostingGabunganInput {
+  cabangId: string;
+  tanggalTransaksi: string;
+  komponen: KomponenEvent[];
+  keterangan?: string | null;
+  referensiTipe?: string | null;
+  referensiId?: string | null;
+  /** Overrides the cash leg of every component's mapping. */
+  akunKasId?: string | null;
+  kunciIdempotensi?: string | null;
+}
+
+/**
+ * The result of a combined posting. A full `Jurnal`, plus `jurnalId` and
+ * `jumlahBaris`: those two are what a business module needs (it stores the id
+ * on its own row and asserts the line count), and carrying them here makes
+ * this engine structurally satisfy the port `modules/angsuran` declared for it
+ * without an adapter in between. `jurnalId` always equals `id`, and
+ * `jumlahBaris` always equals `baris.length`.
+ */
+export interface JurnalGabungan extends Jurnal {
+  jurnalId: string;
+  jumlahBaris: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -470,8 +581,55 @@ export interface JurnalEngine {
    *
    * The journal is created and POSTED in one transaction, so the caller
    * receives a POSTED journal.
+   *
+   * NO `jurnal.post` CHECK ON THIS PATH, deliberately. Spec 2 gives Maker
+   * "input pencairan, input penerimaan angsuran" while only Approver holds
+   * `jurnal.post`, so gating the automatic journal on `jurnal.post` would mean
+   * no single role can complete a PUMK disbursement: the business action would
+   * be authorised and its ledger consequence refused. An automatic journal is
+   * a consequence of a business action the caller already authorised, not a
+   * second act of posting. What IS still enforced here is branch scope (spec 2
+   * rule 3) and every spec 6.2 validation. Manual posting (`postingJurnal`,
+   * `postingBatch`) keeps demanding `jurnal.post`, which is where the
+   * segregation of duties actually lives.
    */
   postingEvent(eventCode: string, payload: EventPayload, ctx: JurnalContext): Promise<Jurnal>;
+
+  /**
+   * Spec 7.2 step 8: SEVERAL mapped events, ONE journal. A deposit allocation
+   * splits into pokok, jasa administrasi and any kelebihan, and the spec is
+   * explicit that those land as "satu jurnal dengan beberapa baris, bukan tiga
+   * jurnal terpisah". `postingEvent` produces one whole journal per call, so
+   * three components would be three journals; this is the capability that
+   * closes that gap, and `modules/angsuran` declared the shape it needs.
+   *
+   * Three things make it different from `postingEvent`, all of them required
+   * rather than convenient:
+   *
+   *   - IT TAKES THE CALLER'S TRANSACTION. Spec 7.2: "Seluruh langkah 1 sampai
+   *     8 dalam satu transaksi database. Kalau jurnal gagal, alokasi harus
+   *     rollback." So it must not open its own; the schedule updates, the akad
+   *     outstanding and this journal commit together or not at all.
+   *   - LEGS THAT AGREE ARE MERGED. One deposit debits cash once, not once per
+   *     component, so legs sharing account, side and sub-ledger dimensions are
+   *     summed into a single line. A three-component allocation is therefore
+   *     four lines: one cash receipt against piutang, pendapatan jasa and
+   *     kelebihan.
+   *   - IT DOES NOT DEMAND `jurnal.post`. See the note on `postingEvent`.
+   *
+   * Each component's accounts are read from its own `event_jurnal_mapping` row
+   * (one lookup per component), so invariant 11 holds and no account pair
+   * moves into code. Balance is asserted over the assembled lines before the
+   * write, and the deferred database guard is forced to fire before this
+   * method returns rather than at the caller's COMMIT, so a refusal arrives as
+   * a `JurnalError` from HERE instead of as raw driver text from a commit the
+   * caller cannot translate.
+   */
+  postingEventGabungan(
+    input: PostingGabunganInput,
+    tx: JurnalTx,
+    ctx: JurnalContext,
+  ): Promise<JurnalGabungan>;
 }
 
 /**
@@ -488,43 +646,4 @@ export interface JurnalEngine {
  */
 export function createJurnalEngine(deps: JurnalEngineDeps): JurnalEngine {
   return buatEngineJurnal(deps);
-}
-
-// ---------------------------------------------------------------------------
-// Spec 6.1 free-function surface. App-level wiring over the engine the
-// composition root registered (see ./index.ts's createJurnalModule and the
-// note at the bottom of ./service.ts); the engine object, not these, is what
-// the tests drive, for the reason given in the file header.
-// ---------------------------------------------------------------------------
-
-export async function buatJurnal(input: BuatJurnalInput, ctx: JurnalContext): Promise<Jurnal> {
-  return engineJurnalTerpasang().buatJurnal(input, ctx);
-}
-
-export async function verifikasiJurnal(id: string, ctx: JurnalContext): Promise<Jurnal> {
-  return engineJurnalTerpasang().verifikasiJurnal(id, ctx);
-}
-
-export async function postingJurnal(id: string, ctx: JurnalContext): Promise<Jurnal> {
-  return engineJurnalTerpasang().postingJurnal(id, ctx);
-}
-
-export async function batalkanJurnalDraft(id: string, ctx: JurnalContext): Promise<void> {
-  return engineJurnalTerpasang().batalkanJurnalDraft(id, ctx);
-}
-
-export async function reversalJurnal(id: string, alasan: string, ctx: JurnalContext): Promise<Jurnal> {
-  return engineJurnalTerpasang().reversalJurnal(id, alasan, ctx);
-}
-
-export async function postingBatch(ids: string[], ctx: JurnalContext): Promise<Jurnal[]> {
-  return engineJurnalTerpasang().postingBatch(ids, ctx);
-}
-
-export async function postingEvent(
-  eventCode: string,
-  payload: EventPayload,
-  ctx: JurnalContext,
-): Promise<Jurnal> {
-  return engineJurnalTerpasang().postingEvent(eventCode, payload, ctx);
 }

@@ -75,21 +75,33 @@ async function sisipkanDraftTidakBalance(debit: string, kredit: string): Promise
   // real one on purpose: this row is not something the numbering service
   // produced, and giving it a plausible sequence number could collide with one
   // the engine allocates later in the same run.
-  const j = await d.db.query<{ id: string }>(
-    `insert into jurnal (bumn_id, cabang_id, no_jurnal, jenis, tanggal_transaksi, periode_id, keterangan, status)
-     values ($1, $2, $3, 'UMUM', $4, $5, 'draft tidak balance (disisipkan test)', 'DRAFT')
-     returning id`,
-    [d.bumnId, d.cabangId, kunci("RAW-DRAFT"), d.tanggalKini, d.periodeKini.id],
-  );
-  await d.db.query(
-    `insert into jurnal_baris (jurnal_id, urutan, akun_id, debit) values ($1, 1, $2, $3)`,
-    [j[0].id, d.akun.kas.id, debit],
-  );
-  await d.db.query(
-    `insert into jurnal_baris (jurnal_id, urutan, akun_id, kredit) values ($1, 2, $2, $3)`,
-    [j[0].id, d.akun.pendapatanAlokasi.id, kredit],
-  );
-  return j[0].id;
+  //
+  // EXPLICIT BYPASS OF THE ENGINE, SAID OUT LOUD. Since migrations/0020,
+  // Postgres refuses a journal row whose transaction is not marked as coming
+  // through a sanctioned path (invariant 11). This fixture is not the engine,
+  // so it blesses itself as 'seed' rather than impersonating 'engine': the
+  // trigger stamps that onto `jurnal.jalur_posting`, so the row shows up in
+  // `v_jurnal_jalur_bukan_engine` and the bypass is visible in the data
+  // instead of being a comment nobody reads. The whole insert now needs ONE
+  // transaction, because the marker is transaction-scoped by design.
+  return d.db.transaction(async (tx) => {
+    await tx.query(`select set_config('tjsl.jalur_posting', 'seed:' || txid_current(), true)`);
+    const j = await tx.query<{ id: string }>(
+      `insert into jurnal (bumn_id, cabang_id, no_jurnal, jenis, tanggal_transaksi, periode_id, keterangan, status)
+       values ($1, $2, $3, 'UMUM', $4, $5, 'draft tidak balance (disisipkan test)', 'DRAFT')
+       returning id`,
+      [d.bumnId, d.cabangId, kunci("RAW-DRAFT"), d.tanggalKini, d.periodeKini.id],
+    );
+    await tx.query(
+      `insert into jurnal_baris (jurnal_id, urutan, akun_id, debit) values ($1, 1, $2, $3)`,
+      [j[0].id, d.akun.kas.id, debit],
+    );
+    await tx.query(
+      `insert into jurnal_baris (jurnal_id, urutan, akun_id, kredit) values ($1, 2, $2, $3)`,
+      [j[0].id, d.akun.pendapatanAlokasi.id, kredit],
+    );
+    return j[0].id;
+  });
 }
 
 describe("spec 6.6.8 postingBatch atomik, semua atau tidak ada", () => {

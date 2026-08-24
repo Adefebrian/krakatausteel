@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ipInCidr,
+  peerTepercaya,
   isIpAddress,
   loadTrustedProxyConfig,
   normaliseIp,
@@ -188,5 +189,56 @@ describe("loadTrustedProxyConfig", () => {
     expect(() => loadTrustedProxyConfig({ TRUSTED_PROXY_COUNT: "one" })).toThrow(/TRUSTED_PROXY_COUNT/);
     expect(() => loadTrustedProxyConfig({ TRUSTED_PROXY_COUNT: "-1" })).toThrow(/TRUSTED_PROXY_COUNT/);
     expect(() => loadTrustedProxyConfig({ TRUSTED_PROXY_CIDRS: "10.0.0.0/99" })).toThrow(/TRUSTED_PROXY_CIDRS/);
+  });
+});
+
+describe("the peer must be one of our proxies before XFF is read at all", () => {
+  const cidrConfig = { count: 0, cidrs: [parseCidr("127.0.0.0/8")!] };
+  const countConfig = { count: 1, cidrs: [] };
+
+  test("a direct caller cannot name its own address (CIDR mode)", () => {
+    // The demonstrated bypass: peer ::1, TRUSTED_PROXY_CIDRS=127.0.0.0/8, and
+    // a bare forged header used to resolve to the forged value.
+    expect(resolveClientIp({ forwardedFor: FORGED, socketAddress: "::1" }, cidrConfig)).toBe("::1");
+    // Nor by appending a hop that looks like one of ours.
+    expect(
+      resolveClientIp({ forwardedFor: `${FORGED}, 127.0.0.1`, socketAddress: "::1" }, cidrConfig),
+    ).toBe("::1");
+  });
+
+  test("a caller from a public address cannot name its own address (count mode)", () => {
+    // No CIDR list configured, so the implicit allowlist is private/loopback.
+    // A request straight off the internet is not a proxy of ours.
+    expect(
+      resolveClientIp({ forwardedFor: `${FORGED}, ${REAL}`, socketAddress: "198.51.100.200" }, countConfig),
+    ).toBe("198.51.100.200");
+  });
+
+  test("the real production shape still works: private peer, one hop", () => {
+    // Caddy on the docker bridge, forwarding "<client's own header>, <client>".
+    expect(
+      resolveClientIp({ forwardedFor: `${FORGED}, ${REAL}`, socketAddress: "172.18.0.4" }, countConfig),
+    ).toBe(REAL);
+    expect(
+      resolveClientIp({ forwardedFor: `${FORGED}, ${REAL}`, socketAddress: "127.0.0.1" }, cidrConfig),
+    ).toBe(REAL);
+  });
+
+  test("peerTepercaya: explicit CIDRs win, otherwise private ranges", () => {
+    expect(peerTepercaya("127.0.0.1", { count: 1, cidrs: [] })).toBe(true);
+    expect(peerTepercaya("10.1.2.3", { count: 1, cidrs: [] })).toBe(true);
+    expect(peerTepercaya("172.18.0.4", { count: 1, cidrs: [] })).toBe(true);
+    expect(peerTepercaya("::1", { count: 1, cidrs: [] })).toBe(true);
+    expect(peerTepercaya("8.8.8.8", { count: 1, cidrs: [] })).toBe(false);
+    // An explicit list replaces the default rather than adding to it.
+    expect(peerTepercaya("10.1.2.3", { count: 0, cidrs: [parseCidr("172.16.0.0/12")!] })).toBe(false);
+    expect(peerTepercaya("172.18.0.4", { count: 0, cidrs: [parseCidr("172.16.0.0/12")!] })).toBe(true);
+  });
+
+  test("an unknown peer is trusted, which only happens off a real socket", () => {
+    // `app.request()` in a test has no peer. Under Bun.serve it is always
+    // known, so this is not reachable by anything an attacker can send.
+    expect(peerTepercaya(null, { count: 1, cidrs: [] })).toBe(true);
+    expect(resolveClientIp({ forwardedFor: `${FORGED}, ${REAL}`, socketAddress: null }, countConfig)).toBe(REAL);
   });
 });

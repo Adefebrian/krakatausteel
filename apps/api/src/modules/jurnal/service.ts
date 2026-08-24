@@ -32,6 +32,7 @@
 // reversal must revert business state in the SAME transaction (spec 6.3 calls
 // skipping this the number one source of corrupt data), and the balance guard
 // is a DEFERRED constraint trigger that only raises at COMMIT.
+import { canonicalPermission } from "../auth";
 import { createNomorService } from "../nomor";
 import type {
   BarisJurnal,
@@ -44,9 +45,13 @@ import type {
   JurnalContext,
   JurnalEngine,
   JurnalEngineDeps,
+  JurnalGabungan,
   JurnalTx,
   KodeJurnal,
+  KomponenEvent,
   PembalikStateBisnis,
+  PencatatAudit,
+  PostingGabunganInput,
   Uang,
 } from "./contract";
 import { adalahJurnalError, bersihkanKesalahan, tolak } from "./kesalahan";
@@ -74,6 +79,7 @@ const PERMISSION = {
   VERIFIKASI: "jurnal.verify",
   POSTING: "jurnal.post",
   HAPUS: "jurnal.delete",
+  REVERSAL: "jurnal.reversal",
 } as const;
 
 const KONFIGURASI_KATEGORI_PINBUK = { grup: "JURNAL", kunci: "kategori_kegiatan_pinbuk" };
@@ -109,9 +115,27 @@ function tanggalIso(waktu: Date): string {
   return waktu.toISOString().slice(0, 10);
 }
 
+/**
+ * Resolves a permission code through the auth catalogue, so a typo
+ * ("jurnal.pos") is a loud programming error at the call rather than a 403
+ * that reads like a policy decision and locks everyone out.
+ */
+function izinKanonik(permission: string): string {
+  if (canonicalPermission(permission) !== null) return permission;
+  throw new Error(
+    `Permission "${permission}" tidak dikenal katalog auth. Tambahkan ke PERMISSIONS ` +
+      "di apps/api/src/modules/auth/permissions.ts sebelum dipakai sebagai penjaga jurnal.",
+  );
+}
+
 function wajibPunya(ctx: JurnalContext, permission: string): void {
-  if (!ctx.permissions.includes(permission)) {
-    throw tolak("TIDAK_BERWENANG", { permission });
+  const kode = izinKanonik(permission);
+  // Compared against the raw code AND its canonical form: a context assembled
+  // from RBAC rows carries canonical codes, a context assembled from a spec
+  // spelling may carry an alias.
+  const kanonik = canonicalPermission(kode) ?? kode;
+  if (!ctx.permissions.includes(kode) && !ctx.permissions.includes(kanonik)) {
+    throw tolak("TIDAK_BERWENANG", { permission: kanonik });
   }
 }
 
@@ -138,10 +162,47 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
   const repo: JurnalRepo = createJurnalRepo();
   const jam = deps.jam ?? (() => new Date());
   const pembalikTerdaftar: readonly PembalikStateBisnis[] = deps.pembalikStateBisnis ?? [];
+  const audit: PencatatAudit | undefined = deps.audit;
   // The port is structurally the core DbPort (query + transaction), so the
   // numbering service takes it as-is. Every allocation below passes `{ tx }`,
   // which is what makes the number and the journal commit together.
   const nomor = createNomorService({ db });
+
+  /**
+   * One audit row per ledger change, on the SAME handle as the change, so a
+   * rolled back posting cannot leave a row claiming it happened. Successes
+   * only, and no ip/userAgent: see the note on `PencatatAudit`.
+   */
+  async function catat(
+    tx: JurnalTx,
+    aksi: string,
+    jurnal: Jurnal,
+    ctx: JurnalContext,
+    tambahan: { nilaiLama?: unknown; keterangan?: string | null } = {},
+  ): Promise<void> {
+    if (!audit) return;
+    await audit.record(
+      {
+        userId: ctx.userId,
+        aksi,
+        entitas: "jurnal",
+        entitasId: jurnal.id,
+        nilaiLama: tambahan.nilaiLama,
+        nilaiBaru: {
+          noJurnal: jurnal.noJurnal,
+          jenis: jurnal.jenis,
+          status: jurnal.status,
+          tanggalTransaksi: jurnal.tanggalTransaksi,
+          totalDebit: jurnal.totalDebit,
+          totalKredit: jurnal.totalKredit,
+          jumlahBaris: jurnal.baris.length,
+        },
+        hasil: "SUKSES",
+        keterangan: tambahan.keterangan ?? null,
+      },
+      tx,
+    );
+  }
 
   // -------------------------------------------------------------------------
   // Reads that are configuration, not code
@@ -506,13 +567,22 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
   /**
    * DRAFT -> POSTED for one journal, inside a caller-owned transaction.
    *
-   * The unlocked pre-read before the lock is what separates "this journal was
-   * never postable" from "someone else posted it while I waited": both callers
-   * of a race see DRAFT in the pre-read, exactly one of them sees DRAFT again
-   * after acquiring the row lock, and the loser gets POSTING_BENTROK rather
-   * than the misleading JURNAL_TIDAK_DRAFT (spec 6.6.9). A member of a batch
-   * that was already POSTED long before, on the other hand, fails the pre-read
-   * and is reported as JURNAL_TIDAK_DRAFT (spec 6.6.8).
+   * WHAT IS GUARANTEED: at most one POSTED outcome. The row lock serialises the
+   * contenders and the UPDATE carries `status = 'DRAFT'` in its own predicate,
+   * so even if the lock were lost the second write would match no row. Lines
+   * are never duplicated, totals never doubled.
+   *
+   * WHAT IS BEST EFFORT: the LABEL on the loser. The unlocked pre-read before
+   * the lock is what separates "this journal was never postable"
+   * (JURNAL_TIDAK_DRAFT, which is what spec 6.6.8 wants for a batch member
+   * that was posted an hour ago) from "someone else posted it while I waited"
+   * (POSTING_BENTROK, spec 6.6.9). Under READ COMMITTED that discrimination is
+   * a heuristic, not a proof: a contender whose transaction begins entirely
+   * after the winner commits sees POSTED in the pre-read and is told
+   * JURNAL_TIDAK_DRAFT, which for it is the truth as it can observe it.
+   * Raising the isolation level would move the failure to a serialization
+   * error without making the label more informative, so the honest position is
+   * that the state is exact and the wording is advisory.
    */
   async function postingSatu(tx: JurnalTx, id: string, ctx: JurnalContext): Promise<Jurnal> {
     const pra = await repo.jurnal(tx, id);
@@ -550,7 +620,221 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
 
     const berhasil = await repo.tandaiPosted(tx, id, ctx.userId, jam().toISOString());
     if (!berhasil) throw tolak("POSTING_BENTROK", { id });
-    return bacaJurnal(tx, id);
+    const posted = await bacaJurnal(tx, id);
+    await catat(tx, "jurnal.post", posted, ctx, { nilaiLama: { status: "DRAFT" } });
+    return posted;
+  }
+
+  /**
+   * Spec 7.2 step 8: SEVERAL mapped events, ONE journal.
+   *
+   * WHY LEGS ARE MERGED. A deposit is one cash movement. Posting each
+   * component as its own two-line journal would produce three journals (what
+   * the spec forbids); assembling them without merging would produce one
+   * journal that debits cash three times for a single receipt. So legs that
+   * agree on account, side and sub-ledger dimensions are summed into one line,
+   * which makes a three-component allocation read the way an accountant writes
+   * it: one cash receipt against piutang, pendapatan jasa administrasi and
+   * kelebihan. Merging only ever combines the SAME SIDE of the SAME account:
+   * netting opposite sides would change the journal's gross totals and could
+   * produce a zero line, which the schema rejects outright.
+   *
+   * WHY THIS CANNOT SILENTLY UNBALANCE. Every component contributes a debit
+   * and a credit of its own value, so the assembled set balances by
+   * construction, and merging preserves sums exactly (BigInt minor units, no
+   * float anywhere). The balance is nevertheless ASSERTED over the assembled
+   * lines, through the same spec 6.2 validation every other path uses, because
+   * "it cannot happen" is not a reason to skip the check that would catch a
+   * future mapping row that resolves both legs to one account, or a bug in the
+   * merge above.
+   */
+  async function tulisGabungan(
+    tx: JurnalTx,
+    input: PostingGabunganInput,
+    ctx: JurnalContext,
+  ): Promise<JurnalGabungan> {
+    const komponen: readonly KomponenEvent[] = input.komponen ?? [];
+
+    // One mapping read per component. The accounts behind every component come
+    // from `event_jurnal_mapping` (invariant 11, ADR 0004), so an accountant
+    // repointing a row changes the combined journal too, with no redeploy.
+    const terpetakan: Array<{
+      komponen: KomponenEvent;
+      jenis: JenisJurnal;
+      akunDebit: string;
+      akunKredit: string;
+    }> = [];
+    for (const k of komponen) {
+      const map = await repo.mappingEvent(tx, ctx.bumnId, k.eventCode);
+      if (!map) throw tolak("EVENT_MAPPING_TIDAK_DITEMUKAN", { eventCode: k.eventCode });
+      const akunDebit = map.debit_dari_payload ? k.akunDebitId : map.akun_debit_id;
+      const akunKredit = map.kredit_dari_payload ? k.akunKreditId : map.akun_kredit_id;
+      if (!akunDebit || !akunKredit) {
+        // A component that can only supply one leg cannot be part of a
+        // balanced journal, so it is refused before anything is assembled.
+        throw tolak("EVENT_PAYLOAD_TIDAK_LENGKAP", {
+          eventCode: k.eventCode,
+          butuhDebit: map.debit_dari_payload && !k.akunDebitId,
+          butuhKredit: map.kredit_dari_payload && !k.akunKreditId,
+        });
+      }
+      terpetakan.push({ komponen: k, jenis: map.jenis_jurnal, akunDebit, akunKredit });
+    }
+
+    const idAkun = new Set<string>();
+    for (const t of terpetakan) {
+      idAkun.add(t.akunDebit);
+      idAkun.add(t.akunKredit);
+    }
+    if (input.akunKasId) idAkun.add(input.akunKasId);
+    const akun = petaAkun(await repo.akun(tx, ctx.bumnId, [...idAkun]));
+    const akunPiutang = await akunDariMapping(tx, ctx.bumnId, EVENT_PIUTANG_MITRA, "debit");
+
+    interface Kaki {
+      akunId: string;
+      sisi: "D" | "K";
+      sen: bigint;
+      keterangan: string | null;
+      mitraId: string | null;
+      akadId: string | null;
+      dimensi: DimensiBaris;
+    }
+
+    const kaki: Kaki[] = [];
+    for (const t of terpetakan) {
+      const k = t.komponen;
+      let debitId = t.akunDebit;
+      let kreditId = t.akunKredit;
+      // The cash account chosen on the form overrides the cash leg of every
+      // component's mapping; a non-cash leg always stays as mapped.
+      if (input.akunKasId) {
+        if (akun.get(debitId)?.is_kas === true) debitId = input.akunKasId;
+        else if (akun.get(kreditId)?.is_kas === true) kreditId = input.akunKasId;
+      }
+
+      const nilai = bacaUang(k.nilai);
+      if (nilai.bentuk === "rusak") {
+        throw tolak("NILAI_BUKAN_DESIMAL", { eventCode: k.eventCode, nilai: k.nilai });
+      }
+      // Checked per component, BEFORE the merge, not left to the assembled
+      // journal: a negative component would cancel against a positive one on
+      // the same account and side, and the merged line would then be refused
+      // for being zero (validation 6.2.3) while the caller's real mistake, a
+      // negative amount, went unnamed.
+      if (nilai.negatif) {
+        throw tolak("NILAI_NEGATIF", { eventCode: k.eventCode, nilai: k.nilai });
+      }
+
+      const adaSubLedger = Boolean(k.mitraId || k.akadId);
+      if (adaSubLedger && debitId !== akunPiutang && kreditId !== akunPiutang) {
+        throw tolak("DIMENSI_PIUTANG_SALAH_AKUN", { eventCode: k.eventCode, akunPiutang });
+      }
+
+      const dimensi = bersihkanDimensi(k.dimensi);
+      const kasDebit = akun.get(debitId)?.is_kas === true;
+      const kasKredit = akun.get(kreditId)?.is_kas === true;
+      const keterangan = k.keterangan ?? null;
+
+      // The piutang sub-ledger dimensions go on the receivable leg ONLY. On the
+      // cash leg as well, v_rekonsiliasi_piutang would net the two legs of
+      // every component to zero per akad and the most important reconciliation
+      // in the system would read "balanced" forever.
+      kaki.push({
+        akunId: debitId,
+        sisi: "D",
+        sen: nilai.sen,
+        keterangan,
+        mitraId: adaSubLedger && debitId === akunPiutang ? (k.mitraId ?? null) : null,
+        akadId: adaSubLedger && debitId === akunPiutang ? (k.akadId ?? null) : null,
+        dimensi: !kasDebit || kasKredit ? dimensi : {},
+      });
+      kaki.push({
+        akunId: kreditId,
+        sisi: "K",
+        sen: nilai.sen,
+        keterangan,
+        mitraId: adaSubLedger && kreditId === akunPiutang ? (k.mitraId ?? null) : null,
+        akadId: adaSubLedger && kreditId === akunPiutang ? (k.akadId ?? null) : null,
+        dimensi: !kasKredit || kasDebit ? dimensi : {},
+      });
+    }
+
+    // Group in first-appearance order, so the cash receipt reads first and the
+    // line order is deterministic for a given component order.
+    const kunciKaki = (k: Kaki): string =>
+      [k.akunId, k.sisi, k.mitraId ?? "", k.akadId ?? "", JSON.stringify(k.dimensi)].join("|");
+    const grup = new Map<string, Kaki[]>();
+    for (const k of kaki) {
+      const kunci = kunciKaki(k);
+      const ada = grup.get(kunci);
+      if (ada) ada.push(k);
+      else grup.set(kunci, [k]);
+    }
+
+    const baris: BarisJurnalInput[] = [...grup.values()].map((anggota) => {
+      const total = anggota.reduce((a, x) => a + x.sen, 0n);
+      const pertama = anggota[0];
+      // A merged line cannot claim one component's narrative, so it keeps the
+      // description only when every member agrees; the header carries the rest.
+      const seragam = anggota.every((x) => x.keterangan === pertama.keterangan);
+      return {
+        akunId: pertama.akunId,
+        ...(pertama.sisi === "D" ? { debit: dariSen(total) } : { kredit: dariSen(total) }),
+        keterangan: seragam ? pertama.keterangan : null,
+        mitraId: pertama.mitraId,
+        akadId: pertama.akadId,
+        dimensi: pertama.dimensi,
+      };
+    });
+
+    // The document type comes from the mapping rows, not from this code. A
+    // unanimous set keeps its type; a mixed set is filed as OTOMATIS, which is
+    // literally what a machine-made combined journal is.
+    const jenisTerpakai = new Set(terpetakan.map((t) => t.jenis));
+    const jenis: JenisJurnal = jenisTerpakai.size === 1 ? [...jenisTerpakai][0] : "OTOMATIS";
+    const ringkasEvent = komponen.map((k) => k.eventCode).join(" + ");
+
+    const inputJurnal: BuatJurnalInput = {
+      cabangId: input.cabangId,
+      jenis,
+      tanggalTransaksi: input.tanggalTransaksi,
+      keterangan: input.keterangan ?? ringkasEvent,
+      referensiTipe: input.referensiTipe ?? null,
+      referensiId: input.referensiId ?? null,
+      baris,
+      isAutoGenerated: true,
+      kunciIdempotensi: input.kunciIdempotensi ?? null,
+    };
+    const hasil = await validasi(tx, inputJurnal, ctx, { jenis, manual: false });
+    const id = await tulisJurnal(
+      tx,
+      ctx,
+      {
+        cabangId: inputJurnal.cabangId,
+        jenis,
+        tanggalTransaksi: inputJurnal.tanggalTransaksi,
+        periode: hasil.periode,
+        keterangan: inputJurnal.keterangan ?? null,
+        referensiTipe: inputJurnal.referensiTipe ?? null,
+        referensiId: inputJurnal.referensiId ?? null,
+        isAutoGenerated: true,
+        reversalOfJurnalId: null,
+        kunciIdempotensi: inputJurnal.kunciIdempotensi ?? null,
+      },
+      hasil.baris,
+    );
+    const terposting = await repo.tandaiPosted(tx, id, ctx.userId, jam().toISOString());
+    if (!terposting) throw tolak("POSTING_BENTROK", { id });
+
+    // The transaction is the caller's, so its COMMIT is out of reach of this
+    // module's error translation. Force the deferred guard to speak now, while
+    // there is still a `try` around it that can turn a trigger string into a
+    // domain code.
+    await repo.paksaCekBalance(tx);
+
+    const jurnal = await bacaJurnal(tx, id);
+    await catat(tx, "jurnal.post_gabungan", jurnal, ctx, { keterangan: ringkasEvent });
+    return { ...jurnal, jurnalId: jurnal.id, jumlahBaris: jurnal.baris.length };
   }
 
   // -------------------------------------------------------------------------
@@ -580,7 +864,9 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
             },
             hasil.baris,
           );
-          return bacaJurnal(tx, id);
+          const dibuat = await bacaJurnal(tx, id);
+          await catat(tx, "jurnal.create", dibuat, ctx);
+          return dibuat;
         }),
       );
     },
@@ -626,7 +912,15 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
               ctx.userId,
             );
           }
-          return bacaJurnal(tx, id);
+          const diubah = await bacaJurnal(tx, id);
+          await catat(tx, "jurnal.update", diubah, ctx, {
+            nilaiLama: {
+              totalDebit: ada.total_debit,
+              totalKredit: ada.total_kredit,
+              version: ada.version,
+            },
+          });
+          return diubah;
         }),
       );
     },
@@ -647,7 +941,9 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
           }
           const berhasil = await repo.tandaiVerified(tx, id, ctx.userId, jam().toISOString());
           if (!berhasil) throw tolak("JURNAL_TIDAK_DRAFT", { id });
-          return bacaJurnal(tx, id);
+          const terverifikasi = await bacaJurnal(tx, id);
+          await catat(tx, "jurnal.verify", terverifikasi, ctx);
+          return terverifikasi;
         }),
       );
     },
@@ -670,15 +966,23 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
           if (!dalamScope(ctx, ada.cabang_id)) {
             throw tolak("CABANG_DILUAR_SCOPE", { cabangId: ada.cabang_id });
           }
+          const sebelum = await bacaJurnal(tx, id);
           const berhasil = await repo.softDeleteDraft(tx, id, ctx.userId, jam().toISOString());
           if (!berhasil) throw tolak("JURNAL_TIDAK_DRAFT", { id });
+          await catat(tx, "jurnal.cancel", sebelum, ctx, {
+            keterangan: "DRAFT dibatalkan lewat soft delete",
+          });
           return null;
         }),
       );
     },
 
     async reversalJurnal(id, alasan, ctx) {
-      wajibPunya(ctx, PERMISSION.POSTING);
+      // `jurnal.reversal`, not `jurnal.post`: reversing a posted journal is its
+      // own right in the auth catalogue and drives its own nav item. Checking
+      // the posting right instead would leave `jurnal.reversal` granting
+      // nothing and hand the power to reverse to everyone who can post.
+      wajibPunya(ctx, PERMISSION.REVERSAL);
       const alasanBersih = (alasan ?? "").trim();
       if (alasanBersih.length === 0) throw tolak("ALASAN_WAJIB", { id });
 
@@ -777,7 +1081,16 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
             await pembalik.balikkan({ jurnalAsli, alasan: alasanBersih }, tx, ctx);
           }
 
-          return bacaJurnal(tx, idReversal);
+          const reversal = await bacaJurnal(tx, idReversal);
+          await catat(tx, "jurnal.reversal", reversal, ctx, {
+            nilaiLama: {
+              jurnalAsliId: jurnalAsli.id,
+              noJurnalAsli: jurnalAsli.noJurnal,
+              statusAsliSebelum: "POSTED",
+            },
+            keterangan: alasanBersih,
+          });
+          return reversal;
         }),
       );
     },
@@ -785,12 +1098,20 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
     async postingBatch(ids, ctx) {
       wajibPunya(ctx, PERMISSION.POSTING);
       if (ids.length === 0) return [];
+      // Locks are taken in SORTED id order, not in the order the UI happened to
+      // list them. Two overlapping batches selected in opposite orders would
+      // otherwise each hold a row the other needs, and Postgres would resolve
+      // it by killing one with a deadlock rather than by refusing it cleanly.
+      // Duplicates are collapsed: the same journal cannot be posted twice in
+      // one batch, and reporting it as a conflict with itself would be noise.
+      const unik = [...new Set(ids)];
+      const urutKunci = [...unik].sort();
       return bersihkanKesalahan(() =>
         db.transaction(async (tx) => {
-          const hasil: Jurnal[] = [];
-          for (const id of ids) {
+          const perId = new Map<string, Jurnal>();
+          for (const id of urutKunci) {
             try {
-              hasil.push(await postingSatu(tx, id, ctx));
+              perId.set(id, await postingSatu(tx, id, ctx));
             } catch (err) {
               if (adalahJurnalError(err)) {
                 // One transaction wraps the whole batch, so throwing here rolls
@@ -806,13 +1127,22 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
               throw err;
             }
           }
-          return hasil;
+          // Returned in the caller's order, which is the order their screen is
+          // showing; the sort above is a locking discipline, not an output one.
+          return unik.map((id) => perId.get(id)!);
         }),
       );
     },
 
     async postingEvent(eventCode, payload, ctx) {
-      wajibPunya(ctx, PERMISSION.POSTING);
+      // NO `jurnal.post` GATE HERE. Spec 2 gives Maker "input pencairan, input
+      // penerimaan angsuran" while only Approver holds `jurnal.post`, so
+      // demanding it would mean no single role can complete a PUMK
+      // disbursement: the business action authorised, its ledger consequence
+      // refused. An automatic journal is the consequence of an action the
+      // caller already authorised. Branch scope (spec 2 rule 3) and every
+      // spec 6.2 validation still apply, and manual posting still demands
+      // `jurnal.post`, which is where segregation of duties actually lives.
       return bersihkanKesalahan(() =>
         db.transaction(async (tx) => {
           const map = await repo.mappingEvent(tx, ctx.bumnId, eventCode);
@@ -913,37 +1243,19 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
           );
           const terposting = await repo.tandaiPosted(tx, id, ctx.userId, jam().toISOString());
           if (!terposting) throw tolak("POSTING_BENTROK", { id });
-          return bacaJurnal(tx, id);
+          const jurnal = await bacaJurnal(tx, id);
+          await catat(tx, "jurnal.post_event", jurnal, ctx, { keterangan: eventCode });
+          return jurnal;
         }),
       );
     },
+
+    postingEventGabungan(input, tx, ctx) {
+      // Same stance as postingEvent on permissions, and for the same reason.
+      // No transaction of its own: spec 7.2 requires steps 1 to 8 to be one
+      // atomic unit, so the caller owns the boundary and a failure here must
+      // take their allocation down with it.
+      return bersihkanKesalahan(() => tulisGabungan(tx, input, ctx));
+    },
   };
-}
-
-// ---------------------------------------------------------------------------
-// The engine the spec 6.1 free functions run on
-// ---------------------------------------------------------------------------
-//
-// Spec 6.1 names seven free functions. They cannot build their own engine: the
-// DB port is an adapter, and a module never reaches for an adapter (that is
-// core/app.ts's job, see tools/check-boundaries.ts). So the composition root
-// registers the wired engine once, through createJurnalModule in ./index.ts,
-// and the free functions delegate to it. Calling one before the app is wired is
-// a programming error and says so, rather than quietly building a second engine
-// on a second pool.
-
-let engineTerpasang: JurnalEngine | null = null;
-
-export function pasangEngineJurnal(engine: JurnalEngine): void {
-  engineTerpasang = engine;
-}
-
-export function engineJurnalTerpasang(): JurnalEngine {
-  if (!engineTerpasang) {
-    throw new Error(
-      "Engine jurnal belum dipasang. Panggil createJurnalModule({ db }) saat menyusun aplikasi " +
-        "(apps/api/src/core/app.ts) sebelum memakai fungsi bebas spec 6.1.",
-    );
-  }
-  return engineTerpasang;
 }

@@ -7,7 +7,7 @@
 // needs them.
 import { useMemo, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
-import { formatCount, formatDate, formatMoney, formatPercent } from "./money";
+import { formatCount, formatDate, formatMoney, formatPercent, UNPARSEABLE } from "./money";
 
 export type ColumnType = "text" | "money" | "count" | "percent" | "date" | "node";
 
@@ -51,16 +51,36 @@ export interface DataTableProps<Row> {
 
 const NUMERIC_TYPES: ReadonlySet<ColumnType> = new Set(["money", "count", "percent"]);
 
+/**
+ * A figure that could not be parsed is shown as a marker, never as a number,
+ * and carries the value that actually arrived in `title` so the person who has
+ * to chase it can see it without opening a console. `formatMoney` throws on
+ * this outside production, so reaching here at all means a production build.
+ */
+function invalidCell(raw: unknown): ReactNode {
+  return (
+    <span className="cell-invalid" title={`Nilai tidak dapat dibaca: ${String(raw)}`}>
+      {UNPARSEABLE}
+    </span>
+  );
+}
+
 function cellText<Row>(column: Column<Row>, row: Row): ReactNode {
   if (column.render) return column.render(row);
   const raw = (row as Record<string, unknown>)[column.key];
   switch (column.type) {
     case "money":
-      return formatMoney(raw as number | string | null | undefined);
     case "count":
-      return formatCount(raw as number | string | null | undefined);
-    case "percent":
-      return formatPercent(raw as number | string | null | undefined);
+    case "percent": {
+      const value = raw as number | string | null | undefined;
+      const formatted =
+        column.type === "money"
+          ? formatMoney(value)
+          : column.type === "count"
+            ? formatCount(value)
+            : formatPercent(value);
+      return formatted === UNPARSEABLE ? invalidCell(raw) : formatted;
+    }
     case "date":
       return formatDate(raw as string | null | undefined);
     default:

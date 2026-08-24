@@ -122,9 +122,9 @@ describe("spec 8.4 check 10 rekonsiliasi sub ledger piutang", () => {
     // always returned zero would look like a permanently balanced ledger.
     // Deliberately written against whatever the ledger currently holds rather
     // than against a fixed number, so it neither depends on the test before it
-    // nor changes meaning once the engine starts posting. It is the ONE test in
-    // this folder that passes today, because it exercises
-    // migrations/0015_view_integritas.sql and not the engine.
+    // nor changes meaning once the engine starts posting. It exercises
+    // migrations/0015_view_integritas.sql rather than the engine, which is why
+    // it was the one test in this folder that passed before the engine existed.
     const awal = await rekonsiliasi();
     await setelSubLedger(jumlahUang(awal.saldo_buku_besar, rp(1_000_000)));
     const rek = await rekonsiliasi();

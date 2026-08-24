@@ -60,7 +60,6 @@ jobs:
       TEST_DATABASE_URL: postgres://tjsl:tjsl@localhost:5432/tjsl_test
       DATABASE_URL: postgres://tjsl:tjsl@localhost:5432/tjsl_test
       REDIS_URL: redis://localhost:6379
-      SESSION_SECRET: ci-only-not-a-real-secret
       AI_ENABLED: "false"
       OPENAI_API_KEY: ""
       CORS_ORIGINS: http://localhost:3000

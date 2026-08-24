@@ -32,23 +32,30 @@ import { Hono } from "hono";
 import { createDbAdapter } from "./adapters/db";
 import { createKeyValueAdapter } from "./adapters/keyvalue";
 import { createRateLimiterAdapter } from "./adapters/ratelimit";
-import { createRedisCacheAdapter } from "./adapters/redis";
 import { applyHardening } from "./hardening";
-import { errorHandler } from "./http";
+import { createErrorHandler } from "./http";
 import type { DbPort } from "./ports/db";
 import type { KeyValueStorePort } from "./ports/keyvalue";
 import type { RateLimiterPort } from "./ports/ratelimit";
 import type { CachePort } from "./ports/redis";
 import { createAuditModule, createAuditService, type AuditService } from "../modules/audit";
-import { createAuthModule } from "../modules/auth";
-import { createExampleModule } from "../modules/example";
+import { auditActor, createAuthModule } from "../modules/auth";
+import { createAngsuranModule } from "../modules/angsuran";
+import { createJurnalModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
 import { createOrganisasiModule } from "../modules/organisasi";
+// modules/example is deliberately NOT imported: see the note above the route
+// table below.
 
 export interface AppOverrides {
   db?: DbPort;
   kv?: KeyValueStorePort;
+  /**
+   * Fail-open cache port. No module wired here needs one yet (konfigurasi uses
+   * the strict KeyValueStorePort on purpose), so this is accepted and passed
+   * through for the first module that does.
+   */
   cache?: CachePort;
   loginLimiter?: RateLimiterPort;
   audit?: AuditService;
@@ -73,7 +80,6 @@ export function createApp(overrides: AppOverrides = {}) {
 
   const base = new Hono();
   applyHardening(base);
-  base.onError(errorHandler);
 
   const auth = createAuthModule({
     db,
@@ -91,6 +97,12 @@ export function createApp(overrides: AppOverrides = {}) {
   // Registered before any route, so it applies to routes written later too.
   base.use("*", auth.guards.enforceReadOnlyRoles);
 
+  // AFTER auth exists, because the handler audits authorisation refusals and
+  // needs both the audit service and the acting principal to do it. Every 403
+  // thrown from a service (branch scope) or from the Origin guard lands here,
+  // not just the ones the guard chain makes itself.
+  base.onError(createErrorHandler({ audit, actor: auditActor }));
+
   const konfigurasi = createKonfigurasiModule({
     db,
     kv,
@@ -103,24 +115,54 @@ export function createApp(overrides: AppOverrides = {}) {
   // No HTTP surface by design (see modules/nomor/index.ts); exposed here so
   // later phases and the tests get the same instance.
   const nomor = createNomorService({ db });
+  // Also no HTTP surface yet: Fase 1 is the engine, the journal screens of
+  // spec 9 add routes later. Wired here so the business modules of Fase 3
+  // onward reach the ledger through this one engine instance, which is what
+  // invariant 11 (a single posting path) actually rests on.
+  // `audit` is the same instance auth and konfigurasi use, so a posting and the
+  // login that led to it land in one audit_log stream. The engine writes its
+  // rows on the transaction that changed the ledger, so a rolled back posting
+  // leaves no row claiming it happened.
+  const jurnal = createJurnalModule({ db, audit });
+  // The installment engine reaches the ledger ONLY through the journal engine
+  // instance above, never by writing jurnal rows itself. That is invariant 11,
+  // and migration 0020's posting-path trigger refuses any other route.
+  const angsuran = createAngsuranModule({ db, jurnal: jurnal.engine });
 
+  // modules/example IS NOT MOUNTED, and must not be.
+  //
+  // It is the repo template's reference module and it is unauthenticated by
+  // design, which is fine as a pattern and dangerous as a live route. Mounted,
+  // it gave an anonymous caller two primitives against the real stack:
+  //   - POST /example appended to an unbounded in-process array (memory growth
+  //     with no ceiling and no auth);
+  //   - GET /example/:id/views ran INCR on a caller-chosen Redis key with NO
+  //     expiry, in the same Redis that holds `tjsl:sess:*`. Enough of those and
+  //     Redis is full, `sessions.create` starts throwing, and because the auth
+  //     limiter is fail-closed nobody can log in at all. An unauthenticated
+  //     total auth outage.
+  // The folder stays in the tree as the module-anatomy example that
+  // tools/check-boundaries.ts and its own test exercise. Wiring it into the
+  // shipped app is what was wrong.
   const app = base
     .get("/health", (c) => c.json({ ok: true }))
     .route("/auth", auth.routes)
     .route("/organisasi", organisasi.routes)
     .route("/konfigurasi", konfigurasi.routes)
-    .route("/audit", auditModule.routes)
-    .route("/example", createExampleModule({ cache: overrides.cache ?? createRedisCacheAdapter() }));
+    .route("/audit", auditModule.routes);
 
   return {
     app,
     db,
     kv,
+    cache: overrides.cache,
     audit,
     auth,
     konfigurasi: konfigurasi.service,
     organisasi: organisasi.service,
     nomor,
+    jurnal: jurnal.engine,
+    angsuran: angsuran.engine,
   };
 }
 
@@ -131,4 +173,6 @@ export const auth = instance.auth;
 export const konfigurasi = instance.konfigurasi;
 export const audit = instance.audit;
 export const nomor = instance.nomor;
+export const jurnal = instance.jurnal;
+export const angsuran = instance.angsuran;
 export type AppType = typeof app;

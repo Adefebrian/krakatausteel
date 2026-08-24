@@ -13,13 +13,44 @@ bun run db:seed:dev    # ke DATABASE_URL (tjsl_dev), untuk demo di lokal
 ```
 
 Seed bersifat **idempoten**: dijalankan dua kali hasilnya sama, dan nilai
-konfigurasi yang sudah diubah operator tidak ditimpa. Isinya tiga bagian:
+konfigurasi yang sudah diubah operator tidak ditimpa.
+
+Dua pagar pada bagian demo, karena kredensial di bawah ini publik:
+
+1. `seedDemo` **menolak** menulis ke database yang namanya tidak berakhiran
+   `_dev`, `_test`, `_local`, atau `_demo`. Nama database ikut dengan targetnya,
+   jadi URL produksi tidak bisa lolos apa pun flag yang dipakai operator.
+2. `seedDemo` **menolak menimpa akun yang bukan miliknya**. Username seperti
+   `maker` atau `auditor` adalah kata biasa dan bisa saja sudah dipakai orang
+   nyata; kalau baris dengan username itu ada dan emailnya bukan
+   `@demo.tjsl.local`, seed berhenti dengan error, bukan mengganti password dan
+   role orang tersebut.
+
+Isinya:
 
 | Modul | Isi | Kapan dipakai |
 |---|---|---|
-| `seedRbac` | 39 permission, 6 role sistem, dan grant antar keduanya | selalu |
+| `seedRbac` | 42 permission, 6 role sistem, dan grant antar keduanya | selalu |
 | `seedKonfigurasiTambahan` | 9 kunci konfigurasi kapabilitas yang tidak dibawa migrasi (lihat `docs/BUILD-PLAN.md`) | selalu |
 | `seedDemo` | 1 BUMN, 1 pusat + 2 cabang, 7 akun, 1 mitra + akun portal, 1 periode berjalan | **hanya demo** |
+| `seedCoaDanEventMapping` | COA inti (5 header + 15 akun postable) + 6 baris laporan + **19 event mapping Bagian 6.4**, per BUMN | selalu |
+
+### Kenapa event mapping wajib diseed
+
+`postingEvent` membaca `event_jurnal_mapping` saat runtime (ADR 0004: mapping
+adalah data, supaya akuntan bisa mengganti akun tanpa deploy). Di database yang
+baru dimigrasi tabel itu **kosong**, jadi tanpa seed ini setiap peristiwa bisnis
+ditolak dengan `EVENT_MAPPING_TIDAK_DITEMUKAN`: tidak ada pencairan, tidak ada
+angsuran, tidak ada penyaluran, tidak ada penyisihan. Mapping juga tidak bisa
+diseed sebelum akunnya ada, karena `event_jurnal_mapping` menunjuk ke
+`akun(postable_id)`; itu sebabnya COA inti ikut di modul yang sama.
+
+COA di `apps/api/src/seed/coa-inti.ts` adalah **minimum** yang dibutuhkan
+Bagian 6.4, bukan COA riil klien (lihat `ASSUMPTIONS.md`, pertanyaan 2 di
+Bagian 18 spesifikasi), dan bukan layout laporan penuh (itu Fase 6, dengan dua
+template PSAK 45 dan ISAK 335 hidup bersamaan). Semua seed bersifat aditif dan
+idempoten, dan **tidak pernah menimpa akun yang sudah diubah akuntan**, jadi
+seed fase berikutnya menambah di atasnya.
 
 ## KREDENSIAL DEMO (DEMO ONLY)
 

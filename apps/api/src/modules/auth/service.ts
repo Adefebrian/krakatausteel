@@ -10,12 +10,15 @@
 //    "exists" and "does not exist". The distinction is recorded in audit_log,
 //    where it belongs, and never in the HTTP response.
 //
-// 2. HARDER RATE LIMITING THAN THE GLOBAL LIMITER, on two keys at once: per
-//    client IP (stops one host spraying many accounts) and per username
-//    (stops a botnet spraying one account). The auth limiter is constructed
-//    fail-CLOSED (core/ports/ratelimit.ts): Redis is where sessions live, so
-//    if Redis is down no login could succeed anyway, and refusing beats
-//    handing an attacker an unlimited-attempt window by knocking Redis over.
+// 2. HARDER RATE LIMITING THAN THE GLOBAL LIMITER, on two keys with two
+//    different jobs. Per client IP: every attempt counts, which bounds argon2
+//    work per source and is the password-spray defence. Per username: only
+//    FAILED attempts count and a success clears it, so the endpoint cannot be
+//    used to lock somebody else out of their own account. The auth limiter is
+//    constructed fail-CLOSED (core/ports/ratelimit.ts): Redis is where
+//    sessions live, so if Redis is down no login could succeed anyway, and
+//    refusing beats handing an attacker an unlimited-attempt window by
+//    knocking Redis over.
 //
 // 3. AUTHORISATION FACTS ARE NEVER CACHED IN THE SESSION. The session record
 //    holds a user id; roles and permissions are re-read from Postgres on
@@ -32,9 +35,13 @@ import type { DbPort, Principal, PrincipalCabang, QueryRunner, RateLimiterPort }
 import { createAuthRepo, type AuthRepo, type PeriodeRow } from "./repo";
 import { createSessionStore, type SessionRecord, type SessionStore, type SessionStoreOptions } from "./session";
 
-/** Login attempts allowed per client IP inside the window. */
+/** Login attempts allowed per client IP inside the window, success or not. */
 export const LOGIN_LIMIT_PER_IP = 10;
-/** Login attempts allowed per username inside the window, across all IPs. */
+/**
+ * FAILED login attempts allowed per username inside the window, across all
+ * IPs. Consumed only on failure and reset on success, so it can never refuse a
+ * correct password; see `deny` in `login` for why that matters.
+ */
 export const LOGIN_LIMIT_PER_USERNAME = 5;
 export const LOGIN_WINDOW_SECONDS = 300;
 
@@ -257,7 +264,40 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       const { username, password } = assertLoginShape(rawInput);
       const actor: AuditActor = { ip: rawInput.ip, userAgent: rawInput.userAgent };
 
+      const tolakRateLimit = async (retryAfterSeconds: number, alasan: string): Promise<never> => {
+        await audit.recordFor(actor, {
+          aksi: "auth.login",
+          entitas: "app_user",
+          nilaiBaru: { username },
+          hasil: "DITOLAK",
+          keterangan: `rate limit login terlampaui (${alasan})`,
+        });
+        throw new AppError(
+          "TERLALU_BANYAK_PERMINTAAN",
+          `Terlalu banyak upaya masuk. Coba lagi dalam ${Math.max(1, retryAfterSeconds)} detik.`,
+          { retryAfterSeconds: [String(Math.max(1, retryAfterSeconds))] },
+        );
+      };
+
+      /**
+       * Records a refused attempt and answers 401 (or 429 once the per-username
+       * failure budget is gone).
+       *
+       * THE PER-USERNAME COUNTER IS CONSUMED HERE, ON FAILURE ONLY, AND NEVER
+       * BEFORE THE PASSWORD IS CHECKED. Consuming it up front turned this
+       * endpoint into a remote account-lockout weapon: six wrong guesses at a
+       * username, and the real owner's CORRECT password was refused with 429
+       * for the rest of the window, from any address, because matching is
+       * case-insensitive and the limiter is fail-closed. Two requests a minute
+       * would have kept `adminpusat` locked out indefinitely.
+       *
+       * So the budget now throttles WRONG answers, not attempts: a correct
+       * password always wins, whatever the counter says. Total work per source
+       * stays bounded by the per-IP counter above, which is what caps argon2
+       * cost and password spraying.
+       */
       const deny = async (keterangan: string, userId?: string | null): Promise<never> => {
+        const gagal = await loginLimiter.consume(usernameKey(username), perUsername, windowSeconds);
         // Written before the response is produced, and NOT swallowed: an
         // unlogged failed login is a hole in the evidence (spec 2 rule 5).
         await audit.recordFor({ ...actor, userId: userId ?? null }, {
@@ -268,30 +308,22 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
           hasil: "DITOLAK",
           keterangan,
         });
+        if (!gagal.allowed) {
+          throw new AppError(
+            "TERLALU_BANYAK_PERMINTAAN",
+            `Terlalu banyak upaya masuk yang gagal. Coba lagi dalam ${Math.max(1, gagal.retryAfterSeconds)} detik.`,
+            { retryAfterSeconds: [String(Math.max(1, gagal.retryAfterSeconds))] },
+          );
+        }
         throw unauthenticated(KREDENSIAL_SALAH);
       };
 
-      const [byIp, byUser] = await Promise.all([
-        loginLimiter.consume(ipKey(rawInput.ip), perIp, windowSeconds),
-        loginLimiter.consume(usernameKey(username), perUsername, windowSeconds),
-      ]);
-      if (!byIp.allowed || !byUser.allowed) {
-        const retryAfter = Math.max(
-          1,
-          byIp.allowed ? byUser.retryAfterSeconds : byIp.retryAfterSeconds,
-        );
-        await audit.recordFor(actor, {
-          aksi: "auth.login",
-          entitas: "app_user",
-          nilaiBaru: { username },
-          hasil: "DITOLAK",
-          keterangan: `rate limit login terlampaui (${byIp.allowed ? "per username" : "per IP"})`,
-        });
-        throw new AppError(
-          "TERLALU_BANYAK_PERMINTAAN",
-          `Terlalu banyak upaya masuk. Coba lagi dalam ${retryAfter} detik.`,
-          { retryAfterSeconds: [String(retryAfter)] },
-        );
+      // Per-IP first and unconditionally: this is the spray defence, it bounds
+      // how much argon2 work one source can ask for, and unlike a per-username
+      // counter it cannot be aimed at somebody else's account.
+      const byIp = await loginLimiter.consume(ipKey(rawInput.ip), perIp, windowSeconds);
+      if (!byIp.allowed) {
+        return tolakRateLimit(byIp.retryAfterSeconds, "per IP");
       }
 
       const credential = await repo.findCredentialByUsername(db, username);
@@ -324,9 +356,10 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       }
 
       await repo.touchLastLogin(db, credential.id);
-      // A successful login clears the per-username counter so a user who
-      // fumbled their password four times is not locked out afterwards. The
-      // per-IP counter stays: it is the spray defence.
+      // Clears the failure budget: the account is demonstrably in the hands of
+      // whoever knows its password, so previous wrong guesses (possibly
+      // somebody else's) must not keep counting against it. The per-IP counter
+      // stays: it is the spray defence.
       await loginLimiter.reset(usernameKey(username));
 
       await audit.recordFor({ ...actor, userId: credential.id }, {

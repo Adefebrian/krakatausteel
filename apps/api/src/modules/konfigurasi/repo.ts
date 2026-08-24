@@ -129,7 +129,10 @@ export function createKonfigurasiRepo(): KonfigurasiRepo {
         `INSERT INTO konfigurasi
            (bumn_id, grup, kunci, nilai, tipe_data, pilihan_json, deskripsi,
             perlu_konfirmasi, diubah_oleh, diubah_at, created_by, updated_by)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, false, $8, now(), $8, $8)
+         -- $6::text::jsonb, not $6::jsonb: with a bun:sql-backed QueryRunner the
+         -- latter stores the JSON as a string SCALAR instead of an array, so
+         -- pilihan_json would stop being queryable. See modules/audit/repo.ts.
+         VALUES ($1, $2, $3, $4, $5, $6::text::jsonb, $7, false, $8, now(), $8, $8)
          RETURNING ${KOLOM}`,
         [
           input.bumnId,

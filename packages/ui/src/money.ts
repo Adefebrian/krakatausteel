@@ -13,7 +13,28 @@
  *     string because the database column is NUMERIC(20,2), and parsing that
  *     into a JS float would lose precision on large values. Strings are
  *     therefore formatted by digit surgery, never by going through Number().
+ *   - An UNPARSEABLE value renders as the marker below, never as a number.
+ *     See UNPARSEABLE.
  */
+
+/**
+ * What a value that is not a number renders as.
+ *
+ * It used to render as "0,00", and that was the worst available answer: on a
+ * report an auditor signs, a silent "Rp 0,00" standing in for a figure that
+ * failed to arrive is indistinguishable from a real zero balance, so the error
+ * is invisible and the total is wrong with nothing on the page admitting it.
+ * Spec section 10 ranks a wrong number above a missing feature.
+ *
+ * A visible marker instead: the cell is obviously not a figure, the row does
+ * not tie, and whoever reads it knows to go and look. Zero itself is
+ * unaffected and still renders "0,00" (the accounting team cross checks on the
+ * printed zero), because zero is parseable and this is not about zero.
+ *
+ * In development the formatter throws instead, so the bug is caught by whoever
+ * introduced it rather than by a client reading a PDF.
+ */
+export const UNPARSEABLE = "tidak sah";
 
 export interface MoneyFormatOptions {
   /** Number of decimals. Money is always 2; other quantities may differ. */
@@ -114,9 +135,27 @@ function groupThousands(digits: string): string {
 }
 
 /**
- * Format a rupiah amount for display. Zero, null, undefined, and an empty
- * string all render as "0,00" on purpose: an accounting report never shows a
- * blank where a figure belongs.
+ * True when the formatter should throw on an unparseable value rather than
+ * render the marker. Production renders the marker, because a thrown error in
+ * one table cell must not blank out the whole report the accountant needs; a
+ * development or test build throws, because a bug caught at the keyboard is
+ * cheaper than a bug caught at a client.
+ *
+ * Read at call time, not at module load, so a test can flip NODE_ENV.
+ */
+function throwOnUnparseable(): boolean {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return (env?.NODE_ENV ?? "development") !== "production";
+}
+
+/**
+ * Format a rupiah amount for display.
+ *
+ * Zero, null, undefined, and an empty string all render as "0,00" on purpose:
+ * an accounting report never shows a blank where a figure belongs.
+ *
+ * A value that is not a number at all is a different case entirely and does
+ * NOT render as a number. See UNPARSEABLE.
  */
 export function formatMoney(
   value: number | string | null | undefined,
@@ -124,9 +163,15 @@ export function formatMoney(
 ): string {
   const decimals = options.decimals ?? 2;
   const parsed = parseDecimal(value);
-  // An unparseable value is a bug upstream, not a number to guess at. Show
-  // it as zero rather than NaN so a report never prints "NaN" at a client.
-  const decimal = roundDecimal(parsed ?? { negative: false, digits: "0", fraction: "" }, decimals);
+  if (parsed === null) {
+    if (throwOnUnparseable()) {
+      throw new TypeError(
+        `formatMoney: nilai tidak dapat dibaca sebagai angka: ${JSON.stringify(value)}`,
+      );
+    }
+    return UNPARSEABLE;
+  }
+  const decimal = roundDecimal(parsed, decimals);
 
   const body =
     groupThousands(decimal.digits) +
@@ -142,6 +187,9 @@ export function formatRupiah(
   options: MoneyFormatOptions = {},
 ): string {
   const formatted = formatMoney(value, options);
+  // No "Rp" in front of the marker: "Rp tidak sah" reads like a currency
+  // amount at a glance, which is the exact confusion the marker exists to end.
+  if (formatted === UNPARSEABLE) return UNPARSEABLE;
   return formatted.startsWith("-") ? `-Rp ${formatted.slice(1)}` : `Rp ${formatted}`;
 }
 
@@ -155,7 +203,9 @@ export function formatPercent(
   value: number | string | null | undefined,
   options: MoneyFormatOptions = {},
 ): string {
-  return `${formatMoney(value, { decimals: 2, ...options })}%`;
+  const formatted = formatMoney(value, { decimals: 2, ...options });
+  if (formatted === UNPARSEABLE) return UNPARSEABLE;
+  return `${formatted}%`;
 }
 
 /** ISO date (or Date) rendered as dd-mm-yyyy, the format on client forms. */

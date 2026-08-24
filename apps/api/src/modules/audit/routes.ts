@@ -5,6 +5,7 @@
 // depends on core only (see core/principal.ts).
 import { Hono } from "hono";
 import { badRequest } from "../../core/http";
+import { allowedCabangIds, requirePrincipal } from "../../core/principal";
 import type { Guards } from "./ports";
 import type { AuditHasil } from "./repo";
 import type { AuditService } from "./service";
@@ -35,6 +36,11 @@ export function createAuditRoutes(service: AuditService, guards: Guards) {
     guards.requireSession,
     guards.requirePermission("audit.view"),
     async (c) => {
+      const principal = requirePrincipal(c);
+      // Branch scope applies here too (spec 2 rule 3). `allowedCabangIds`
+      // returns [] for a cross-branch role, which this maps to null = no
+      // restriction; anything else is the caller's own branch list.
+      const allowed = allowedCabangIds(principal);
       const rows = await service.list({
         userId: c.req.query("userId"),
         entitas: c.req.query("entitas"),
@@ -42,6 +48,7 @@ export function createAuditRoutes(service: AuditService, guards: Guards) {
         aksi: c.req.query("aksi"),
         hasil: parseHasil(c.req.query("hasil")),
         limit: parseLimit(c.req.query("limit")),
+        cabangIds: allowed.length === 0 ? null : allowed,
       });
       return c.json({ data: rows });
     },

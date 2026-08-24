@@ -123,7 +123,34 @@ export interface SeedDemoOptions {
   passwordOptions?: { memoryCost?: number; timeCost?: number };
   /** Seeds the current calendar month as an OPEN periode. */
   withPeriode?: boolean;
+  /**
+   * Connection string of the target, checked against the production guard
+   * below. Omit only when the caller has already established that the target
+   * is disposable (the test harness has).
+   */
+  targetUrl?: string;
 }
+
+/**
+ * Databases this seed may write to: a name that ends in `_dev`, `_test`,
+ * `_local` or `_demo`.
+ *
+ * WHY A NAME CHECK AND NOT A FLAG. Every "are you sure" flag is one
+ * copy-pasted command away from being set in the wrong shell. The database
+ * NAME travels with the target, so a production URL simply cannot satisfy this
+ * regardless of which flags an operator passes or which env file got sourced.
+ * `tools/db.ts` uses the same idea for its destructive commands.
+ */
+const NAMA_DB_BOLEH_DEMO = /_(dev|test|local|demo)$/;
+
+export function databaseBolehDemo(connectionString: string): boolean {
+  const withoutQuery = connectionString.split("?")[0] ?? "";
+  const name = withoutQuery.slice(withoutQuery.lastIndexOf("/") + 1);
+  return NAMA_DB_BOLEH_DEMO.test(name);
+}
+
+/** Marks a row as belonging to this seed, so it is never confused with a real one. */
+const DEMO_EMAIL_DOMAIN = "@demo.tjsl.local";
 
 async function upsertBumn(tx: QueryRunner): Promise<string> {
   const rows = await tx.query<{ id: string }>(
@@ -139,6 +166,15 @@ async function upsertBumn(tx: QueryRunner): Promise<string> {
 }
 
 export async function seedDemo(db: DbPort, options: SeedDemoOptions = {}): Promise<SeedDemoResult> {
+  if (options.targetUrl !== undefined && !databaseBolehDemo(options.targetUrl)) {
+    throw new Error(
+      "Menolak menulis akun demo ke database ini: namanya tidak berakhiran " +
+        "_dev, _test, _local atau _demo. Kredensial demo di file ini publik " +
+        "(SEED.md mencantumkannya), jadi menuliskannya ke database produksi " +
+        "sama dengan memberi akses Admin Pusat ke siapa pun yang bisa membaca repo.",
+    );
+  }
+
   const passwordHash = await Bun.password.hash(DEMO_PASSWORD, {
     algorithm: "argon2id",
     ...options.passwordOptions,
@@ -166,6 +202,24 @@ export async function seedDemo(db: DbPort, options: SeedDemoOptions = {}): Promi
     for (const spec of DEMO_USERS) {
       const cabangId = cabang[spec.cabangKode];
       if (!cabangId) throw new Error(`seed demo: cabang ${spec.cabangKode} tidak ada`);
+
+      // NEVER OVERWRITE AN ACCOUNT THIS SEED DOES NOT OWN. The usernames here
+      // are ordinary words (`maker`, `auditor`, `admincabang`), so a real
+      // deployment can easily already have one. Re-running the seed used to
+      // reset that person's PASSWORD to the public demo password and replace
+      // their roles. A row is ours only if its email is in the demo domain.
+      const existing = await tx.query<{ email: string }>(
+        `SELECT email FROM app_user WHERE lower(username) = lower($1) AND deleted_at IS NULL`,
+        [spec.username],
+      );
+      const email = existing[0]?.email;
+      if (email !== undefined && !email.toLowerCase().endsWith(DEMO_EMAIL_DOMAIN)) {
+        throw new Error(
+          `Menolak menimpa akun "${spec.username}" (${email}): akun itu bukan milik seed demo. ` +
+            "Hapus atau ganti nama akun tersebut lebih dulu, atau jalankan seed tanpa data demo.",
+        );
+      }
+
       const rows = await tx.query<{ id: string }>(
         `INSERT INTO app_user (cabang_id, nip, nama, email, username, password_hash, aktif)
          VALUES ($1, $2, $3, $4, $5, $6, true)

@@ -12,7 +12,14 @@ import { z } from "zod";
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
-  DATABASE_URL: z.string().url().default("postgres://user:password@localhost:5432/app"),
+  // REQUIRED, with no default. A default here made a missing DATABASE_URL a
+  // silent success: `loadEnv()` passed, the pool pointed at
+  // postgres://user:password@localhost:5432/app, and the failure surfaced
+  // later as connection errors or, worse, as a connection to some other local
+  // database. `loadEnv()` runs at the top of the real entrypoint, so an unset
+  // value now stops the process with a readable message before it serves
+  // anything.
+  DATABASE_URL: z.string().url(),
   // Tests need a real Postgres, not a fake: the accounting invariants of this
   // system (Bagian 3 of the spec) are enforced by triggers and check
   // constraints inside the database, so a stubbed repository proves nothing.

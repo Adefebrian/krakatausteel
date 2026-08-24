@@ -38,7 +38,7 @@ running one package's tests, and the optional Docker path.
 
 | Script | What it does |
 |---|---|
-| `bun run verify` | The gate. Test DB reset plus migrations, build, `bun test`, boundary check, static compose check. Named PASS/FAIL per step, exits non-zero on the first failure. |
+| `bun run verify` | The gate. Test DB reset plus migrations, typecheck, build, `bun test`, boundary check (imports plus the invariant-11 ledger-write rule), static compose check. Named PASS/FAIL per step, exits non-zero on the first failure. |
 | `bun run dev` | Watches apps/web (rebuild on save) and apps/api (restart on save) in parallel. No Vite dev server, no HMR: a full rebuild per save, by design, so dev and prod share one build path. |
 | `bun run build` | `turbo run build` across all workspaces. |
 | `bun test` | Whole suite from the repo root. The root `bunfig.toml` preloads `tools/test-env.ts`, which pins `DATABASE_URL` to `TEST_DATABASE_URL` so a test can never write to the dev database. |
@@ -48,7 +48,7 @@ running one package's tests, and the optional Docker path.
 | `bun run db:migrate` / `db:migrate:test` | Migrations up on the dev / test database. |
 | `bun run db:reset` | Drop and recreate the test schema, then replay every migration. Refuses any database not named `*_test`. |
 | `bun run db:seed` | Seed entry point, placeholder until the phases that need it. |
-| `bun run check:boundaries` | No cross-module deep imports, infra always behind a port. |
+| `bun run check:boundaries` | No cross-module deep imports, infra always behind a port, and no raw `jurnal` / `jurnal_baris` write outside `modules/jurnal/**` (spec invariant 11). |
 | `bun run check:compose` | Static validation of `infra/docker-compose.prod.yml` with no Docker daemon. |
 
 ## Stack
