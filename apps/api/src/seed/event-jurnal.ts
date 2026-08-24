@@ -1,4 +1,5 @@
-// The 19 event-to-journal mappings of spec 6.4, as SEEDED DATA.
+// The event-to-journal mappings, as SEEDED DATA: the 19 of spec 6.4 plus 3
+// the owner ruled on because the spec has no code for them.
 //
 // WHY THIS FILE IS NOT OPTIONAL
 // Spec invariant 11 says every financial event may only create a journal
@@ -17,6 +18,33 @@
 // the journal engine's test fixture builds its world from it. Anything that
 // exists in only one of those two places drifts, and a drifted event mapping
 // is not a failing test, it is a journal that posts to the wrong account.
+//
+// THE THREE EVENTS THAT ARE NOT IN SPEC 6.4, and why they are here rather
+// than invented at a call site. Each is a real movement of money that Fase 3
+// to 5 cannot record with the spec's 19 codes; the owner's reasoning is in
+// docs/BUILD-PLAN.md ("Keputusan sementara: event yang tidak ada di
+// spesifikasi Bagian 6.4") and each is logged as an assumption awaiting the
+// client's finance team and their KAP (ASSUMPTIONS.md A-38 to A-40). None of
+// them is a compliance claim.
+//
+// They sit at the END of the catalogue, after the 19, so the spec's own list
+// stays readable as a block and a diff never mixes "what the spec says" with
+// "what we decided". ./event-jurnal.test.ts asserts that split explicitly.
+//
+// Being wrong here is cheap BY CONSTRUCTION, and that is the whole argument
+// for deciding now: the account pair is a row in `event_jurnal_mapping`, so a
+// correction is an UPDATE, not a deploy. What would NOT be cheap is the
+// alternative that was avoided: business code inventing its own journal
+// because no event code existed, which is invariant 11 gone and a mis-posting
+// nobody can find later.
+//
+// PENGHAPUSTAGIHAN DELIBERATELY HAS NO CODE. Penghapusbukuan already removes
+// the receivable from the balance sheet while the right to collect survives
+// on the extracomptable register, so extinguishing that right later moves no
+// balance: it is a memorandum event, not a journal. A case that needs to
+// extinguish a claim still on the balance sheet is two steps, hapus buku then
+// hapus tagih. Two event codes producing identical journals is a
+// reconciliation trap, so there is one. Do not "helpfully" add it.
 //
 // PAYLOAD LEGS. Three events resolve one leg at runtime rather than from the
 // row (the migration's own comment says so): PENYALURAN_NON_PUMK debits a
@@ -49,8 +77,9 @@ export interface EventJurnalDef {
 }
 
 /**
- * Spec 6.4 in order, verbatim. Debit and credit are the account CODES from
- * ./coa-inti.ts, never ids: an id is per-database, a code is the contract.
+ * Spec 6.4 in order, verbatim, then the three owner decisions. Debit and
+ * credit are the account CODES from ./coa-inti.ts, never ids: an id is
+ * per-database, a code is the contract.
  */
 export const KATALOG_EVENT_JURNAL: readonly EventJurnalDef[] = [
   {
@@ -188,6 +217,59 @@ export const KATALOG_EVENT_JURNAL: readonly EventJurnalDef[] = [
     jenis: "OTOMATIS",
     deskripsi: "Beban operasional unit TJSL, akun beban per jenis dari form",
   },
+
+  // --- Beyond spec 6.4: owner decisions, see the file header -------------
+  {
+    code: "HAPUS_BUKU_KEKURANGAN_PENYISIHAN",
+    // The spec's HAPUS_BUKU_PIUTANG debits the allowance for the FULL
+    // outstanding, which is only true when the allowance covers it. Under the
+    // collective-impairment basis docs/REGULASI.md found to be the one in
+    // force, it can be smaller, and the spec's journal as written would drive
+    // a contra-ASSET account negative. The shortfall is an expense of the
+    // current period. Operations that need both consume the allowance first
+    // with HAPUS_BUKU_PIUTANG and route only the remainder here.
+    debitKode: "5.1.01",
+    kreditKode: "1.1.03",
+    jenis: "OTOMATIS",
+    deskripsi:
+      "Hapus buku bagian yang tidak tertutup penyisihan; kekurangannya dibebankan ke periode berjalan",
+  },
+  {
+    code: "RESTRUKTUR_POKOK_NAIK",
+    // Principal up with no cash out means an already-recognised claim was
+    // capitalised into principal, and accrued-but-unpaid jasa administrasi is
+    // the likeliest candidate. If it turns out to be something else, this row
+    // changes and no code does.
+    debitKode: "1.1.03",
+    kreditKode: "1.1.04",
+    jenis: "OTOMATIS",
+    deskripsi: "Reschedule menaikkan pokok; kapitalisasi jasa administrasi terakrual ke pokok",
+  },
+  {
+    code: "RESTRUKTUR_POKOK_TURUN",
+    // Principal down is a reduction of the claim, absorbed by the allowance
+    // first; a remainder beyond the allowance goes through
+    // HAPUS_BUKU_KEKURANGAN_PENYISIHAN for the same reason as above.
+    debitKode: "1.1.05",
+    kreditKode: "1.1.03",
+    jenis: "OTOMATIS",
+    deskripsi: "Reschedule menurunkan pokok; pengurangan tagihan diserap penyisihan lebih dulu",
+  },
+];
+
+/** The 19 codes spec 6.4 lists, in the spec's order. */
+export const EVENT_SPEC_6_4: readonly string[] = KATALOG_EVENT_JURNAL.slice(0, 19).map(
+  (ev) => ev.code,
+);
+
+/**
+ * The codes that are NOT in the spec, kept nameable so a reader (and a test)
+ * can tell a spec obligation from a provisional decision without diffing.
+ */
+export const EVENT_KEPUTUSAN_PEMILIK: readonly string[] = [
+  "HAPUS_BUKU_KEKURANGAN_PENYISIHAN",
+  "RESTRUKTUR_POKOK_NAIK",
+  "RESTRUKTUR_POKOK_TURUN",
 ];
 
 export interface SeedEventJurnalResult {

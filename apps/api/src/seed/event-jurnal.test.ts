@@ -4,11 +4,24 @@
 // `postingEvent`, and on a freshly migrated database it is EMPTY, so every
 // business event is rejected with EVENT_MAPPING_TIDAK_DITEMUKAN. A mapping
 // that is "data, not code" (ADR 0004) still has to be seeded, and the seed has
-// to cover all 19 events with the right accounts on the right sides.
+// to cover every event with the right accounts on the right sides.
+//
+// The catalogue is 19 spec 6.4 codes PLUS 3 the owner ruled on (see the header
+// of ./event-jurnal.ts and docs/BUILD-PLAN.md). The split is asserted here as
+// two NAMED lists rather than as one total, so nobody can quietly slip a
+// twenty-third event in as "one of the spec's": a new code has to be added to
+// EVENT_KEPUTUSAN_PEMILIK, where it is visibly a decision and not an
+// obligation.
 import { describe, expect, test } from "bun:test";
 import { createDbAdapter } from "../core/adapters/db";
 import { AKUN_INTI, BARIS_LAPORAN_INTI, HEADER_AKUN_INTI, seedCoaInti } from "./coa-inti";
-import { KATALOG_EVENT_JURNAL, seedCoaDanEventMapping, seedEventJurnalMapping } from "./event-jurnal";
+import {
+  EVENT_KEPUTUSAN_PEMILIK,
+  EVENT_SPEC_6_4,
+  KATALOG_EVENT_JURNAL,
+  seedCoaDanEventMapping,
+  seedEventJurnalMapping,
+} from "./event-jurnal";
 
 const db = createDbAdapter();
 
@@ -22,8 +35,11 @@ async function bumnBaru(): Promise<string> {
   return rows[0]!.id;
 }
 
-/** Every event code spec 6.4 lists, in the spec's own order. */
-const EVENT_SPEC_6_4 = [
+/**
+ * Every event code spec 6.4 lists, in the spec's own order. Transcribed, so the
+ * catalogue is checked against the spec rather than against itself.
+ */
+const KODE_SPEC_6_4 = [
   "ALOKASI_DANA_BUMN_PEMBINA",
   "PENCAIRAN_PUMK",
   "ANGSURAN_POKOK",
@@ -45,9 +61,64 @@ const EVENT_SPEC_6_4 = [
   "BEBAN_OPERASIONAL",
 ];
 
-describe("the catalogue matches spec 6.4", () => {
-  test("all 19 events, in the spec's order, no extras and none missing", () => {
-    expect(KATALOG_EVENT_JURNAL.map((ev) => ev.code)).toEqual(EVENT_SPEC_6_4);
+/** The codes the owner ruled on, which the spec does not name. */
+const KODE_KEPUTUSAN_PEMILIK = [
+  "HAPUS_BUKU_KEKURANGAN_PENYISIHAN",
+  "RESTRUKTUR_POKOK_NAIK",
+  "RESTRUKTUR_POKOK_TURUN",
+];
+
+describe("the catalogue matches spec 6.4, plus the owner's three decisions", () => {
+  test("the spec's 19 come first, in the spec's order, none missing and none renamed", () => {
+    expect(EVENT_SPEC_6_4).toEqual(KODE_SPEC_6_4);
+    expect(KATALOG_EVENT_JURNAL.slice(0, 19).map((ev) => ev.code)).toEqual(KODE_SPEC_6_4);
+  });
+
+  test("the three non-spec codes are named as decisions, and are the only extras", () => {
+    expect(EVENT_KEPUTUSAN_PEMILIK).toEqual(KODE_KEPUTUSAN_PEMILIK);
+    expect(KATALOG_EVENT_JURNAL.map((ev) => ev.code)).toEqual([
+      ...KODE_SPEC_6_4,
+      ...KODE_KEPUTUSAN_PEMILIK,
+    ]);
+    expect(KATALOG_EVENT_JURNAL).toHaveLength(22);
+  });
+
+  test("penghapustagihan has NO event code, on purpose", () => {
+    // Penghapusbukuan already removes the receivable from the balance sheet
+    // while the right to collect survives extracomptably, so extinguishing
+    // that right moves no balance: it is a memorandum event on that register.
+    // A second code producing a journal identical to HAPUS_BUKU_PIUTANG would
+    // be a reconciliation trap. If a later agent "helpfully" adds one, this
+    // test is where they find out it was deliberate.
+    const kode = KATALOG_EVENT_JURNAL.map((ev) => ev.code);
+    expect(kode.filter((k) => /HAPUS_TAGIH|PENGHAPUSTAGIHAN/.test(k))).toEqual([]);
+  });
+
+  test("the owner's three decisions post the accounts docs/BUILD-PLAN.md names", () => {
+    const byCode = new Map(KATALOG_EVENT_JURNAL.map((ev) => [ev.code, ev]));
+    // A write-off the allowance does not cover charges the shortfall to
+    // expense instead of driving the contra-asset negative.
+    expect(byCode.get("HAPUS_BUKU_KEKURANGAN_PENYISIHAN")).toMatchObject({
+      debitKode: "5.1.01",
+      kreditKode: "1.1.03",
+    });
+    // Principal up with no cash out capitalises accrued jasa administrasi.
+    expect(byCode.get("RESTRUKTUR_POKOK_NAIK")).toMatchObject({
+      debitKode: "1.1.03",
+      kreditKode: "1.1.04",
+    });
+    // Principal down is a reduction of the claim, absorbed by the allowance.
+    expect(byCode.get("RESTRUKTUR_POKOK_TURUN")).toMatchObject({
+      debitKode: "1.1.05",
+      kreditKode: "1.1.03",
+    });
+    // None of them touches cash: a restructure and a write-off are book
+    // entries, and a cash leg appearing here would mean the wrong event.
+    for (const kode of KODE_KEPUTUSAN_PEMILIK) {
+      const ev = byCode.get(kode)!;
+      expect(ev.debitKode).not.toBe("1.1.01");
+      expect(ev.kreditKode).not.toBe("1.1.01");
+    }
   });
 
   test("exactly the two 'per bidang / per jenis' events resolve a leg from the payload", () => {
@@ -162,10 +233,10 @@ describe("seedCoaInti", () => {
 });
 
 describe("seedEventJurnalMapping", () => {
-  test("seeds all 19 rows, active, with the right accounts on the right sides", async () => {
+  test("seeds all 22 rows, active, with the right accounts on the right sides", async () => {
     const bumnId = await bumnBaru();
     const { event } = await seedCoaDanEventMapping(db, bumnId);
-    expect(event).toEqual({ seeded: 19, total: 19 });
+    expect(event).toEqual({ seeded: 22, total: 22 });
 
     const rows = await db.query<{
       event_code: string;
@@ -184,7 +255,7 @@ describe("seedEventJurnalMapping", () => {
         WHERE m.bumn_id = $1`,
       [bumnId],
     );
-    expect(rows).toHaveLength(19);
+    expect(rows).toHaveLength(22);
     const byCode = new Map(rows.map((row) => [row.event_code, row]));
     for (const ev of KATALOG_EVENT_JURNAL) {
       const row = byCode.get(ev.code);
@@ -219,7 +290,7 @@ describe("seedEventJurnalMapping", () => {
       "SELECT count(*)::text AS n FROM event_jurnal_mapping WHERE bumn_id = $1",
       [bumnId],
     );
-    expect(Number(rows[0]!.n)).toBe(19);
+    expect(Number(rows[0]!.n)).toBe(22);
   });
 
   test("never overwrites an account an accountant corrected (ADR 0004)", async () => {
@@ -252,7 +323,7 @@ describe("seedEventJurnalMapping", () => {
       [[a, b]],
     );
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect(Number(row.n)).toBe(19);
+    for (const row of rows) expect(Number(row.n)).toBe(22);
   });
 });
 
@@ -265,6 +336,6 @@ describe("seedFase0 leaves a database that can actually post", () => {
       "SELECT count(*)::text AS n FROM event_jurnal_mapping WHERE bumn_id = $1 AND aktif",
       [extra],
     );
-    expect(Number(rows[0]!.n)).toBe(19);
+    expect(Number(rows[0]!.n)).toBe(22);
   }, 30_000);
 });

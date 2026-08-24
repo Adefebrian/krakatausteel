@@ -10,16 +10,20 @@
 // file rewrites a row and inserts an event code that did not exist when the
 // process started.
 //
-// COUNTING NOTE: the spec 6.4 table has NINETEEN rows, not twenty. All
-// nineteen are covered below. docs/BUILD-PLAN.md notes a twentieth event is
-// needed for penghapustagihan (SK-277/MBU/10/2023 distinguishes it from
-// penghapusbukuan), but the spec does not name it, so it is not invented here.
+// COUNTING NOTE: the spec 6.4 table has NINETEEN rows, not twenty. The
+// catalogue this file iterates now holds TWENTY-TWO: those nineteen plus three
+// the owner ruled on (docs/BUILD-PLAN.md, "Keputusan sementara"), which the
+// seed keeps separable through EVENT_SPEC_6_4 and EVENT_KEPUTUSAN_PEMILIK. The
+// loop below covers all of them, because it iterates the catalogue rather than
+// a list written here: an event added to the seed is covered the same day.
+// Penghapustagihan still has NO code, on purpose, and
+// apps/api/src/seed/event-jurnal.test.ts is where that is asserted.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createJurnalEngine, KODE_JURNAL, type JenisJurnal, type JurnalEngine } from "./contract";
 import {
   bacaBarisDb,
   buatDunia,
-  KATALOG_EVENT_6_4,
+  KATALOG_EVENT,
   keSen,
   kunci,
   rp,
@@ -82,22 +86,24 @@ async function saldoPenyisihan(): Promise<string> {
 }
 
 describe("spec 6.4 postingEvent membaca event_jurnal_mapping", () => {
-  test("katalog event adalah data: 19 baris spec 6.4 ada di tabel, satu baris aktif per event", async () => {
+  test("katalog event adalah data: seluruh baris katalog ada di tabel, satu baris aktif per event", async () => {
     const r = await d.db.query<{ event_code: string }>(
       `select event_code from event_jurnal_mapping
         where bumn_id = $1 and aktif and deleted_at is null order by event_code`,
       [d.bumnId],
     );
     expect(r.map((x) => x.event_code)).toEqual(
-      KATALOG_EVENT_6_4.map((e) => e.code).sort((a, b) => a.localeCompare(b)),
+      KATALOG_EVENT.map((e) => e.code).sort((a, b) => a.localeCompare(b)),
     );
-    expect(r).toHaveLength(19);
+    // 19 from spec 6.4 + 3 owner decisions. Asserted against the catalogue
+    // above as well, so this number cannot drift away from the seed.
+    expect(r).toHaveLength(22);
   });
 
-  // One test per spec 6.4 row, named by event code so a failure names the
+  // One test per catalogue row, named by event code so a failure names the
   // event that broke.
-  for (const ev of KATALOG_EVENT_6_4) {
-    test(`spec 6.4 ${ev.code} memakai akun dari baris mapping-nya`, async () => {
+  for (const ev of KATALOG_EVENT) {
+    test(`${ev.code} memakai akun dari baris mapping-nya`, async () => {
       const map = await bacaMapping(ev.code);
       const nilai = rp(2_500_000);
 

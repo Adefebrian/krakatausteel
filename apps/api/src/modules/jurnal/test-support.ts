@@ -150,96 +150,106 @@ function buatPortDb(): PortUji {
 }
 
 // ---------------------------------------------------------------------------
-// Chart of accounts for the minimal world
+// Chart of accounts and event catalogue: ONE SOURCE, SHARED WITH THE SEED
 // ---------------------------------------------------------------------------
+//
+// This file used to carry its own copy of the accounts and of the 19 event
+// mappings. Two copies of an event-to-account mapping do not fail as a red
+// test when they drift: they fail as a journal posted to the wrong account in
+// production while the fixture keeps agreeing with itself. Adding the owner's
+// three new events to two catalogues would have been exactly that. So the
+// world is now built by `seedCoaDanEventMapping`, the same function
+// `seedFase0` runs against a real database, and the ids are read back BY CODE.
+//
+// What that buys, concretely: a mapping the seed gets wrong is now a failing
+// journal test, and an account the seed forgets is a failing journal test.
+//
+// TWO ACCOUNTS ARE STILL DEFINED HERE, and deliberately are not in the seed:
+// an alternative receivable and a DEACTIVATED expense account. Both exist only
+// to be pointed at by a validation test (6.2.6 needs an inactive account to
+// reject, 6.2.8 needs a second receivable to repoint a mapping at). Seeding a
+// "Beban Program Lama (nonaktif)" into a client's chart of accounts to satisfy
+// a test would be putting test scaffolding into production data.
+import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
+import { KATALOG_EVENT_JURNAL } from "../../seed/event-jurnal";
 
 type TipeAkun = "ASET" | "LIABILITAS" | "ASET_NETO" | "PENDAPATAN" | "BEBAN";
 
-interface DefAkun {
+/**
+ * Friendly fixture name -> account CODE in the seeded chart of accounts. The
+ * tests read `d.akun.piutangPokok.id`; the code is what ties that name to the
+ * one definition in apps/api/src/seed/coa-inti.ts.
+ */
+const KODE_AKUN = {
+  kas: "1.1.01",
+  kasKedua: "1.1.02",
+  piutangPokok: "1.1.03",
+  piutangJasa: "1.1.04",
+  penyisihan: "1.1.05",
+  /** Fixture-only, see the file header. */
+  piutangAlternatif: "1.1.06",
+  kelebihanAngsuran: "2.1.01",
+  angsuranBelumTeridentifikasi: "2.1.02",
+  pendapatanAlokasi: "4.1.01",
+  pendapatanJasaAdm: "4.1.02",
+  pendapatanJasaGiro: "4.1.03",
+  pendapatanLain: "4.1.04",
+  bebanPenyisihan: "5.1.01",
+  bebanPinbuk: "5.1.02",
+  bebanNonPumk: "5.1.03",
+  bebanOperasional: "5.1.04",
+  /** Fixture-only and INACTIVE, so validation 6.2.6 has something to reject. */
+  bebanNonAktif: "5.1.09",
+} as const;
+
+export type KunciAkun = keyof typeof KODE_AKUN;
+
+/** The two accounts the production seed must not carry. See the file header. */
+const AKUN_KHUSUS_FIXTURE: ReadonlyArray<{
   kode: string;
   nama: string;
   tipe: TipeAkun;
   saldoNormal: "D" | "K";
-  isKas?: boolean;
-  isKontra?: boolean;
-  aktif?: boolean;
+  parentKode: string;
   klasifikasi: string;
-}
-
-/**
- * Every account spec 6.4 names, plus the ones the validation tests need
- * (a second cash account, an alternative receivable account, an inactive
- * account). Header (non-postable) parents are created separately.
- */
-const DEF_AKUN: Record<string, DefAkun> = {
-  kas: { kode: "1.1.01", nama: "Kas dan Setara Kas", tipe: "ASET", saldoNormal: "D", isKas: true, klasifikasi: "ASET" },
-  kasKedua: { kode: "1.1.02", nama: "Bank Operasional TJSL", tipe: "ASET", saldoNormal: "D", isKas: true, klasifikasi: "ASET" },
-  piutangPokok: { kode: "1.1.03", nama: "Piutang Pinjaman Mitra Binaan", tipe: "ASET", saldoNormal: "D", klasifikasi: "ASET" },
-  piutangJasa: { kode: "1.1.04", nama: "Piutang Jasa Administrasi", tipe: "ASET", saldoNormal: "D", klasifikasi: "ASET" },
-  // Contra asset, spec 6.4 note: normal balance CREDIT on an ASSET account,
-  // presented as a deduction from gross receivables (baris_laporan.tanda = -1).
-  penyisihan: {
-    kode: "1.1.05",
-    nama: "Penyisihan Penurunan Nilai Piutang",
-    tipe: "ASET",
-    saldoNormal: "K",
-    isKontra: true,
-    klasifikasi: "PENYISIHAN_KONTRA",
-  },
-  piutangAlternatif: { kode: "1.1.06", nama: "Piutang Pinjaman Mitra Binaan (Alternatif)", tipe: "ASET", saldoNormal: "D", klasifikasi: "ASET" },
-  kelebihanAngsuran: { kode: "2.1.01", nama: "Kelebihan Pembayaran Angsuran", tipe: "LIABILITAS", saldoNormal: "K", klasifikasi: "LIABILITAS" },
-  angsuranBelumTeridentifikasi: { kode: "2.1.02", nama: "Angsuran Belum Teridentifikasi", tipe: "LIABILITAS", saldoNormal: "K", klasifikasi: "LIABILITAS" },
-  pendapatanAlokasi: { kode: "4.1.01", nama: "Pendapatan Alokasi Dana BUMN Pembina", tipe: "PENDAPATAN", saldoNormal: "K", klasifikasi: "PENDAPATAN" },
-  pendapatanJasaAdm: { kode: "4.1.02", nama: "Pendapatan Jasa Administrasi Pinjaman", tipe: "PENDAPATAN", saldoNormal: "K", klasifikasi: "PENDAPATAN" },
-  pendapatanJasaGiro: { kode: "4.1.03", nama: "Pendapatan Bunga Jasa Giro", tipe: "PENDAPATAN", saldoNormal: "K", klasifikasi: "PENDAPATAN" },
-  pendapatanLain: { kode: "4.1.04", nama: "Pendapatan Lain lain", tipe: "PENDAPATAN", saldoNormal: "K", klasifikasi: "PENDAPATAN" },
-  bebanPenyisihan: { kode: "5.1.01", nama: "Beban Penyisihan Penurunan Nilai Piutang", tipe: "BEBAN", saldoNormal: "D", klasifikasi: "BEBAN" },
-  bebanPinbuk: { kode: "5.1.02", nama: "Beban Pembinaan Kemitraan", tipe: "BEBAN", saldoNormal: "D", klasifikasi: "BEBAN" },
-  bebanNonPumk: { kode: "5.1.03", nama: "Beban Penyaluran Non PUMK", tipe: "BEBAN", saldoNormal: "D", klasifikasi: "BEBAN" },
-  bebanOperasional: { kode: "5.1.04", nama: "Beban Operasional", tipe: "BEBAN", saldoNormal: "D", klasifikasi: "BEBAN" },
-  bebanNonAktif: { kode: "5.1.09", nama: "Beban Program Lama (nonaktif)", tipe: "BEBAN", saldoNormal: "D", aktif: false, klasifikasi: "BEBAN" },
-};
-
-export type KunciAkun = keyof typeof DEF_AKUN;
-
-/**
- * Spec 6.4, transcribed. `debit`/`kredit` name a key of DEF_AKUN, or null when
- * the leg is resolved at runtime from the payload (`PENYALURAN_NON_PUMK`
- * debits a per-bidang expense account, `BEBAN_OPERASIONAL` a per-type one;
- * migrations/0010_jurnal.sql calls this out explicitly).
- *
- * The spec 6.4 table has NINETEEN rows, not twenty. Counted and listed here in
- * full so the discrepancy is visible in the fixture rather than hidden in a
- * loop bound; see the report note on `HAPUS_TAGIH_PIUTANG`, which
- * docs/BUILD-PLAN.md says is a separate event that regulation requires but the
- * spec does not name, and which is therefore NOT invented here.
- */
-export const KATALOG_EVENT_6_4: ReadonlyArray<{
-  code: string;
-  debit: KunciAkun | null;
-  kredit: KunciAkun | null;
-  jenis: JenisJurnal;
+  aktif: boolean;
 }> = [
-  { code: "ALOKASI_DANA_BUMN_PEMBINA", debit: "kas", kredit: "pendapatanAlokasi", jenis: "OTOMATIS" },
-  { code: "PENCAIRAN_PUMK", debit: "piutangPokok", kredit: "kas", jenis: "OTOMATIS" },
-  { code: "ANGSURAN_POKOK", debit: "kas", kredit: "piutangPokok", jenis: "OTOMATIS" },
-  { code: "ANGSURAN_JASA_ADM", debit: "kas", kredit: "pendapatanJasaAdm", jenis: "OTOMATIS" },
-  { code: "ANGSURAN_JASA_ADM_AKRUAL", debit: "kas", kredit: "piutangJasa", jenis: "OTOMATIS" },
-  { code: "TERIMA_KELEBIHAN_ANGSURAN", debit: "kas", kredit: "kelebihanAngsuran", jenis: "OTOMATIS" },
-  { code: "KEMBALIKAN_KELEBIHAN_ANGSURAN", debit: "kelebihanAngsuran", kredit: "kas", jenis: "OTOMATIS" },
-  { code: "TERIMA_ANGSURAN_BELUM_TERIDENTIFIKASI", debit: "kas", kredit: "angsuranBelumTeridentifikasi", jenis: "OTOMATIS" },
-  { code: "IDENTIFIKASI_ANGSURAN", debit: "angsuranBelumTeridentifikasi", kredit: "piutangPokok", jenis: "OTOMATIS" },
-  { code: "PENYALURAN_NON_PUMK", debit: null, kredit: "kas", jenis: "OTOMATIS" },
-  { code: "PENGEMBALIAN_SISA_NON_PUMK", debit: "kas", kredit: "bebanNonPumk", jenis: "OTOMATIS" },
-  { code: "PENYALURAN_PINBUK", debit: "bebanPinbuk", kredit: "kas", jenis: "PINBUK" },
-  { code: "AKRUAL_JASA_ADM", debit: "piutangJasa", kredit: "pendapatanJasaAdm", jenis: "AKRUAL" },
-  { code: "BEBAN_PENYISIHAN", debit: "bebanPenyisihan", kredit: "penyisihan", jenis: "PENYISIHAN" },
-  { code: "PEMULIHAN_PENYISIHAN", debit: "penyisihan", kredit: "bebanPenyisihan", jenis: "PENYISIHAN" },
-  { code: "HAPUS_BUKU_PIUTANG", debit: "penyisihan", kredit: "piutangPokok", jenis: "OTOMATIS" },
-  { code: "PENERIMAAN_HAPUS_BUKU", debit: "kas", kredit: "pendapatanLain", jenis: "OTOMATIS" },
-  { code: "PENDAPATAN_JASA_GIRO", debit: "kas", kredit: "pendapatanJasaGiro", jenis: "OTOMATIS" },
-  { code: "BEBAN_OPERASIONAL", debit: null, kredit: "kas", jenis: "OTOMATIS" },
+  {
+    kode: "1.1.06",
+    nama: "Piutang Pinjaman Mitra Binaan (Alternatif)",
+    tipe: "ASET",
+    saldoNormal: "D",
+    parentKode: "1",
+    klasifikasi: "ASET",
+    aktif: true,
+  },
+  {
+    kode: "5.1.09",
+    nama: "Beban Program Lama (nonaktif)",
+    tipe: "BEBAN",
+    saldoNormal: "D",
+    parentKode: "5",
+    klasifikasi: "BEBAN",
+    aktif: false,
+  },
 ];
+
+/**
+ * The event catalogue the world is seeded with: spec 6.4's nineteen plus the
+ * three the owner ruled on (docs/BUILD-PLAN.md, "Keputusan sementara"). Named
+ * without a spec section number because it is no longer only the spec's:
+ * apps/api/src/seed/event-jurnal.ts keeps the two groups separable through
+ * `EVENT_SPEC_6_4` and `EVENT_KEPUTUSAN_PEMILIK`.
+ *
+ * Re-exported rather than copied. A test that wants "every event" iterates
+ * this and therefore covers a new one the day it is seeded.
+ */
+export const KATALOG_EVENT: ReadonlyArray<{
+  code: string;
+  debitKode: string | null;
+  kreditKode: string | null;
+  jenis: JenisJurnal;
+}> = KATALOG_EVENT_JURNAL;
 
 /**
  * Pinbuk activity categories (spec 6.5). Seeded into `konfigurasi`, NOT
@@ -444,77 +454,69 @@ export async function buatDunia(): Promise<DuniaJurnal> {
   const periodeAwal = await buatPeriode(2026, 1);
   const periodeKini = await buatPeriode(2026, 2);
 
-  // Report layout rows. `akun.klasifikasi_laporan` is a real composite FK into
-  // this table (migrations/0005_coa.sql), so they must exist first. `tanda`
-  // -1 on PENYISIHAN_KONTRA is what makes the contra-asset present as a
-  // deduction from gross receivables (spec 6.4 note).
-  const barisLaporan: Array<[string, string, string, number, number]> = [
-    ["ASET", "Aset", "POSISI_KEUANGAN", 10, 1],
-    ["PENYISIHAN_KONTRA", "Penyisihan Penurunan Nilai Piutang", "POSISI_KEUANGAN", 20, -1],
-    ["LIABILITAS", "Liabilitas", "POSISI_KEUANGAN", 30, 1],
-    ["ASET_NETO", "Aset Neto", "POSISI_KEUANGAN", 40, 1],
-    ["PENDAPATAN", "Pendapatan", "AKTIVITAS", 10, 1],
-    ["BEBAN", "Beban", "AKTIVITAS", 20, 1],
-  ];
-  for (const [kode, nama, laporan, urutan, tanda] of barisLaporan) {
-    await db.query(
-      `insert into baris_laporan (bumn_id, laporan, kode, nama, urutan, level, tipe_baris, tanda, seksi)
-       values ($1, $2, $3, $4, $5, 1, 'DETAIL', $6, $2)`,
-      [bumn.id, laporan, kode, nama, urutan, tanda],
-    );
-  }
+  // The chart of accounts, its report lines, and every event mapping, from the
+  // SAME function that seeds a real database (see the file header). Ids come
+  // back keyed by account code.
+  const { akun: idPerKode } = await seedCoaDanEventMapping(db, bumn.id);
 
-  // Level-1 header accounts: non-postable by construction, which is exactly
-  // what validation 6.2.6 needs something to point at.
-  const header: Record<string, string> = {};
-  const defHeader: Array<[string, string, TipeAkun, "D" | "K", string]> = [
-    ["1", "ASET", "ASET", "D", "ASET"],
-    ["2", "LIABILITAS", "LIABILITAS", "K", "LIABILITAS"],
-    ["4", "PENDAPATAN", "PENDAPATAN", "K", "PENDAPATAN"],
-    ["5", "BEBAN", "BEBAN", "D", "BEBAN"],
-  ];
-  for (const [kode, nama, tipe, saldo, klasifikasi] of defHeader) {
-    const h = await satu<{ id: string }>(
-      db,
-      `insert into akun (bumn_id, kode, nama, level, tipe, saldo_normal, is_postable, klasifikasi_laporan)
-       values ($1, $2, $3, 1, $4, $5, false, $6) returning id`,
-      [bumn.id, kode, nama, tipe, saldo, klasifikasi],
-    );
-    header[tipe] = h.id;
-  }
-
-  const akun = {} as Record<KunciAkun, AkunFixture>;
-  for (const [kunciAkun, def] of Object.entries(DEF_AKUN) as Array<[KunciAkun, DefAkun]>) {
+  // The two fixture-only accounts. Level 2 under a seeded header, so the
+  // hierarchy trigger is satisfied the same way the seed satisfies it.
+  for (const def of AKUN_KHUSUS_FIXTURE) {
+    const parentId = idPerKode.get(def.parentKode);
+    if (!parentId) throw new Error(`fixture: header ${def.parentKode} tidak ada di hasil seed`);
     const a = await satu<{ id: string }>(
       db,
       `insert into akun
          (bumn_id, kode, nama, parent_id, level, tipe, saldo_normal,
           is_postable, is_kas, is_kontra, aktif, klasifikasi_laporan)
-       values ($1, $2, $3, $4, 2, $5, $6, true, $7, $8, $9, $10) returning id`,
-      [
-        bumn.id,
-        def.kode,
-        def.nama,
-        header[def.tipe],
-        def.tipe,
-        def.saldoNormal,
-        def.isKas ?? false,
-        def.isKontra ?? false,
-        def.aktif ?? true,
-        def.klasifikasi,
-      ],
+       values ($1, $2, $3, $4::uuid, 2, $5, $6, true, false, false, $7, $8) returning id`,
+      [bumn.id, def.kode, def.nama, parentId, def.tipe, def.saldoNormal, def.aktif, def.klasifikasi],
     );
+    idPerKode.set(def.kode, a.id);
+  }
+
+  // Read every account back by code. Reading rather than trusting the seed's
+  // own return value means the flags the tests depend on (is_kas, is_kontra)
+  // are the ones actually stored, not the ones intended.
+  const barisAkun = await db.query<{
+    kode: string;
+    id: string;
+    nama: string;
+    tipe: TipeAkun;
+    saldo_normal: "D" | "K";
+    is_kas: boolean;
+    is_kontra: boolean;
+    klasifikasi_laporan: string;
+  }>(
+    `select kode, id, nama, tipe, saldo_normal, is_kas, is_kontra, klasifikasi_laporan
+       from akun where bumn_id = $1 and deleted_at is null`,
+    [bumn.id],
+  );
+  const akunPerKode = new Map(barisAkun.map((row) => [row.kode, row]));
+
+  const akun = {} as Record<KunciAkun, AkunFixture>;
+  for (const [kunciAkun, kode] of Object.entries(KODE_AKUN) as Array<[KunciAkun, string]>) {
+    const row = akunPerKode.get(kode);
+    if (!row) {
+      throw new Error(
+        `fixture: akun ${kode} (${kunciAkun}) tidak ada setelah seed. ` +
+          "Kalau kode COA di apps/api/src/seed/coa-inti.ts berubah, perbarui KODE_AKUN di sini.",
+      );
+    }
     akun[kunciAkun] = {
-      id: a.id,
-      kode: def.kode,
-      nama: def.nama,
-      tipe: def.tipe,
-      saldoNormal: def.saldoNormal,
-      isKas: def.isKas ?? false,
-      isKontra: def.isKontra ?? false,
-      klasifikasi: def.klasifikasi,
+      id: row.id,
+      kode: row.kode,
+      nama: row.nama,
+      tipe: row.tipe,
+      saldoNormal: row.saldo_normal,
+      isKas: row.is_kas,
+      isKontra: row.is_kontra,
+      klasifikasi: row.klasifikasi_laporan,
     };
   }
+
+  const akunHeaderAset = akunPerKode.get("1");
+  if (!akunHeaderAset) throw new Error("fixture: akun header 1 (ASET) tidak ada setelah seed");
 
   const sektor = await satu<{ id: string }>(
     db,
@@ -564,27 +566,6 @@ export async function buatDunia(): Promise<DuniaJurnal> {
     ],
   );
 
-  // Spec 6.4 mapping rows: the accounts behind every automatic journal live
-  // HERE, as data (ADR 0004), which is what the event tests prove.
-  for (const ev of KATALOG_EVENT_6_4) {
-    await db.query(
-      `insert into event_jurnal_mapping
-         (bumn_id, event_code, deskripsi, akun_debit_id, akun_kredit_id,
-          debit_dari_payload, kredit_dari_payload, jenis_jurnal, aktif)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
-      [
-        bumn.id,
-        ev.code,
-        `${ev.code} (fixture)`,
-        ev.debit ? akun[ev.debit].id : null,
-        ev.kredit ? akun[ev.kredit].id : null,
-        ev.debit === null,
-        ev.kredit === null,
-        ev.jenis,
-      ],
-    );
-  }
-
   await db.query(
     `insert into konfigurasi (bumn_id, grup, kunci, nilai, tipe_data, deskripsi, perlu_konfirmasi)
      values ($1, $2, $3, $4, 'JSON', 'Kategori kegiatan Pinbuk (spec 6.5), default menunggu konfirmasi klien', true)`,
@@ -615,7 +596,7 @@ export async function buatDunia(): Promise<DuniaJurnal> {
     tanggalAwal,
     jam,
     akun,
-    akunHeaderId: header.ASET,
+    akunHeaderId: akunHeaderAset.id,
     sektorId: sektor.id,
     mitraId: mitra.id,
     clusterId: cluster.id,

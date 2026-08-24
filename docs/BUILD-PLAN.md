@@ -123,6 +123,20 @@ Granularitas push dan mekanisme idempotensi menunggu verifikasi kemampuan API di
 
 Granularitas push (per jurnal detail versus ringkasan per periode) dan mekanisme idempotensi masih menunggu verifikasi kemampuan API di `docs/INTEGRASI-ACCURATE.md`. Sampai itu selesai, desain harus menyediakan satu port ekspor dengan dua adapter, file dan API, supaya jalur file tetap ada kalau API ternyata membatasi.
 
+## Keputusan sementara: event yang tidak ada di spesifikasi Bagian 6.4
+
+Spesifikasi mendaftarkan 19 kode event. Tiga peristiwa uang yang nyata tidak punya kode di daftar itu, dan pekerjaan Fase 3 sampai 5 tersandung karenanya. Pemilik repo meminta diambil keputusan yang paling masuk akal sekarang, dengan catatan bisa diganti belakangan. Karena pemetaan akun adalah baris di `event_jurnal_mapping`, menggantinya nanti berarti mengedit satu baris, bukan mengubah kode.
+
+| Kode | Kapan dipakai | Debit | Kredit | Alasan |
+|---|---|---|---|---|
+| `HAPUS_BUKU_KEKURANGAN_PENYISIHAN` | Saat hapus buku sementara saldo penyisihan lebih kecil dari outstanding yang dihapus | Beban Penyisihan Penurunan Nilai Piutang | Piutang Pinjaman Mitra Binaan | Spesifikasi mengasumsikan penyisihan selalu menutup seluruh outstanding. Itu hanya benar kalau kolektibilitasnya Macet dengan rate 100 persen. Kalau dasar penyisihan kolektif seperti temuan `docs/REGULASI.md`, saldo penyisihan bisa kurang, dan `HAPUS_BUKU_PIUTANG` apa adanya akan membuat akun kontra aset menjadi negatif. Kekurangannya dibebankan ke periode berjalan |
+| `RESTRUKTUR_POKOK_NAIK` | Reschedule yang menaikkan pokok | Piutang Pinjaman Mitra Binaan | Piutang Jasa Administrasi | Pokok naik tanpa uang keluar berarti kewajiban yang sudah diakui dikapitalisasi ke pokok. Yang paling mungkin adalah jasa administrasi yang sudah diakrual tapi belum dibayar. Kalau ternyata yang dikapitalisasi bukan itu, baris pemetaan diubah tanpa deploy |
+| `RESTRUKTUR_POKOK_TURUN` | Reschedule yang menurunkan pokok | Penyisihan Penurunan Nilai Piutang | Piutang Pinjaman Mitra Binaan | Penurunan pokok adalah pengurangan tagihan, jadi diserap penyisihan lebih dulu. Kalau penyisihan tidak cukup, sisanya lewat `HAPUS_BUKU_KEKURANGAN_PENYISIHAN` dengan alasan yang sama seperti di atas |
+
+**Penghapustagihan sengaja TIDAK diberi kode event.** Alasannya bukan kelalaian: menurut SK-277/MBU/10/2023, penghapusbukuan mengeluarkan piutang dari neraca sementara hak tagih tetap ada dan dicatat ekstrakomtabel. Penghapustagihan menghapus hak tagih itu, dan pada saat itu piutangnya sudah tidak ada di neraca, jadi tidak ada saldo yang perlu digeser. Perlakuannya adalah peristiwa memorandum pada register ekstrakomtabel, bukan jurnal. Kalau suatu kasus perlu menghapus tagihan atas piutang yang masih di neraca, urutannya dua langkah: hapus buku lebih dulu, lalu hapus tagih. Ini menghindari dua kode event yang menghasilkan jurnal identik, yang justru sumber kebingungan saat rekonsiliasi.
+
+Ketiga keputusan di atas berstatus **asumsi yang perlu dikonfirmasi tim keuangan klien dan KAP**, dicatat di `ASSUMPTIONS.md`, dan tidak boleh dianggap sebagai kepatuhan regulasi.
+
 ## Batas scope (Bagian 15)
 
 Tidak dibangun: payment gateway atau integrasi bank apa pun, aplikasi mobile native, UI multi tenant, multi mata uang, modul di luar TJSL, realtime atau websocket, design system baru dari nol, fitur AI di luar delapan yang disebut Bagian 12, hard delete data keuangan, optimasi performa prematur.

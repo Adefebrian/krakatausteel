@@ -22,11 +22,14 @@
 // be asserting against a shape the API cannot produce.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createAuditService } from "../audit";
+import { canonicalPermission, ROLE_CODES } from "../auth";
 import { createDbAdapter } from "../../core/adapters/db";
+import { permissionsForRole, seedRbac } from "../../seed/rbac";
 import {
   createJurnalEngine,
   JurnalError,
   KODE_JURNAL,
+  PERMISSION_JURNAL,
   POLA_NO_JURNAL,
   type JurnalDbPort,
   type JurnalEngine,
@@ -363,6 +366,52 @@ describe("spec 7.2 step 8 postingEventGabungan: beberapa event, satu jurnal", ()
     );
     await tolakDengan(engine.postingJurnal(draft.id, d.ctx.maker), KODE_JURNAL.TIDAK_BERWENANG);
   });
+});
+
+describe("otorisasi: izin yang dijaga engine harus izin yang bisa diberikan", () => {
+  // THE BUG CLASS THIS CLOSES. The engine used to check `jurnal.update` and
+  // `jurnal.delete` while the auth catalogue carried neither, and to check
+  // `jurnal.post` for reversal while `jurnal.reversal` existed and granted
+  // nothing. Both stayed green for the same reason: the fixture wrote its own
+  // permission arrays, so every test asserted against its own opinion instead
+  // of against the grant matrix. Resolving from the database is what makes
+  // "the engine demands a permission nobody can be granted" a failing test.
+  test("setiap izin yang dijaga engine ada di katalog auth", async () => {
+    for (const kode of Object.values(PERMISSION_JURNAL)) {
+      // A typo here is a permanent 403 that reads like a policy decision.
+      expect(canonicalPermission(kode)).toBe(kode);
+    }
+  });
+
+  test("setiap izin yang dijaga engine benar benar dipegang minimal satu role di database", async () => {
+    // Through the pg adapter on purpose: seedRbac binds a text[] parameter,
+    // and node-postgres serialises a JS array correctly where a bare
+    // comma-joined string would be rejected.
+    const dbPg = createDbAdapter();
+    await seedRbac(dbPg);
+
+    const diberikan = new Set<string>();
+    for (const role of ROLE_CODES) {
+      for (const kode of await permissionsForRole(dbPg, role)) diberikan.add(kode);
+    }
+
+    for (const kode of Object.values(PERMISSION_JURNAL)) {
+      // If this fails, the engine is guarding a door with a key that does not
+      // exist: the operation is unreachable for every role in the system.
+      expect(diberikan.has(kode)).toBe(true);
+    }
+
+    // And the two the engine treats as distinct really are distinct rights in
+    // the matrix, held by the role that reverses rather than by everyone who
+    // can post.
+    const approver = await permissionsForRole(dbPg, "APPROVER");
+    expect(approver).toContain(PERMISSION_JURNAL.POSTING);
+    expect(approver).toContain(PERMISSION_JURNAL.REVERSAL);
+    const maker = await permissionsForRole(dbPg, "MAKER");
+    expect(maker).toContain(PERMISSION_JURNAL.BUAT);
+    expect(maker).not.toContain(PERMISSION_JURNAL.POSTING);
+    expect(maker).not.toContain(PERMISSION_JURNAL.REVERSAL);
+  }, 30_000);
 });
 
 describe("otorisasi: reversal adalah hak tersendiri", () => {
