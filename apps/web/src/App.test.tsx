@@ -3,6 +3,7 @@
 // answer in these tests is a response the API can actually produce, and the
 // fetch double below only replaces the transport.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { act } from "react";
 import { App } from "./App";
 import { clickOn, mount, submitForm, textOf, typeInto } from "./testing";
 
@@ -370,6 +371,50 @@ describe("logout", () => {
     expect(view.container.querySelector(".shell")).toBeTruthy();
     expect(textOf(view.container.querySelector(".toast"))).toContain("Gagal keluar");
 
+    view.unmount();
+  });
+});
+
+describe("revalidation when the tab comes back to the front", () => {
+  test("a session that expired while the tab was idle sends the user to login", async () => {
+    // Redis drops the session on an idle TTL, so a tab left open overnight can
+    // be holding a shell whose session no longer exists. Every button in it
+    // would fail. Checking on focus turns that into one honest login prompt.
+    let live = true;
+    stubFetch(() => (live ? json(200, SESSION) : NO_SESSION()));
+
+    const view = await mount(<App />);
+    expect(view.container.querySelector(".shell")).toBeTruthy();
+
+    live = false;
+    await act(async () => {
+      globalThis.dispatchEvent(new Event("focus"));
+    });
+    await view.flush();
+
+    expect(view.container.querySelector(".shell")).toBeNull();
+    expect(view.container.querySelector("#login-username")).toBeTruthy();
+    view.unmount();
+  });
+
+  test("a network blip on that check does NOT sign anyone out", async () => {
+    // Losing wifi for a second is not a revoked session. Throwing the user out
+    // of a half filled form over it would be its own bug.
+    let online = true;
+    stubFetch(() => {
+      if (!online) throw new Error("network down");
+      return json(200, SESSION);
+    });
+
+    const view = await mount(<App />);
+    online = false;
+    await act(async () => {
+      globalThis.dispatchEvent(new Event("focus"));
+    });
+    await view.flush();
+
+    expect(view.container.querySelector(".shell")).toBeTruthy();
+    expect(view.container.querySelector("#login-username")).toBeNull();
     view.unmount();
   });
 });
