@@ -1,63 +1,69 @@
 # Titik lanjut
 
-Dijeda atas permintaan pemilik repo. Commit terakhir `51802cf`, sudah dipush. Kondisi commit itu: **599 test lulus, 0 gagal**, typecheck bersih 5 dari 5 paket, `check:boundaries` lolos.
+Dijeda atas permintaan pemilik repo saat batas pemakaian hampir tercapai. Commit terakhir `318141f`, sudah dipush.
 
-## Selesai dan terkunci
+**PENTING: working tree sedang di tengah perubahan yang sengaja memutus.** Jangan anggap kegagalan test sebagai kerusakan sampai membaca bagian berikut.
 
-| Fase | Isi | Bukti |
-|---|---|---|
-| 0 Fondasi | 67 tabel spesifikasi Bagian 4, invarian Bagian 3 ditegakkan trigger database, auth argon2id dengan sesi Redis, 42 permission kanonik, scope cabang, audit log, konfigurasi tanpa default diam diam, generator nomor dokumen tanpa endpoint HTTP | 288 test di 12 file |
-| 1 Engine jurnal | Tujuh operasi Bagian 6.1 plus edit draft, event mapping dari tabel, reversal yang membalik state bisnis di transaksi yang sama, posting batch atomik, posting gabungan satu jurnal beberapa baris, audit per operasi | 112 test |
-| 2 Engine angsuran | FLAT, EFEKTIF, ANUITAS di atas BigInt sen, sisa pembulatan seluruhnya ke baris terakhir terpisah pokok dan jasa, grace, jatuh tempo tanggal 31 yang clamp lalu kembali, waterfall alokasi dari konfigurasi, reschedule dengan riwayat versi, simulasi satu kernel, konversi rate flat ekuivalen | 89 test |
-| Integrasi | Engine angsuran menembak ledger hanya lewat instance engine jurnal di composition root. Invarian 11 juga ditolak database lewat trigger jalur posting | Wiring di `core/app.ts` |
-| Keamanan | Sepuluh temuan `docs/SECURITY-FASE-0.md` ditutup, dibuktikan pada boot nyata dengan `PORT` terisi | Satu listener, `/example` 404, XFF palsu tidak sampai audit log |
+## Kondisi persis saat dijeda
 
-## Terputus di tengah, lanjut dari sini
+| Hal | Keadaan |
+|---|---|
+| Commit terakhir | `318141f`, hijau saat di-commit |
+| Working tree | 6 file dimodifikasi, rename belum selesai |
+| `bun run typecheck` | bersih, 0 error |
+| `bun test` | merah, dan itu memang diharapkan, lihat sebab di bawah |
+| Database `tjsl_test` | masih di migrasi 26, berisi 6234 baris BUMN sisa fixture |
+| Database `tjsl_dev` | di migrasi 26 |
 
-**1. Fase 3 PUMK, test lebih dulu (agen QA).** Yang ada di disk baru `apps/api/src/modules/pumk/{contract.ts,index.ts,test-support.ts}`. **Belum ada satu pun file test.** Agen berhenti saat mengerjakan index dan test-support.
+**Kenapa test merah:** migrasi 0027 dan 0028 sudah di-commit tapi **belum diterapkan** ke database mana pun. Kode sudah sebagian di-rename ke nama kolom baru (`akun.klasifikasi_akun`), sementara database masih punya nama lama (`akun.klasifikasi_laporan`). Jadi merahnya karena kode dan database berbeda versi, bukan karena logikanya salah.
 
-Ada satu file uji coba yang **sengaja tidak di-commit** dan masih tergeletak di working tree: `apps/api/src/modules/pumk/zz-smoke.test.ts`. File itu merah karena kekhasan driver yang sudah terdokumentasi di `modules/jurnal/repo.ts`: array JS terikat ke Postgres sebagai string dipisah koma, bukan array, sehingga muncul `malformed array literal ... 22P02`. Perbaikannya membangun daftar `IN ($2,$3,...)` atau cast eksplisit. Hapus atau perbaiki file itu, jangan dibiarkan menggantung.
+## Yang sedang dikerjakan saat berhenti
 
-Yang masih harus ditulis, semuanya dari spesifikasi Bagian 9.1: seluruh transisi state machine termasuk setiap penolakan, otorisasi per role plus skenario 24 (Maker cabang A menembus cabang B lewat manipulasi id), segregation of duties sebagai error domain bersih bukan trigger mentah, approver mengubah plafon dan tenor lalu mengalir ke akad dan jadwal, akad dan jadwal dan pencairan lewat kedua engine sungguhan dengan rekonsiliasi sub ledger nol, penerimaan angsuran tiga kasus skenario 6, reschedule, pengakhiran dan hapus buku, tindak lanjut penagihan, cluster, kartu piutang, dan konversi submission portal.
+Mendaratkan migrasi 0027 dan 0028 yang sengaja memutus, memperbaiki 25 titik pemanggilan, lalu mereset database test. Agen berhenti tepat saat menulis badan fungsi `seedCoaInti`.
 
-**2. Tiga kode event baru (agen engine jurnal).** Sudah mendarat di seed dan fixture bersama, plus test keputusannya. Yang belum: satu test yang benar benar penting, yaitu hapus buku ketika **saldo penyisihan kurang**, yang harus mengonsumsi penyisihan lebih dulu lalu menyalurkan sisanya ke `HAPUS_BUKU_KEKURANGAN_PENYISIHAN`, dengan akun kontra aset tidak pernah negatif dan ledger tetap balance. Juga belum: entri `ASSUMPTIONS.md` untuk ketiga keputusan itu.
+File yang sudah tersentuh: `apps/api/src/seed/{coa-inti.ts,event-jurnal.test.ts,index.ts}`, `apps/api/src/modules/jurnal/{test-support.ts,jurnal-event.test.ts}`, `apps/api/src/modules/nonpumk/test-support.ts`.
 
-## Keputusan yang diambil sementara, bisa diganti
+Yang **belum** tersentuh dan masih harus di-rename: `apps/api/src/modules/laporan/` (`test-support.ts`, `contract.ts`, `laporan-struktur-data.test.ts`, `laporan-bagan-akun.test.ts`, `laporan-aktivitas.test.ts`, `laporan-perubahan-aset-neto.test.ts`, sekitar 11 titik) dan `apps/api/src/modules/angsuran/test-support.ts` (3 titik).
 
-Pemilik repo meminta ambil yang paling masuk akal dulu. Semua ada di `docs/BUILD-PLAN.md` bagian "Keputusan sementara". Menggantinya berarti mengedit baris `event_jurnal_mapping`, bukan mengubah kode.
+## Urutan lanjut, jangan diacak
 
-| Kode | Debit | Kredit |
-|---|---|---|
-| `HAPUS_BUKU_KEKURANGAN_PENYISIHAN` | Beban Penyisihan | Piutang Pokok |
-| `RESTRUKTUR_POKOK_NAIK` | Piutang Pokok | Piutang Jasa Administrasi |
-| `RESTRUKTUR_POKOK_TURUN` | Penyisihan | Piutang Pokok |
+1. Selesaikan rename di dua modul yang tersisa di atas.
+2. Lengkapi `seedCoaInti` supaya menghasilkan bentuk baru: klasifikasi akun, minimal satu template, dan pemetaan yang membuat keempat laporan digerakkan akun.
+3. Tutup empat celah seed yang difilekan suite laporan sebagai test gagal-tertutup: tidak ada akun aset neto yang bisa diposting, seksi baris laporan diisi nama laporan bukan nama seksi, dua laporan tidak punya baris template sama sekali, dan klasifikasi arus kas hanya diisi di akun kas sehingga setiap lawan akun tidak terklasifikasi.
+4. Re-pin satu test di `modules/rka` yang memakukan ketiadaan kolom `saldo_akun_periode.sektor_id`. Perbaikannya ternyata berbentuk tabel (`saldo_akun_dimensi_periode`), dan pin berbentuk kolom tidak bisa mendeteksinya, jadi celah itu akan terbaca terbuka selamanya. Ganti ke keberadaan tabel barunya, pertahankan catatan asalnya.
+5. Jalankan `bun run db:reset` (aman, tidak ada agen lain), lalu seed ulang, lalu verifikasi dua kali tanpa reset.
 
-Penghapustagihan sengaja tanpa kode event, karena piutangnya sudah keluar dari neraca saat hapus buku sehingga tidak ada saldo yang digeser.
+## Yang sengaja TIDAK dikerjakan di langkah ini
 
-## Masih menunggu keputusan pemilik repo
+Dua ini punya pemilik sendiri dan test yang memakukannya memang harus tetap merah:
 
-Tidak memblokir pembangunan, semuanya punya default konservatif, tapi butuh jawaban tim keuangan klien dan KAP sebelum produksi:
+- Engine closing menulis `saldo_akun_dimensi_periode` (termasuk baris sisa) dan `periode.template_laporan_id`.
+- Modul PUMK mengirim `dimensi: { sektorId }` saat memposting pencairan, supaya atribusi per sektor tidak lagi bergantung pada master data yang bisa diubah.
 
-1. **Siapa pemegang buku resmi TJSL** (`OPEN-QUESTIONS.md` item 11). Fork scope terbesar dan memblokir Fase 6. Kalau Accurate yang jadi pemegang buku, COA wajib mencerminkan COA Accurate dan laporan 17 sampai 20 turun status jadi laporan manajemen.
-2. Metode jasa administrasi: 3 persen flat sesuai spesifikasi, atau 3 persen efektif sesuai PER-1/MBU/03/2023 Pasal 22 ayat (2).
-3. Dasar penyisihan: tabel rate 0, 25, 75, 100 persen, atau penurunan nilai kolektif berbasis histori penagihan.
-4. Format laporan: istilah PSAK 45 sesuai spesifikasi, atau ISAK 335 yang berlaku.
-5. Siapa yang memelihara ratusan record customer Mitra Binaan di Accurate (item 15). Tata kelola data, bukan rekayasa.
-6. Dua puluh dua butir di `OPEN-QUESTIONS.md`.
+## Status fase
 
-## Lingkungan lokal
+| Fase | Status |
+|---|---|
+| 0 sampai 4 | Selesai penuh, engine plus API plus layar |
+| 5 Closing | Engine selesai, 132 test. Belum ada API dan layar |
+| 6 RKA dan laporan | Test selesai ditulis, 104 dan 147 test, keduanya merah sesuai desain. Implementasi belum |
+| 7 sampai 9 | Belum |
 
-Postgres 15.17 native `localhost:5432`, database `tjsl_dev` dan `tjsl_test`, 21 migrasi terpasang. Redis `localhost:6379`. Tidak perlu setup ulang.
+## Menjalankan lokal
 
-Dua server dev **masih hidup** dari sesi terakhir: API di 3001, SPA di 3000. Login pakai kredensial di `SEED.md` setelah `bun run db:seed:dev`. Matikan dengan:
+Port 3000 dipakai project lain (traveldiary), jadi aplikasi ini di **3100**.
 
 ```bash
-lsof -ti:3000 -ti:3001 | xargs kill
+PORT=3001 CORS_ORIGINS=http://localhost:3100,http://localhost:3000 bun apps/api/src/index.ts
+WEB_PORT=3100 API_BASE_URL=http://localhost:3001 bun apps/web/server.ts
 ```
 
-## Urutan lanjut
+Buka http://localhost:3100, login `adminpusat` dengan kata sandi `TjslDemo#2026`. Kalau muncul "Origin tidak diizinkan", itu karena API dijalankan tanpa `CORS_ORIGINS` yang memuat port 3100.
 
-1. Selesaikan test PUMK, lalu implementasi modulnya terhadap test yang merah.
-2. Gate Fase 3: satu proposal jalan dari DRAFT sampai DICAIRKAN, jurnal otomatis benar, sub ledger piutang cocok buku besar.
-3. Fase 4 Non PUMK, Fase 5 closing. Untuk closing ada satu syarat keras dari ADR 0010: `saldo_akun_periode` **wajib** membaca `v_ledger_baris`, bukan memfilter `POSTED` saja, atau setiap periode yang ditutup akan membawa dobel hitung reversal secara permanen di neraca lajur bekunya.
-4. Fase 6 sampai 9 sesuai `docs/BUILD-PLAN.md`.
+## Keputusan yang masih menunggu pemilik repo
+
+1. Siapa pemegang buku resmi TJSL. Fork scope terbesar, menggigit di Fase 6.
+2. Metode jasa administrasi, flat atau efektif.
+3. Dasar penyisihan, tabel rate atau penurunan nilai kolektif.
+4. Format laporan, PSAK 45 atau ISAK 335. Skema sekarang mendukung keduanya hidup berdampingan lewat template bermasa berlaku.
+5. Butir 1 sampai 28 di `OPEN-QUESTIONS.md`.
