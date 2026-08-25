@@ -465,7 +465,19 @@ export interface PenyisihanDb {
   saldo_penyisihan_awal: string;
   penyisihan_dibutuhkan: string;
   beban_penyisihan_periode: string;
-  jurnal_id: string | null;
+  /**
+   * The SET of entries that carried this branch's movement, oldest first, from
+   * `penyisihan_periode_jurnal` (migrations/0026). `nilai` is signed: positive
+   * a formation, negative a recovery.
+   *
+   * `penyisihan_periode.jurnal_id` is GONE, and this is not a rename of it. A
+   * delta correction spreads one period's provision over several journals, so
+   * the singular column could only ever name the last one while
+   * `beban_penyisihan_periode` stated the total; that ambiguity is the whole
+   * subject of migrations/0026. Summing `nilai` here reconciles against the
+   * stated movement, and the database enforces it at COMMIT.
+   */
+  jurnal: Array<{ jurnal_id: string; nilai: string }>;
   tanggal: string;
 }
 
@@ -1486,15 +1498,31 @@ export async function buatDunia(): Promise<DuniaClosing> {
       );
     },
     bacaPenyisihan(periodeId) {
+      // The linked journals arrive as a jsonb array built in Postgres rather
+      // than as a second round trip, so a caller sees one row per branch with
+      // its entries attached and cannot accidentally read a partial set.
+      // `coalesce` on the aggregate, because a branch whose movement was zero
+      // has a row and no entries at all, which is a legitimate state (spec 8.4
+      // check 5: "posted OR explicitly stated as zero").
       return db.query<PenyisihanDb>(
-        `select id::text as id, periode_id::text as periode_id, cabang_id::text as cabang_id,
-                saldo_penyisihan_awal::text as saldo_penyisihan_awal,
-                penyisihan_dibutuhkan::text as penyisihan_dibutuhkan,
-                beban_penyisihan_periode::text as beban_penyisihan_periode,
-                jurnal_id::text as jurnal_id, tanggal::text as tanggal
-           from penyisihan_periode
-          where periode_id = $1 and deleted_at is null
-          order by cabang_id`,
+        `select p.id::text as id, p.periode_id::text as periode_id,
+                p.cabang_id::text as cabang_id,
+                p.saldo_penyisihan_awal::text as saldo_penyisihan_awal,
+                p.penyisihan_dibutuhkan::text as penyisihan_dibutuhkan,
+                p.beban_penyisihan_periode::text as beban_penyisihan_periode,
+                coalesce(t.jurnal, '[]'::jsonb) as jurnal,
+                p.tanggal::text as tanggal
+           from penyisihan_periode p
+           left join lateral (
+             select jsonb_agg(
+                      jsonb_build_object('jurnal_id', j.jurnal_id::text,
+                                         'nilai', j.nilai::text)
+                      order by j.created_at, j.id) as jurnal
+               from penyisihan_periode_jurnal j
+              where j.penyisihan_periode_id = p.id and j.deleted_at is null
+           ) t on true
+          where p.periode_id = $1 and p.deleted_at is null
+          order by p.cabang_id`,
         [periodeId],
       );
     },

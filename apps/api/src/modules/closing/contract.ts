@@ -557,8 +557,51 @@ export interface PenyisihanPeriode {
   bebanPenyisihanPeriode: Uang;
   /** step 4. null when the movement is exactly zero and no journal is posted. */
   eventCode: "BEBAN_PENYISIHAN" | "PEMULIHAN_PENYISIHAN" | null;
+  /**
+   * THE PERIOD'S PROVISION, AS THE SET OF ENTRIES THAT ACTUALLY CARRIED IT.
+   *
+   * Correction is by DELTA, not by reversal (a reversal in this system MEANS a
+   * mistake was made, spec 6.3), so a re-run at a corrected rate leaves the
+   * movement spread across several journals: 10.200.000 then +1.200.000 is a
+   * period expense of 11.400.000 carried by two entries. migrations/0026 makes
+   * that a join table and enforces, deferred and from both sides, that
+   * `SUM(nilai)` here equals `bebanPenyisihanPeriode`. Signed, because both
+   * events post under `jenis = 'PENYISIHAN'` and the direction cannot be read
+   * off the journal.
+   *
+   * THIS, NOT `jurnalId`, IS WHAT A REPORT MUST READ. Spec 16 scenario 17 has
+   * an operator reconcile Laporan Perhitungan Penyisihan against the period's
+   * provision journal; summing this set reconciles, following a single link
+   * does not.
+   */
+  jurnal: ReadonlyArray<KontribusiJurnalPenyisihan>;
+  /**
+   * The entry the MOST RECENT movement was posted to, or null when nothing has
+   * been posted for this period and branch.
+   *
+   * DELIBERATELY NOT "the period's provision journal", and the difference is
+   * the whole content of migrations/0026: after a delta correction this names
+   * the delta while `bebanPenyisihanPeriode` states the total, so the two do
+   * not reconcile with each other and are not supposed to. It is kept because
+   * an operator correcting a run needs to reach the entry that run produced
+   * (reversing it, opening it on screen), which is a question about ONE journal
+   * and is unanswerable from a set. `penyisihan_periode.jurnal_id` itself is
+   * gone from the schema, so nothing can follow this link by accident from SQL.
+   */
   jurnalId: string | null;
   tanggal: string;
+}
+
+/**
+ * One journal's signed contribution to a period's provision movement. Mirrors
+ * `penyisihan_periode_jurnal` (migrations/0026). `nilai` is never zero: a
+ * journal that moved nothing is not part of the movement, and spec 8.2 step 4
+ * posts none.
+ */
+export interface KontribusiJurnalPenyisihan {
+  jurnalId: string;
+  /** Positive = formation, negative = recovery. `abs` equals the journal total. */
+  nilai: Uang;
 }
 
 export interface JalankanPenyisihanInput {

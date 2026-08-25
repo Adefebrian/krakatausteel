@@ -55,6 +55,7 @@ import {
   type JalankanPenyisihanInput,
   type KelasKolektibilitas,
   type KodePrasyarat,
+  type KontribusiJurnalPenyisihan,
   type MetodePengakuanJasa,
   type ModePenyisihan,
   type PenyisihanPeriode,
@@ -223,6 +224,17 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
     bumnId: string,
   ): Promise<PeriodeRow> {
     const p = await repo.periode(tx, periodeId);
+    if (!p || p.bumn_id !== bumnId) throw tolak("PERIODE_TIDAK_DITEMUKAN", { periodeId });
+    return p;
+  }
+
+  /** `periodeWajib`, but taking the row lock. See `repo.periodeUntukUbah`. */
+  async function periodeUntukUbah(
+    tx: ClosingTx,
+    periodeId: string,
+    bumnId: string,
+  ): Promise<PeriodeRow> {
+    const p = await repo.periodeUntukUbah(tx, periodeId);
     if (!p || p.bumn_id !== bumnId) throw tolak("PERIODE_TIDAK_DITEMUKAN", { periodeId });
     return p;
   }
@@ -652,12 +664,19 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
 
   // --- spec 8.2 ------------------------------------------------------------
 
+  interface BarisPenyisihanTersimpan {
+    id: string;
+    beban: Uang;
+    /** Oldest first, so the last element is the entry the last run posted. */
+    jurnal: KontribusiJurnalPenyisihan[];
+  }
+
   interface HitunganPenyisihan {
     cabangId: string;
     saldoAwal: Uang;
     dibutuhkan: Uang;
     beban: Uang;
-    barisAda: { id: string; jurnalId: string | null; beban: Uang } | null;
+    barisAda: BarisPenyisihanTersimpan | null;
   }
 
   async function hitungPenyisihanCabang(
@@ -666,7 +685,7 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
     periode: PeriodeRow,
     cabangId: string,
     akunPenyisihanId: string,
-    tersimpan: Map<string, { id: string; jurnal_id: string | null; beban_penyisihan_periode: string }>,
+    tersimpan: Map<string, BarisPenyisihanTersimpan>,
   ): Promise<HitunganPenyisihan> {
     const dibutuhkan = uangDariDb(
       await repo.totalPenyisihanDibutuhkan(tx, periode.id, cabangId),
@@ -685,7 +704,12 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
       akunId: akunPenyisihanId,
       sampaiTanggal: periode.tanggal_akhir,
       cabangId,
-      kecualiJurnalIds: ada?.jurnal_id ? [ada.jurnal_id] : [],
+      // EVERY entry this period's provision has already posted, not just the
+      // last one. Under delta correction the movement is carried by a SET
+      // (migrations/0026), so excluding one of two would leave the earlier
+      // formation inside the "opening" balance and the re-run would compute a
+      // delta against a figure that already contains its own first instalment.
+      kecualiJurnalIds: ada?.jurnal.map((j) => j.jurnalId) ?? [],
     });
     // The contra-asset carries a normal CREDIT balance and `saldoAkun` is
     // debit-positive, so the allowance in hand is the negation.
@@ -695,13 +719,7 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
       saldoAwal,
       dibutuhkan,
       beban: kurang(dibutuhkan, saldoAwal),
-      barisAda: ada
-        ? {
-            id: ada.id,
-            jurnalId: ada.jurnal_id,
-            beban: uangDariDb(ada.beban_penyisihan_periode),
-          }
-        : null,
+      barisAda: ada,
     };
   }
 
@@ -723,10 +741,17 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
     if (!mapping) {
       throw tolak("EVENT_MAPPING_BELUM_ADA", { eventCode: EVENT_CLOSING.BEBAN_PENYISIHAN });
     }
-    const tersimpan = new Map(
+    const tautan = await repo.tautanJurnal(tx, periode.id);
+    const tersimpan = new Map<string, BarisPenyisihanTersimpan>(
       (await repo.penyisihanPeriode(tx, periode.id)).map((r) => [
         r.cabang_id,
-        { id: r.id, jurnal_id: r.jurnal_id, beban_penyisihan_periode: r.beban_penyisihan_periode },
+        {
+          id: r.id,
+          beban: uangDariDb(r.beban_penyisihan_periode),
+          jurnal: tautan
+            .filter((t) => t.penyisihan_periode_id === r.id)
+            .map((t) => ({ jurnalId: t.jurnal_id, nilai: uangDariDb(t.nilai) })),
+        },
       ]),
     );
     const hitungan: HitunganPenyisihan[] = [];
@@ -913,6 +938,7 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
     //    dinyatakan nol". The `penyisihan_periode` row IS that statement, which
     //    is why spec 8.2 writes it even when the movement is nothing.
     const penyisihan = await repo.penyisihanPeriode(tx, periode.id);
+    const tautanPenyisihan = await repo.tautanJurnal(tx, periode.id);
     hasil.push(
       hasilPrasyarat(
         "PENYISIHAN_BELUM_POSTED",
@@ -923,10 +949,16 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
           : `Perhitungan penyisihan periode ${label} belum dijalankan, jadi belum ada beban penyisihan ` +
             "maupun pernyataan bahwa pergerakannya nol.",
         {
+          // The drill-down names EVERY entry that carried the branch's
+          // movement, not one of them: after a delta correction the provision
+          // lives in several journals (migrations/0026) and an operator
+          // checking the checklist needs all of them.
           cabang: penyisihan.map((p) => ({
             cabangId: p.cabang_id,
             beban: uangDariDb(p.beban_penyisihan_periode),
-            jurnalId: p.jurnal_id,
+            jurnal: tautanPenyisihan
+              .filter((t) => t.penyisihan_periode_id === p.id)
+              .map((t) => ({ jurnalId: t.jurnal_id, nilai: uangDariDb(t.nilai) })),
           })),
         },
       ),
@@ -1284,6 +1316,9 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
             : keSen(h.beban) > 0n
               ? EVENT_CLOSING.BEBAN_PENYISIHAN
               : EVENT_CLOSING.PEMULIHAN_PENYISIHAN,
+          // A preview states what WOULD be posted, not what is stored, so both
+          // links are empty even when a committed run already exists.
+          jurnal: [],
           jurnalId: null,
           tanggal: periode.tanggal_akhir,
         }));
@@ -1309,14 +1344,15 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
             // IDEMPOTENCY (invariant 13), as one rule rather than two cases:
             // what gets posted is always the DELTA between the movement already
             // journalised for this (periode, cabang) and the movement now
-            // required. On a first run the previous figure is zero, so the delta
+            // required. On a first run nothing is journalised yet, so the delta
             // IS the movement; on a re-run with unchanged inputs it is zero and
             // nothing is posted, which is what leaves the journal count alone.
-            // `saldoAwal` was measured with the existing journal EXCLUDED, so
+            // `saldoAwal` was measured with every existing entry EXCLUDED, so
             // the arithmetic reproduces instead of compounding.
-            let jurnalId = h.barisAda?.jurnalId ?? null;
-            const sudahDijurnal: Uang = h.barisAda?.beban ?? "0.00";
+            const tautanLama = h.barisAda?.jurnal ?? [];
+            const sudahDijurnal: Uang = tambah("0.00", ...tautanLama.map((t) => t.nilai));
             const delta = kurang(h.beban, sudahDijurnal);
+            let jurnalBaruId: string | null = null;
             if (!nol(delta)) {
               const naikDelta = keSen(delta) > 0n;
               // spec 8.2 step 4 posts the ABSOLUTE value through the event that
@@ -1345,7 +1381,7 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
                   },
                   ctx as JurnalContext,
                 );
-                jurnalId = jurnalBaru.id;
+                jurnalBaruId = jurnalBaru.id;
               } catch (e) {
                 // A `penyisihan_periode` row pointing at no journal would tell
                 // check 5 the allowance was posted when it was not, and the
@@ -1354,7 +1390,6 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
               }
             }
 
-
             const id = await repo.simpanPenyisihan(tx, {
               id: h.barisAda?.id ?? null,
               periodeId: periode.id,
@@ -1362,10 +1397,25 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
               saldoAwal: h.saldoAwal,
               dibutuhkan: h.dibutuhkan,
               beban: h.beban,
-              jurnalId,
               tanggal: periode.tanggal_akhir,
               userId: ctx.userId,
             });
+            // The row first, then its link: the parent must exist for the
+            // foreign key, and `trg_penyisihan_periode_jurnal_30_total` is
+            // deferred, so it compares the stated movement against the sum of
+            // the links once, at COMMIT, whichever order they were written in.
+            if (jurnalBaruId) {
+              await repo.tautkanJurnal(tx, {
+                penyisihanPeriodeId: id,
+                jurnalId: jurnalBaruId,
+                nilai: delta,
+                userId: ctx.userId,
+              });
+            }
+            const tautan: KontribusiJurnalPenyisihan[] = jurnalBaruId
+              ? [...tautanLama, { jurnalId: jurnalBaruId, nilai: delta }]
+              : [...tautanLama];
+
             keluaran.push({
               id,
               periodeId: periode.id,
@@ -1374,7 +1424,11 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
               penyisihanDibutuhkan: h.dibutuhkan,
               bebanPenyisihanPeriode: h.beban,
               eventCode,
-              jurnalId,
+              jurnal: tautan,
+              // The entry the LAST movement was posted to, which after a delta
+              // correction is the delta and NOT the period's provision. See the
+              // field's note in ./contract.ts: reports read `jurnal`.
+              jurnalId: tautan.at(-1)?.jurnalId ?? null,
               tanggal: periode.tanggal_akhir,
             });
           }
@@ -1454,8 +1508,18 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
           await repo.hapusAkrual(tx, h.periode.id, h.daftar);
           await repo.tulisAkrual(
             tx,
-            h.periode.id,
-            ctx.userId,
+            {
+              periodeId: h.periode.id,
+              userId: ctx.userId,
+              // migrations/0025. Both are the policy that produced this run, in
+              // hand already and previously discarded; `konfigurasi` is mutated
+              // in place, so without them a closed period cannot say why its
+              // population was its population. `metode` can only ever be
+              // ACCRUAL here, because CASH_BASIS returned above without writing
+              // anything, and the column's CHECK says exactly that.
+              metode: h.metode,
+              kelasDiakrual: JSON.stringify(h.kelas),
+            },
             h.baris.map((b) => ({
               akadId: b.akadId,
               cabangId: b.cabangId,
@@ -1497,7 +1561,14 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
       return bersihkan(async () => {
         wajibIzin(ctx, PERMISSION_CLOSING.PERIODE);
         return db.transaction(async (tx) => {
-          const periode = await periodeWajib(tx, input.periodeId, ctx.bumnId);
+          // THE ROW LOCK, taken before the checklist and held to COMMIT.
+          // Without it two concurrent closes both read OPEN, both evaluate the
+          // checklist against the same committed state, both pass, and both
+          // write a SUKSES audit record for a period that was closed once.
+          // Monthly closing makes that unlikely and the frozen trial balance
+          // makes it expensive, which is the worst combination to leave to
+          // chance.
+          const periode = await periodeUntukUbah(tx, input.periodeId, ctx.bumnId);
           if (periode.status === "CLOSED") {
             // A second close that silently rewrote the frozen balances would be
             // invariant 14 broken with no trace: both runs look identical in
@@ -1552,6 +1623,11 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
             ctx.userId,
             jam().toISOString(),
           );
+          // The second half of the lock. `tandaiClosed` carries
+          // `status <> 'CLOSED'`, so a close that lost a race updates nothing
+          // and finds out here instead of writing a SUKSES audit row for
+          // somebody else's close.
+          if (!ditutup) throw tolak("PERIODE_SUDAH_CLOSED", { periodeId: periode.id });
 
           await audit?.record(
             {
@@ -1608,7 +1684,10 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
           );
           if (!izinkan) throw tolak("REOPEN_TIDAK_DIIZINKAN", { periodeId: input.periodeId });
 
-          const periode = await periodeWajib(tx, input.periodeId, ctx.bumnId);
+          // Locked for the same reason `tutupPeriode` locks: a reopen decides
+          // on `periodeClosedLebihBaru`, which is only evidence if no other
+          // session can close a later period between the read and the write.
+          const periode = await periodeUntukUbah(tx, input.periodeId, ctx.bumnId);
           if (periode.status !== "CLOSED") {
             throw tolak("PERIODE_BELUM_CLOSED", { periodeId: periode.id, status: periode.status });
           }
@@ -1639,6 +1718,7 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
             alasan,
             jam().toISOString(),
           );
+          if (!dibuka) throw tolak("PERIODE_BELUM_CLOSED", { periodeId: periode.id });
 
           await audit?.record(
             {

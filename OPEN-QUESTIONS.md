@@ -389,3 +389,52 @@ periode yang sudah tertutup tidak bisa dibangun ulang dan kolom baru hanya bisa 
 
 **Pemilik keputusan:** pemilik engine closing (bentuk 1 atau 2), bukan tim akuntansi klien;
 pertanyaan ke klien hanya soal isi daftar kelasnya, yang sudah menjadi baris konfigurasi.
+
+**PEMBARUAN (migrasi 0025, ADR 0015): sebagian ditutup, sisanya TIDAK.** Engine akrual ternyata
+menulis satu baris per akad di kelas yang dikonfigurasi termasuk akad yang jasanya nol, jadi
+faktanya sekarang punya tempat per baris dan `metode` serta `kelas_diakrual` menjadi kolom.
+Yang tertutup: setiap periode yang punya minimal satu akad di daftar itu kini menjelaskan seluruh
+pengecualiannya sendiri. Yang **tidak** tertutup, dan tidak boleh disebut tertutup: periode yang
+daftarnya mengecualikan seluruh portofolio tidak punya baris sama sekali, jadi tidak membawa daftar
+itu, dan lebih jauh lagi tidak meninggalkan jejak apa pun bahwa langkah 8.3 pernah dijalankan
+(tidak ada snapshot, tidak ada jurnal, dan `jalankanAkrualJasaAdm` tidak menulis audit). Prasyarat
+nomor 6 meloloskannya lewat cabang `adaRun && !adaKandidat`, yang membaca daftar kelas **saat
+checklist dijalankan**, bukan saat periode ditutup; jadi menjalankan ulang checklist atas periode
+yang sudah CLOSED setelah daftarnya diperluas bisa melaporkan GAGAL.
+
+Ini yang membuat tabel induk `closing_akrual` tetap jawaban akhirnya. Batas waktunya tidak berubah:
+sebelum periode produksi pertama ditutup.
+
+---
+
+## 24. Apakah buku dibekukan selama rangkaian tutup buku berjalan?
+
+**Ini pertanyaan kebijakan klien, dan ia menentukan apakah `CLOSING_IN_PROGRESS` pernah ditulis.**
+
+Nilai itu disebut spesifikasi (Bagian 4.7), diizinkan CHECK di migrasi 0007, dan sampai hari ini
+tidak pernah ditulis oleh kode mana pun. Keputusan skema sudah diambil dan tidak menunggu jawaban
+ini: nilainya **dipertahankan**, alasannya ditulis di ADR 0015 dan di `COMMENT` kolom
+`periode.status` (migrasi 0025). Ringkasnya, ia bukan penanda crash recovery, karena `tutupPeriode`
+berjalan dalam satu transaksi sehingga crash membatalkan seluruhnya dan tidak menyisakan apa pun
+untuk dipulihkan; dan ia bukan nilai mati, karena guard periode di jurnal sudah menolak posting
+untuk periode yang bukan OPEN, jadi ia langsung bermakna begitu ada yang menulisnya.
+
+**Yang belum diputuskan, dan hanya klien yang bisa memutuskan:** rangkaian 8.1 sampai 8.4 berjalan
+dalam empat transaksi terpisah (kolektibilitas, penyisihan, akrual, tutup periode), dan di
+antaranya posting biasa masih diterima. Artinya seorang Maker bisa memposting jurnal bertanggal
+dalam periode itu setelah snapshot kolektibilitas dibuat tetapi sebelum neraca lajur dibekukan.
+Sistem sudah menangani konsekuensinya (prasyarat dievaluasi ulang di dalam transaksi penutupan,
+jadi jurnal DRAFT atau ledger yang tidak balance akan menolak penutupan), tetapi menangani bukan
+mencegah.
+
+Dua pilihan, dengan biayanya:
+
+1. **Tidak membekukan** (perilaku hari ini). Operasional cabang tidak pernah berhenti. Risikonya
+   rangkaian tutup buku bisa harus diulang karena ada yang memposting di tengah jalan.
+2. **Membekukan**, dengan menulis `CLOSING_IN_PROGRESS` di awal rangkaian dan mengembalikannya ke
+   OPEN kalau dibatalkan. Tutup buku jadi deterministik, tetapi seluruh cabang berhenti bisa
+   memposting selama rangkaian berjalan, dan butuh jalur "batalkan closing" yang jelas supaya
+   sebuah periode tidak tertinggal dalam status beku karena operatornya pulang.
+
+**Sampai dijawab:** nilainya tetap ada di CHECK, tidak pernah ditulis, dan alasannya terbaca di
+kolomnya sendiri. Jangan menghapusnya tanpa jawaban, dan jangan menulisnya tanpa jalur pembatalan.

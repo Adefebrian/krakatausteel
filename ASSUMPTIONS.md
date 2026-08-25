@@ -814,3 +814,44 @@ adalah wewenang Approver.
 `"admin.closing.view"` ke daftar MAKER atau CHECKER di
 `apps/api/src/modules/auth/permissions.ts` dan cerminkan di `apps/web/src/permissions.ts`. Tidak
 ada jalur tulis yang ikut terbuka, karena kode ini tidak menggerakkan satu pun operasi closing.
+
+## A-48. Baris `akrual_jasa_snapshot` hanya lahir di bawah metode ACCRUAL
+
+**Diasumsikan:** `akrual_jasa_snapshot.metode` (migrasi 0025) selalu bernilai `ACCRUAL`, dijaga
+CHECK, sehingga **adanya baris** di tabel itu adalah bukti bahwa langkah Bagian 8.3 benar benar
+berjalan di bawah metode akrual. Di bawah `CASH_BASIS` spesifikasi tidak menghasilkan baris apa pun,
+dan engine memang mengembalikan `dilewati: true` tanpa menulis.
+
+**Kenapa:** kolomnya ada supaya laporan 30 bisa menyebut kebijakannya sendiri tanpa membaca
+`konfigurasi`, yang bisa berubah kapan saja. Kalau nilainya dibiarkan bebas di antara dua anggota
+`MetodePengakuanJasa`, sebuah bug yang menstempel nilai konfigurasi apa adanya saat run CASH_BASIS
+akan menulis baris yang bertentangan dengan Bagian 8.3, dan bertentangan secara diam diam. CHECK
+satu nilai itulah yang mengubah "ada baris" menjadi pernyataan yang bisa dipercaya.
+
+**Dampak kalau salah:** kalau kelak ada metode pengakuan ketiga yang juga menghasilkan akrual
+(misalnya akrual parsial untuk kelas tertentu), CHECK ini menolak barisnya dan perubahannya adalah
+satu migrasi yang melonggarkan CHECK. Itu memang yang diinginkan: metode pengakuan baru adalah
+perubahan kebijakan akuntansi, dan perubahan kebijakan yang butuh migrasi adalah perubahan yang
+terlihat.
+
+## A-49. Pergerakan penyisihan satu periode dibawa oleh HIMPUNAN jurnal, dan himpunan itu yang dicatat
+
+**Diasumsikan:** `penyisihan_periode` tidak lagi punya `jurnal_id` tunggal (migrasi 0026). Setiap
+jurnal yang membentuk pergerakan satu periode dan cabang punya barisnya sendiri di
+`penyisihan_periode_jurnal` dengan kontribusi **bertanda**, dan jumlah kontribusi itu wajib sama
+dengan `beban_penyisihan_periode`, dijaga constraint trigger deferred dari kedua sisi.
+
+**Kenapa:** koreksi penyisihan diposting sebagai delta, bukan sebagai pembalikan lalu posting ulang,
+karena di sistem ini pembalikan berarti ada kesalahan (ADR 0010, Bagian 6.3) sedangkan koreksi rate
+adalah penyempurnaan. Konsekuensinya satu periode bisa punya dua jurnal atau lebih, dan kolom
+tunggal `jurnal_id` menunjuk yang terakhir saja. Skenario 17 Bagian 16 meminta operator
+merekonsiliasi laporan penyisihan terhadap jurnalnya: mengikuti kolom tunggal menghasilkan
+1.200.000 melawan 11.400.000 yang dinyatakan, dan gagal. Alternatif "turunkan saja himpunannya dari
+periode plus jenis jurnal" ditolak karena jurnal manual boleh memakai `jenis = 'PENYISIHAN'` dan
+akan ikut terhitung, dan karena himpunan turunan tidak bisa diuji terhadap angka yang dinyatakan.
+
+**Dampak kalau salah:** kalau tim akuntansi ternyata menghendaki koreksi penyisihan dilakukan
+dengan pembalikan penuh lalu posting ulang (sehingga satu periode memang hanya boleh punya satu
+jurnal penyisihan hidup), tabel ini tetap benar dan hanya berisi satu baris hidup per periode dan
+cabang. Tidak ada yang perlu dibongkar; yang berubah hanya perilaku engine. Sebaliknya, tanpa tabel
+ini, kebijakan mana pun yang dipilih tidak bisa dibuktikan oleh basis data.

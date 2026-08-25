@@ -108,3 +108,9 @@ database migrated so far the table is empty, because the engine that writes it i
   kolektibilitas there is no `closing_akrual` header row to hang it on. Recorded as
   OPEN-QUESTIONS item 23, to be settled with the accrual engine's design and before the first
   production period closes, not guessed at while that engine is being written.
+
+  **Settled, in part, by ADR 0015 and migrations/0025.** The engine now writes one snapshot row per
+  akad in the configured classes including zero-fee ones, which gave the fact a per-row home, so
+  `metode` and `kelas_diakrual` are columns after all. The residual case, a period whose class list
+  excluded everything and therefore has no row to carry the list, is NOT closed by that and is not
+  claimed to be; ADR 0015 says why it argues for a `closing_akrual` header eventually.

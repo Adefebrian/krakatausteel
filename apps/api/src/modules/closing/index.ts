@@ -46,6 +46,7 @@ export type {
   JalankanKolektibilitasInput,
   JalankanPenyisihanInput,
   KelasKolektibilitas,
+  KontribusiJurnalPenyisihan,
   KodeClosing,
   KodePrasyarat,
   MetodePengakuanJasa,

@@ -1,6 +1,6 @@
 # TJSL Online data model
 
-74 tables and 13 views, created by `migrations/0002` through `migrations/0024`. This document is
+75 tables and 13 views, created by `migrations/0002` through `migrations/0026`. This document is
 the map; the migrations are the source of truth and every non-obvious column is commented there.
 
 Sections 1 to 13 are the core system, which works standalone and holds the books.
@@ -133,8 +133,9 @@ transaction date fall in", shared by the journal guard and the closing engine.
 |---|---|
 | `closing_kolektibilitas` | One collectibility run: preview or committed, with the migration matrix as JSON. At most one committed run per (periode, cabang). |
 | `kolektibilitas_snapshot` | Per akad per period: arrears days, class, outstanding, arrears, the rate and basis used, and the resulting provision. A CHECK re-derives the provision from the stored inputs, which is what makes report 28 reproducible. Since 0024 the row also states WHERE the rate came from (`sumber_rate`, plus `rate_histori_dari` / `rate_histori_sampai` for a collectively derived one), so report 28 survives a change of `akuntansi.mode_penyisihan`; provenance is copied, never pointed at a config row that is mutated in place (ADR 0014). Unique per (periode, akad). |
-| `penyisihan_periode` | Per branch per period: opening provision balance, required provision, and the expense or recovery, with a CHECK that the third equals the second minus the first. |
-| `akrual_jasa_snapshot` | Per akad per period service-fee accrual, so spec 8.3 is idempotent and report 30 is reproducible. Does NOT yet record `akuntansi.akrual_hanya_untuk_kolektibilitas`, the eligible-class list in force, so a later edit to that list leaves "why was this akad not accrued" unanswerable from the snapshot: the same reconstruction gap 0024 closed for the provision rate, open as OPEN-QUESTIONS item 23. |
+| `penyisihan_periode` | Per branch per period: opening provision balance, required provision, and the expense or recovery, with a CHECK that the third equals the second minus the first. It has NO `jurnal_id`: a correction is posted as a delta, so the movement is carried by a set of journals (0026, ADR 0015). |
+| `penyisihan_periode_jurnal` | The journals making up one period-branch provision movement, each with its SIGNED contribution. A deferred constraint trigger on both tables makes `SUM(nilai)` disagreeing with `beban_penyisihan_periode` impossible to commit, which is what spec 16 scenario 17 rests on. Unique on `jurnal_id` alone: a journal belongs to exactly one provision. |
+| `akrual_jasa_snapshot` | Per akad per period service-fee accrual, so spec 8.3 is idempotent and report 30 is reproducible. Since 0025 it also records the policy that produced it: `metode` (always ACCRUAL, because CASH_BASIS writes nothing) and `kelas_diakrual`, the eligible-class list in force, so eligibility per row is `kelas_diakrual ? kolektibilitas` and report 30 states its own population. A period whose class list excluded the whole portfolio still has no rows and so no record that the step ran: OPEN-QUESTIONS item 23. |
 | `saldo_akun_periode` | Frozen trial balance per (periode, cabang, akun). All four amount columns are debit-positive, and a CHECK enforces closing = opening + debit - credit. Deleted when a period is reopened, by design. |
 
 ## 9. Ledger (0010)
@@ -230,14 +231,14 @@ bumn
  │                                        ◄── event_jurnal_mapping
  ├─ periode ──┬── jurnal
  │            ├── closing_kolektibilitas ── kolektibilitas_snapshot
- │            ├── penyisihan_periode
+ │            ├── penyisihan_periode ── penyisihan_periode_jurnal ──► jurnal
  │            ├── akrual_jasa_snapshot
  │            └── saldo_akun_periode
  ├─ jurnal ── jurnal_baris ──► akun, mitra, pumk_akad
  │      ▲  reversal_of_jurnal_id / reversed_by_jurnal_id (self, 1:1)
  │      └── referenced by pumk_pencairan, pumk_angsuran, pumk_pengakhiran,
- │          pumk_kelebihan, nonpumk_penyaluran, nonpumk_lpj, penyisihan_periode,
- │          akrual_jasa_snapshot, saldo_awal_batch
+ │          pumk_kelebihan, nonpumk_penyaluran, nonpumk_lpj,
+ │          penyisihan_periode_jurnal, akrual_jasa_snapshot, saldo_awal_batch
  ├─ rka ── rka_detail ──► akun / sektor_pumk / bidang_non_pumk
  └─ portal_submission ──► pumk_proposal / nonpumk_proposal (converted)
 

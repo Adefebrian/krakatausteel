@@ -120,8 +120,14 @@ export interface PenyisihanRow {
   saldo_penyisihan_awal: string;
   penyisihan_dibutuhkan: string;
   beban_penyisihan_periode: string;
-  jurnal_id: string | null;
   tanggal: string;
+}
+
+/** One row of `penyisihan_periode_jurnal` (migrations/0026). */
+export interface TautanJurnalRow {
+  penyisihan_periode_id: string;
+  jurnal_id: string;
+  nilai: string;
 }
 
 export interface AkrualRow {
@@ -181,6 +187,29 @@ export function buatRepoClosing() {
       );
     },
 
+    /**
+     * The same read, TAKING THE ROW LOCK, for the two operations that change a
+     * period's status.
+     *
+     * Without it two concurrent closes both read OPEN, both run the checklist
+     * against the same committed state, both pass, and both write a SUKSES
+     * audit record for a period that was closed once. Monthly closing makes the
+     * race unlikely and the ledger makes it expensive, which is the worst
+     * combination to leave to chance. `FOR UPDATE` makes the second
+     * transaction block until the first commits and then re-read under READ
+     * COMMITTED, so it sees CLOSED and refuses on the ordinary guard rather
+     * than on a constraint.
+     */
+    periodeUntukUbah(tx: QueryRunner, periodeId: string): Promise<PeriodeRow | null> {
+      return satu<PeriodeRow>(
+        tx,
+        `select ${KOLOM_PERIODE} from periode p
+          where p.id = $1::uuid and p.deleted_at is null
+          for update`,
+        [periodeId],
+      );
+    },
+
     /** Spec 8.4 check 1 and invariant 6: everything earlier that is still open. */
     periodeSebelumnyaBelumTutup(
       tx: QueryRunner,
@@ -215,23 +244,28 @@ export function buatRepoClosing() {
       );
     },
 
+    /**
+     * Returns null when the row was NOT the engine's to close, which under this
+     * predicate means somebody else closed it first. The `status <> 'CLOSED'`
+     * clause is the second half of the lock above: the lock serialises the two
+     * transactions, this makes the loser's write a no-op it can detect instead
+     * of a silent second close.
+     */
     async tandaiClosed(
       tx: QueryRunner,
       periodeId: string,
       userId: string,
       saatIni: string,
-    ): Promise<PeriodeRow> {
-      const row = await satu<PeriodeRow>(
+    ): Promise<PeriodeRow | null> {
+      return satu<PeriodeRow>(
         tx,
         `update periode p
             set status = 'CLOSED', closed_by = $2::uuid, closed_at = $3::timestamptz,
                 updated_by = $2::uuid
-          where p.id = $1::uuid
+          where p.id = $1::uuid and p.status <> 'CLOSED'
         returning ${KOLOM_PERIODE}`,
         [periodeId, userId, saatIni],
       );
-      if (!row) throw new Error("modules/closing: UPDATE periode CLOSED tidak mengembalikan baris");
-      return row;
     },
 
     async tandaiOpenKembali(
@@ -240,21 +274,23 @@ export function buatRepoClosing() {
       userId: string,
       alasan: string,
       saatIni: string,
-    ): Promise<PeriodeRow> {
+    ): Promise<PeriodeRow | null> {
       // ONE statement, because `trg_periode_10_transisi` is a BEFORE UPDATE OF
       // status that reads `NEW.alasan_reopen` and `NEW.reopened_by`: setting
       // them afterwards would be refused by TJSL-PER-003 / TJSL-PER-004.
-      const row = await satu<PeriodeRow>(
+      // `status = 'CLOSED'` in the predicate for the same reason `tandaiClosed`
+      // carries its own: with the row lock taken, the loser of a concurrent
+      // reopen updates nothing and finds out, instead of reopening a period the
+      // winner already reopened and closed again.
+      return satu<PeriodeRow>(
         tx,
         `update periode p
             set status = 'OPEN', reopened_by = $2::uuid, reopened_at = $4::timestamptz,
                 alasan_reopen = $3, updated_by = $2::uuid
-          where p.id = $1::uuid
+          where p.id = $1::uuid and p.status = 'CLOSED'
         returning ${KOLOM_PERIODE}`,
         [periodeId, userId, alasan, saatIni],
       );
-      if (!row) throw new Error("modules/closing: UPDATE periode OPEN tidak mengembalikan baris");
-      return row;
     },
 
     // --- configuration ----------------------------------------------------
@@ -683,16 +719,57 @@ export function buatRepoClosing() {
     },
 
     penyisihanPeriode(tx: QueryRunner, periodeId: string): Promise<PenyisihanRow[]> {
+      // No `jurnal_id`: migrations/0026 dropped it. The entries that carried the
+      // movement come from `tautanJurnal` below, as a SET, because a delta
+      // correction spreads one period's provision over several journals.
       return tx.query<PenyisihanRow>(
         `select id::text as id, cabang_id::text as cabang_id,
                 saldo_penyisihan_awal::text as saldo_penyisihan_awal,
                 penyisihan_dibutuhkan::text as penyisihan_dibutuhkan,
                 beban_penyisihan_periode::text as beban_penyisihan_periode,
-                jurnal_id::text as jurnal_id, tanggal::text as tanggal
+                tanggal::text as tanggal
            from penyisihan_periode
           where periode_id = $1::uuid and deleted_at is null
           order by cabang_id`,
         [periodeId],
+      );
+    },
+
+    /**
+     * The journals that carried a period's provision, per `penyisihan_periode`
+     * row. Ordered oldest first, so the LAST element is the entry the most
+     * recent run posted, which is what `PenyisihanPeriode.jurnalId` reports.
+     */
+    tautanJurnal(tx: QueryRunner, periodeId: string): Promise<TautanJurnalRow[]> {
+      return tx.query<TautanJurnalRow>(
+        `select t.penyisihan_periode_id::text as penyisihan_periode_id,
+                t.jurnal_id::text as jurnal_id, t.nilai::text as nilai
+           from penyisihan_periode_jurnal t
+           join penyisihan_periode p on p.id = t.penyisihan_periode_id
+          where p.periode_id = $1::uuid and t.deleted_at is null and p.deleted_at is null
+          order by t.created_at, t.id`,
+        [periodeId],
+      );
+    },
+
+    /**
+     * Records one journal's SIGNED contribution to a period's movement.
+     *
+     * Written AFTER `simpanPenyisihan` has stated the new movement, because
+     * `trg_penyisihan_periode_jurnal_30_total` is deferred and compares the two
+     * at COMMIT: writing the link first and the row second is equally valid,
+     * and the order chosen here just keeps the failure, when there is one,
+     * pointing at the arithmetic rather than at the sequencing.
+     */
+    async tautkanJurnal(
+      tx: QueryRunner,
+      input: { penyisihanPeriodeId: string; jurnalId: string; nilai: string; userId: string },
+    ): Promise<void> {
+      await tx.query(
+        `insert into penyisihan_periode_jurnal
+           (penyisihan_periode_id, jurnal_id, nilai, created_by, updated_by)
+         values ($1::uuid, $2::uuid, $3::numeric(20,2), $4::uuid, $4::uuid)`,
+        [input.penyisihanPeriodeId, input.jurnalId, input.nilai, input.userId],
       );
     },
 
@@ -705,7 +782,6 @@ export function buatRepoClosing() {
         saldoAwal: string;
         dibutuhkan: string;
         beban: string;
-        jurnalId: string | null;
         tanggal: string;
         userId: string;
       },
@@ -716,15 +792,13 @@ export function buatRepoClosing() {
               set saldo_penyisihan_awal = $2::numeric(20,2),
                   penyisihan_dibutuhkan = $3::numeric(20,2),
                   beban_penyisihan_periode = $4::numeric(20,2),
-                  jurnal_id = $5::uuid, tanggal = $6::date, dijalankan_oleh = $7::uuid,
-                  updated_by = $7::uuid
+                  tanggal = $5::date, dijalankan_oleh = $6::uuid, updated_by = $6::uuid
             where id = $1::uuid`,
           [
             input.id,
             input.saldoAwal,
             input.dibutuhkan,
             input.beban,
-            input.jurnalId,
             input.tanggal,
             input.userId,
           ],
@@ -735,10 +809,9 @@ export function buatRepoClosing() {
         tx,
         `insert into penyisihan_periode
            (periode_id, cabang_id, saldo_penyisihan_awal, penyisihan_dibutuhkan,
-            beban_penyisihan_periode, jurnal_id, dijalankan_oleh, tanggal,
-            created_by, updated_by)
+            beban_penyisihan_periode, dijalankan_oleh, tanggal, created_by, updated_by)
          values ($1::uuid, $2::uuid, $3::numeric(20,2), $4::numeric(20,2),
-                 $5::numeric(20,2), $6::uuid, $7::uuid, $8::date, $7::uuid, $7::uuid)
+                 $5::numeric(20,2), $6::uuid, $7::date, $6::uuid, $6::uuid)
          returning id::text as id`,
         [
           input.periodeId,
@@ -746,7 +819,6 @@ export function buatRepoClosing() {
           input.saldoAwal,
           input.dibutuhkan,
           input.beban,
-          input.jurnalId,
           input.userId,
           input.tanggal,
         ],
@@ -857,10 +929,23 @@ export function buatRepoClosing() {
       );
     },
 
+    /**
+     * migrations/0025: `metode` and `kelas_diakrual` are NOT NULL with no
+     * default, so every row states the POLICY that produced it and not just the
+     * amounts. Both are per-run facts repeated on every row of the run, exactly
+     * as `kolektibilitas_snapshot` already repeats `rate_penyisihan` and
+     * `dasar_perhitungan`: `konfigurasi` is mutated in place, so a period whose
+     * rows carry only amounts cannot later say why its population was its
+     * population (invariant 14, ADR 0015).
+     *
+     * `$n::text::jsonb` for the class list, NOT `$n::jsonb`: driver fact 2, a
+     * jsonb parameter bound from a JS string is stored as a JSON string SCALAR,
+     * which `akrual_jasa_snapshot_kelas_ck` rejects because `jsonb_typeof`
+     * answers 'string' rather than 'array'.
+     */
     async tulisAkrual(
       tx: QueryRunner,
-      periodeId: string,
-      userId: string,
+      input: { periodeId: string; userId: string; metode: string; kelasDiakrual: string },
       baris: ReadonlyArray<{
         akadId: string;
         cabangId: string;
@@ -872,13 +957,14 @@ export function buatRepoClosing() {
       }>,
     ): Promise<void> {
       if (baris.length === 0) return;
-      const params: unknown[] = [periodeId, userId];
+      const params: unknown[] = [input.periodeId, input.userId, input.metode, input.kelasDiakrual];
       const values: string[] = [];
       for (const b of baris) {
         const i = params.length + 1;
         values.push(
           `($1::uuid, $${i}::uuid, $${i + 1}::uuid, $${i + 2}, $${i + 3}::numeric(20,2),` +
-            ` $${i + 4}::numeric(20,2), $${i + 5}::numeric(20,2), $${i + 6}::uuid, $2::uuid, $2::uuid)`,
+            ` $${i + 4}::numeric(20,2), $${i + 5}::numeric(20,2), $${i + 6}::uuid,` +
+            ` $3, $4::text::jsonb, $2::uuid, $2::uuid)`,
         );
         params.push(
           b.akadId,
@@ -893,7 +979,8 @@ export function buatRepoClosing() {
       await tx.query(
         `insert into akrual_jasa_snapshot
            (periode_id, akad_id, cabang_id, kolektibilitas, jasa_jatuh_tempo_periode,
-            jasa_diterima_periode, jasa_diakrual, jurnal_id, created_by, updated_by)
+            jasa_diterima_periode, jasa_diakrual, jurnal_id, metode, kelas_diakrual,
+            created_by, updated_by)
          values ${values.join(", ")}`,
         params,
       );
