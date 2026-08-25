@@ -1,6 +1,6 @@
 # TJSL Online data model
 
-75 tables and 13 views, created by `migrations/0002` through `migrations/0026`. This document is
+79 tables and 13 views, created by `migrations/0002` through `migrations/0028`. This document is
 the map; the migrations are the source of truth and every non-obvious column is commented there.
 
 Sections 1 to 13 are the core system, which works standalone and holds the books.
@@ -71,8 +71,11 @@ row with `bumn_id IS NULL`", which is why the unique indexes use `NULLS NOT DIST
 
 | Table | Purpose |
 |---|---|
-| `baris_laporan` | One row per printed line of Posisi Keuangan / Aktivitas / Arus Kas / Perubahan Aset Neto. Report layout is data: changing a statement is a config edit, not a deploy. |
-| `akun` | The chart of accounts. Tree via `parent_id` with hierarchy validated by trigger (child level, matching type, parent not postable). `klasifikasi_laporan` is a real composite FK into `baris_laporan`. `postable_id` is the generated column that makes "only leaves can be posted to" a foreign key (ADR 0003). |
+| `baris_laporan` | One row per printed line of Posisi Keuangan / Aktivitas / Arus Kas / Perubahan Aset Neto, **belonging to one template**. Report layout is data: changing a statement is a config edit, not a deploy. `kode` is unique per (bumn, template) since 0028, so two coexisting templates may each own a line called `ASET_NETO_TERIKAT`. |
+| `template_laporan` (0028) | A named presentation, effective dated over the period being REPORTED. A BUMN's ranges may not overlap (TJSL-TPL-001), so "which template was in force" always has exactly one answer. Exists because the spec's PSAK 45 wording and the ISAK 335 wording in force must be able to coexist (docs/REGULASI.md finding 1, ADR 0017). |
+| `klasifikasi_akun` (0028) | The classification vocabulary: WHAT an account is, independent of which standard's presentation is in force. `akun.klasifikasi_akun` is a real composite FK into it. |
+| `pemetaan_baris_laporan` (0028) | `(template, klasifikasi, laporan) -> printed line`. One line per statement per classification per template (`pemetaan_baris_laporan_uq`), and a four-column FK into `baris_laporan (id, bumn_id, template_id, laporan)` makes a statement that mixes two templates structurally impossible. Many classifications may share one line, which is how a standards change that merges categories is expressed. |
+| `akun` | The chart of accounts. Tree via `parent_id` with hierarchy validated by trigger (child level, matching type, parent not postable). `klasifikasi_akun` (named `klasifikasi_laporan` before 0028) is a real composite FK into `klasifikasi_akun`, no longer directly into a printed line. `postable_id` is the generated column that makes "only leaves can be posted to" a foreign key (ADR 0003). |
 | `saldo_awal_batch` | One go-live opening-balance import (ADR 0006). |
 | `akun_saldo_awal` | The chart-of-accounts half of an opening balance, one side only per row. |
 
@@ -89,7 +92,7 @@ row with `bumn_id IS NULL`", which is why the unique indexes use `NULLS NOT DIST
 
 | Table | Purpose |
 |---|---|
-| `periode` | One calendar month per row, unique per (bumn, tahun, bulan). Closing order and reopen rules are enforced by trigger. Physical delete blocked. |
+| `periode` | One calendar month per row, unique per (bumn, tahun, bulan). Closing order and reopen rules are enforced by trigger. Physical delete blocked. `template_laporan_id` (0028) records the report template in force at close, so adopting a new template cannot reshape a period that has already been reported. |
 
 `tjsl_periode_untuk_tanggal(bumn_id, date)` is the single definition of "which period does this
 transaction date fall in", shared by the journal guard and the closing engine.
@@ -137,6 +140,7 @@ transaction date fall in", shared by the journal guard and the closing engine.
 | `penyisihan_periode_jurnal` | The journals making up one period-branch provision movement, each with its SIGNED contribution. A deferred constraint trigger on both tables makes `SUM(nilai)` disagreeing with `beban_penyisihan_periode` impossible to commit, which is what spec 16 scenario 17 rests on. Unique on `jurnal_id` alone: a journal belongs to exactly one provision. |
 | `akrual_jasa_snapshot` | Per akad per period service-fee accrual, so spec 8.3 is idempotent and report 30 is reproducible. Since 0025 it also records the policy that produced it: `metode` (always ACCRUAL, because CASH_BASIS writes nothing) and `kelas_diakrual`, the eligible-class list in force, so eligibility per row is `kelas_diakrual ? kolektibilitas` and report 30 states its own population. A period whose class list excluded the whole portfolio still has no rows and so no record that the step ran: OPEN-QUESTIONS item 23. |
 | `saldo_akun_periode` | Frozen trial balance per (periode, cabang, akun). All four amount columns are debit-positive, and a CHECK enforces closing = opening + debit - credit. Deleted when a period is reopened, by design. |
+| `saldo_akun_dimensi_periode` | The frozen movement of ONE `saldo_akun_periode` row, broken down along one axis (`sumbu`: SEKTOR or BIDANG). Flow only, no opening or closing balance: the parent stays the only authority on balances. The breakdown is TOTAL per axis (a deferred constraint trigger on both tables, TJSL-SDP-002), and movement carrying no dimension is an explicit residual row with both id columns NULL rather than a gap. `ON DELETE CASCADE`, so a reopen sweeps it with the parent. This is what lets report 24 satisfy spec 10 for RKA PUMK (per sektor) and RKA Non PUMK (per bidang); see ADR 0016. |
 
 ## 9. Ledger (0010)
 
@@ -226,14 +230,18 @@ bumn
  ├─ sektor_pumk, bidang_non_pumk, sdg
  ├─ konfigurasi, kolektibilitas_range, penyisihan_rate  (bumn_id NULL = global default)
  ├─ nomor_urut
- ├─ baris_laporan ── akun (klasifikasi_laporan)
- │                    └─ akun.postable_id ◄── jurnal_baris.akun_id
- │                                        ◄── event_jurnal_mapping
+ ├─ template_laporan ──┬── baris_laporan ◄─┐
+ │                     └── pemetaan_baris_laporan ──► klasifikasi_akun
+ ├─ klasifikasi_akun ── akun (klasifikasi_akun)
+ │                       └─ akun.postable_id ◄── jurnal_baris.akun_id
+ │                                           ◄── event_jurnal_mapping
  ├─ periode ──┬── jurnal
  │            ├── closing_kolektibilitas ── kolektibilitas_snapshot
  │            ├── penyisihan_periode ── penyisihan_periode_jurnal ──► jurnal
  │            ├── akrual_jasa_snapshot
- │            └── saldo_akun_periode
+ │            ├── saldo_akun_periode ── saldo_akun_dimensi_periode
+ │            │                          ──► sektor_pumk / bidang_non_pumk
+ │            └── template_laporan (template_laporan_id, dicatat saat tutup)
  ├─ jurnal ── jurnal_baris ──► akun, mitra, pumk_akad
  │      ▲  reversal_of_jurnal_id / reversed_by_jurnal_id (self, 1:1)
  │      └── referenced by pumk_pencairan, pumk_angsuran, pumk_pengakhiran,

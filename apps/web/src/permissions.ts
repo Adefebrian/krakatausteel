@@ -56,6 +56,13 @@ export const PERMISSIONS = [
   "admin.closing.periode",
   "admin.periode.reopen",
   "admin.rka",
+  // Approving an RKA, and reading one, are separate codes from entering one.
+  // Mirrors the server: `admin.rka` alone would mean the person who types the
+  // sector targets also blesses the baseline every "versus anggaran" figure is
+  // measured against, and would force an Auditor who needs to see WHICH budget
+  // version a variance was measured against to hold a write code.
+  "admin.rka.approve",
+  "admin.rka.view",
 
   "konfigurasi.master",
   "konfigurasi.coa",
@@ -100,16 +107,21 @@ const READ_ONLY: Permission[] = [
   "portal.view",
   "audit.view",
   "admin.closing.view",
+  "admin.rka.view",
 ];
 
 /**
- * The two evidence codes in READ_ONLY that are the Auditor's and not every
- * signed in user's. Mirrors `HANYA_BUKTI` on the server: the operational roles
- * are built from READ_ONLY minus these, and get them back only where the server
+ * The evidence codes in READ_ONLY that are the Auditor's and not every signed
+ * in user's. Mirrors `HANYA_BUKTI` on the server: the operational roles are
+ * built from READ_ONLY minus these, and get them back only where the server
  * grants them (the Approver holds `admin.closing.view`, nobody but the Auditor
- * and Admin Pusat holds `audit.view`).
+ * and Admin Pusat holds `audit.view` or `admin.rka.view`).
  */
-const HANYA_BUKTI: readonly Permission[] = ["audit.view", "admin.closing.view"];
+const HANYA_BUKTI: readonly Permission[] = [
+  "audit.view",
+  "admin.closing.view",
+  "admin.rka.view",
+];
 
 const LIHAT: Permission[] = READ_ONLY.filter(
   (permission) => !HANYA_BUKTI.includes(permission),

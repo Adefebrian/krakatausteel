@@ -695,6 +695,45 @@ export const KATALOG: Readonly<Record<string, KatalogEntri>> = Object.freeze({
     asalNilaiDefault: "KEPUTUSAN",
     nilaiDefault: "false",
   }),
+
+  // WHY THIS KEY EXISTS AT ALL, AND WHY ITS DEFAULT IS AN ASSUMPTION.
+  //
+  // Spec 2 states its segregation rules in its own words as "pola Maker,
+  // Checker, Approval yang berlaku di dua modul (PUMK dan Non PUMK)". The RKA
+  // has an approval (`rka.approved_by` / `approved_at`, made mandatory by
+  // `rka_disetujui_ck` in migrations/0012) and NO Checker stage, so neither
+  // rule reaches it verbatim. Whether one Admin Pusat may draft the annual
+  // budget and then approve it alone is therefore a control decision belonging
+  // to the client, not a rule we can read off the specification.
+  //
+  // The engine reads this key and REFUSES when the row is absent, exactly as it
+  // does for every rate. So the value below is not a fallback: it is the
+  // shipped default, it is ours, and `asalNilaiDefault: "ASUMSI"` is what makes
+  // the Konfigurasi screen say so instead of presenting it as settled policy.
+  // Logged as ASSUMPTIONS.md A-31 and OPEN-QUESTIONS item 25.
+  //
+  // WHY THE DEFAULT IS `true` RATHER THAN `false`. The RKA is the baseline
+  // every "versus anggaran" figure in the system is measured against: report
+  // 24, the "versus RKA" columns of reports 2 and 13, and the dashboard on top
+  // of both. Shipping it OFF would mean a system that, out of the box, lets one
+  // person set and bless that baseline with no second party anywhere in the
+  // record, and nothing downstream would ever reveal it. Shipping it ON has a
+  // real and OPPOSITE cost, stated rather than glossed: a client with a single
+  // Admin Pusat account cannot approve an RKA at all until they create a
+  // second one. That failure is loud, immediate, and fixed by a decision
+  // someone makes on purpose; the other failure is silent and permanent.
+  "rka.pemisahan_tugas_persetujuan": entri({
+    grup: "rka",
+    kunci: "pemisahan_tugas_persetujuan",
+    bentuk: "BOOLEAN",
+    deskripsi:
+      "Penyusun atau penyunting terakhir RKA tidak boleh menyetujui RKA itu sendiri. " +
+      "Spec 2 hanya mengatur pemisahan tugas untuk modul PUMK dan Non PUMK, jadi " +
+      "penerapannya pada RKA adalah asumsi kami dan menunggu keputusan klien",
+    dariMigrasi: false,
+    asalNilaiDefault: "ASUMSI",
+    nilaiDefault: "true",
+  }),
 });
 
 export type KatalogKunci = keyof typeof KATALOG;

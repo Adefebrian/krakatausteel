@@ -855,3 +855,66 @@ dengan pembalikan penuh lalu posting ulang (sehingga satu periode memang hanya b
 jurnal penyisihan hidup), tabel ini tetap benar dan hanya berisi satu baris hidup per periode dan
 cabang. Tidak ada yang perlu dibongkar; yang berubah hanya perilaku engine. Sebaliknya, tanpa tabel
 ini, kebijakan mana pun yang dipilih tidak bisa dibuktikan oleh basis data.
+
+## A-50. RKA: penyusun tidak boleh menyetujui RKA-nya sendiri (default menyala)
+
+**Diasumsikan:** `rka.pemisahan_tugas_persetujuan` masuk katalog konfigurasi dengan default `true`,
+artinya penyusun atau **penyunting terakhir** sebuah RKA tidak boleh menyetujui RKA itu.
+`asalNilaiDefault`-nya `ASUMSI`, bukan `SPEC` dan bukan `KEPUTUSAN`, sehingga layar Konfigurasi
+menyebutnya sebagai usulan kami yang menunggu konfirmasi klien, bukan sebagai kebijakan yang sudah
+disepakati.
+
+**Kenapa:** Bagian 2 menuliskan dua aturan pemisahan tugasnya dengan kata katanya sendiri untuk
+"pola Maker, Checker, Approval yang berlaku di dua modul (PUMK dan Non PUMK)". RKA punya
+persetujuan tetapi tidak punya tahap Checker, jadi tidak satu pun dari kedua aturan itu mengenainya
+secara harfiah, dan pertanyaan "boleh tidak satu Admin Pusat menyusun sekaligus menyetujui anggaran
+tahunan" adalah keputusan kontrol milik klien. Nilainya tetap harus ada, karena engine menolak
+(`KONFIGURASI_TIDAK_ADA`) kalau barisnya tidak ada, persis seperti untuk setiap rate. Default
+`true` dipilih karena RKA yang DISETUJUI adalah tolok ukur setiap angka "versus anggaran" di sistem
+ini (laporan 24, kolom versus RKA pada laporan 2 dan 13, dan dashboard di atas keduanya): default
+mati berarti sistem yang, apa adanya, membiarkan satu orang menetapkan sekaligus memberkati tolok
+ukur itu tanpa pihak kedua mana pun dalam catatan, dan tidak ada apa pun di hilir yang akan
+memperlihatkannya.
+
+**Dampak kalau salah:** biayanya nyata dan berlawanan arah, jadi ditulis apa adanya. Klien dengan
+satu akun Admin Pusat tidak akan bisa menyetujui RKA sama sekali sampai mereka membuat akun kedua.
+Kegagalan itu keras, langsung terlihat, dan selesai dengan satu keputusan yang diambil dengan
+sadar; kegagalan sebaliknya diam dan permanen. Kalau klien memutuskan satu orang cukup, yang
+berubah adalah satu baris `konfigurasi` menjadi `false`, tanpa migrasi dan tanpa deploy.
+
+## A-51. Rincian dimensi periode beku menguraikan mutasi secara UTUH, dengan baris sisa
+
+**Diasumsikan:** kalau mesin closing menulis satu baris saja di `saldo_akun_dimensi_periode`
+(migrasi 0027) untuk sebuah akun dan sebuah sumbu, maka baris baris pada sumbu itu **wajib**
+menjumlah persis ke `mutasi_debit` dan `mutasi_kredit` akun tersebut. Mutasi yang tidak membawa
+dimensi ditulis sebagai satu baris sisa (`sektor_id` dan `bidang_id` NULL), bukan dihilangkan.
+
+**Kenapa:** penguraian sebagian adalah bentuk kesalahan yang tidak bisa dideteksi. Angka per sektor
+yang diam diam berjumlah kurang dari akunnya terlihat wajar di layar, tetap konsisten dari bulan ke
+bulan, dan tidak melanggar satu pun identitas neraca. Dengan baris sisa, "uang yang tidak bisa
+diatribusikan" menjadi baris yang terlihat, dan jumlahnya bisa diuji basis data.
+
+**Dampak kalau salah:** kalau ternyata klien menghendaki laporan per sektor yang sengaja hanya
+memuat sebagian akun (misalnya hanya pencairan, bukan seluruh mutasi piutang), yang benar bukan
+melonggarkan constraint ini melainkan membekukan akun yang lebih sempit atau menambah sumbu baru.
+Melonggarkannya berarti mengembalikan tepat kondisi yang membuat total bisa menggelembung sementara
+setiap barisnya tampak benar.
+
+## A-52. Template laporan berlaku per rentang tanggal pelaporan, dan periode CLOSED mengingat miliknya
+
+**Diasumsikan:** satu BUMN boleh punya lebih dari satu `template_laporan` sekaligus (migrasi 0028),
+rentang berlakunya tidak boleh bertindih, dan `periode.template_laporan_id` dicatat saat periode
+ditutup sehingga cetak ulang periode CLOSED memakai template yang berlaku saat itu, bukan yang
+berlaku hari ini.
+
+**Kenapa:** istilah PSAK 45 yang dipakai spesifikasi sudah dicabut, ISAK 335 memakai istilah lain,
+amendemennya berlaku 2027, dan klien belum memutuskan (docs/REGULASI.md temuan 1). Yang dibutuhkan
+basis data bukan "pilih salah satu selamanya", melainkan kemampuan menyatakan bahwa laporan tahun
+2026 disusun dengan format yang berlaku saat itu. Rentang yang tidak boleh bertindih membuat
+pertanyaan "template mana yang berlaku untuk periode ini" selalu punya tepat satu jawaban, dan
+jawaban itu data, bukan pilihan di layar.
+
+**Dampak kalau salah:** kalau klien ternyata hanya akan pernah memakai satu format, tabelnya tetap
+benar dan hanya berisi satu baris; tidak ada yang perlu dibongkar. Sebaliknya, kalau kita memilih
+satu template tunggal, satu satunya cara mengadopsi standar baru adalah UPDATE di tempat, dan
+UPDATE itu mengubah bentuk laporan setiap periode lampau tanpa ada yang memberi tahu.

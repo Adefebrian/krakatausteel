@@ -438,3 +438,83 @@ Dua pilihan, dengan biayanya:
 
 **Sampai dijawab:** nilainya tetap ada di CHECK, tidak pernah ditulis, dan alasannya terbaca di
 kolomnya sendiri. Jangan menghapusnya tanpa jawaban, dan jangan menulisnya tanpa jalur pembatalan.
+
+## 25. RKA: boleh tidak satu Admin Pusat menyusun sekaligus menyetujui anggaran tahunan?
+
+**Kenapa ini pertanyaan dan bukan bug.** Bagian 2 menuliskan dua aturan pemisahan tugasnya untuk
+"pola Maker, Checker, Approval yang berlaku di dua modul (PUMK dan Non PUMK)". RKA punya
+persetujuan dan tidak punya tahap Checker, jadi tidak satu pun aturan itu mengenainya secara
+harfiah. Yang kami kerjakan adalah mekaniknya, bukan kebijakannya: kunci
+`rka.pemisahan_tugas_persetujuan` ada di katalog, engine membacanya, dan menolak kalau barisnya
+tidak ada.
+
+**Yang kami kirim, dan statusnya:** default `true` (penyusun atau penyunting terakhir tidak boleh
+menyetujui), ditandai `ASUMSI` di katalog dan dicatat sebagai A-50, bukan sebagai kebijakan.
+
+**Yang perlu diputuskan klien:** apakah RKA memerlukan pihak kedua. Biayanya nyata di kedua arah.
+Menyala berarti klien dengan satu akun Admin Pusat tidak bisa menyetujui RKA sampai ada akun kedua.
+Mati berarti tolok ukur setiap angka "versus anggaran" di sistem ini ditetapkan dan diberkati oleh
+orang yang sama, tanpa jejak pihak kedua di mana pun.
+
+**Pemilik:** tim akuntansi dan SPI Krakatau Steel. **Batas waktu:** sebelum RKA pertama disetujui
+di produksi.
+
+## 26. Siapa yang boleh MEMBACA RKA, dan apakah cabang boleh punya RKA sendiri?
+
+`admin.rka.view` sekarang ada dan dipegang Auditor (dan Admin Pusat), karena Auditor memegang
+`laporan.view` sehingga laporan 24 terbuka baginya sementara ia tidak memegang apa pun yang
+menjangkau versi anggaran yang dibandingkan laporan itu. Itu menutup celah yang dipin oleh suite
+RKA dan mengikuti preseden `admin.closing.view`.
+
+**Yang belum dijawab, dan sengaja tidak kami putuskan:**
+
+1. Apakah **Admin Cabang** boleh membaca RKA cabangnya. Hari ini tidak: `admin.rka.view` ada di
+   `HANYA_BUKTI`, jadi tidak diwarisi role operasional.
+2. Apakah **cabang boleh punya RKA sendiri**. `rka.cabang_id` nullable justru supaya bisa, tetapi
+   hanya ADMIN_PUSAT yang memegang `admin.rka`, sehingga setiap anggaran cabang harus diketik
+   kantor pusat. Salah satu dari dua hal itu harus berubah: entah cabang tidak pernah menyusun
+   anggarannya sendiri (dan kolomnya hanya penanda kepemilikan), entah ada pemegang `admin.rka` di
+   level cabang.
+
+**Pemilik:** tim akuntansi Krakatau Steel. **Batas waktu:** sebelum penyusunan RKA tahun buku
+berikutnya.
+
+## 27. Bolehkah template laporan diubah setelah periode yang memakainya ditutup?
+
+Migrasi 0028 sudah menutup kegagalan yang paling mungkin terjadi tanpa sengaja: **mengganti**
+template tidak bisa mengubah bentuk laporan periode lampau, karena `periode.template_laporan_id`
+mencatat template yang berlaku saat periode itu ditutup dan cetak ulang membacanya dari sana.
+
+**Yang masih bisa terjadi, dan tidak kami larang:** menyunting template yang sama di tempat.
+Memindahkan akun ke klasifikasi lain, membalik `tanda`, atau menonaktifkan satu baris akan mengubah
+bentuk laporan periode yang sudah dilaporkan. Alasannya ada di ADR 0017: angkanya tidak bergerak
+(saldo per akun beku di `saldo_akun_periode` dan bebas template), penyajian ulang komparatif justru
+diwajibkan ketika standar berubah, dan mencegahnya secara benar berarti memversikan template
+**dan** kaitan akun ke klasifikasi sepanjang waktu, yaitu master data temporal yang tidak dipakai di
+mana pun dalam sistem ini.
+
+**Mitigasi yang ada sekarang:** ketiga tabel baru memakai audit trigger, jadi siapa yang mengubah
+bentuk sebuah laporan dan kapan bisa dijawab dari `audit_log`.
+
+**Yang perlu diputuskan:** apakah tim akuntansi menghendaki penyuntingan template dikunci setelah
+periode pertama ditutup (dan setiap koreksi harus berupa template baru dengan rentang berlaku
+baru), atau cukup jejak audit. Jawaban pertama bisa ditegakkan trigger dan biayanya adalah setiap
+koreksi salah ketik pun jadi template baru.
+
+**Pemilik:** tim akuntansi Krakatau Steel bersama KAP. **Batas waktu:** sebelum tutup buku pertama
+di produksi.
+
+## 28. Apakah dimensi analitik wajib per event, atau cukup dipasok pemanggilnya?
+
+`PENYALURAN_NON_PUMK` membawa `bidangId` ke `dimensi_json` karena modul Non PUMK memasoknya. Tidak
+ada apa pun di basis data yang **mewajibkannya**. Satu jurnal manual ke akun beban per bidang, atau
+satu event baru yang lupa, menghasilkan jumlah yang tidak bisa diatribusikan ke bidang mana pun, dan
+laporan per bidang diam diam kurang.
+
+Sejak migrasi 0027 kekurangan itu setidaknya **terlihat**: pembekuan wajib menaruh sisanya di baris
+sisa. Yang belum ada adalah pencegahannya. `event_jurnal_mapping` sudah berupa data (ADR 0004), jadi
+tempat yang benar untuk "event ini wajib membawa dimensi X" adalah kolom di sana, bukan `if` di satu
+modul. Tidak dikerjakan sekarang karena tabel itu dilalui tiga modul yang sedang aktif ditulis.
+
+**Pemilik:** arsitektur. **Batas waktu:** sebelum modul Pinbuk dan modul program berikutnya menambah
+event baru.

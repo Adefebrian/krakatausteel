@@ -129,6 +129,46 @@ export const PERMISSIONS = [
   "admin.closing.periode",
   "admin.periode.reopen",
   "admin.rka",
+  // APPROVING an RKA, which is the act that turns a draft budget into the
+  // baseline every "versus anggaran" figure in the system is measured against:
+  // report 24, the "versus RKA" columns of reports 2 and 13, and the dashboard
+  // over both.
+  //
+  // Its own code, and deliberately not a reuse of `admin.rka`. With one code,
+  // the person who types the sector targets is the person who blesses them, and
+  // the RKA becomes the one approved document in the system with no second
+  // party anywhere in the record. Spec 9.3 gives the RKA a status and an
+  // approval, and migrations/0012's `rka_disetujui_ck` makes `approved_by` and
+  // `approved_at` mandatory on a DISETUJUI row, so the schema already expects
+  // an approver; until now the catalogue had no way to say who may be one.
+  //
+  // It is not `konfigurasi.master` either: an annual budget is not master data,
+  // and gating it there would put budget approval behind the same code as
+  // editing the list of provinces.
+  //
+  // WHETHER THE SAME PERSON MAY HOLD BOTH AND USE BOTH is a separate question
+  // and NOT settled by this catalogue. It is the configuration key
+  // `rka.pemisahan_tugas_persetujuan`, whose default is an assumption
+  // (ASSUMPTIONS.md A-31), because spec 2 scopes its segregation rules to the
+  // two proposal modules and the RKA has no Checker stage.
+  "admin.rka.approve",
+  // READING the RKA: which versions exist, which one is DISETUJUI and is
+  // therefore the baseline, who approved it and when. No right to write one.
+  //
+  // Same shape as `admin.closing.view`, and the same argument. The Auditor
+  // holds `laporan.view`, so report 24 opens for it, but held nothing at all
+  // that reaches the budget versions that report compares against; granting
+  // `admin.rka` to close that gap would hand a WRITE code to a role spec 2
+  // defines as "read only penuh ... tidak bisa mengubah apa pun", leaving
+  // `ROLES_READ_ONLY` as the only thing between the grant and a write, which is
+  // a far thinner guarantee than not holding the right.
+  //
+  // Granted to AUDITOR below, and listed in `HANYA_BUKTI` so the operational
+  // roles do not inherit it: whether an Admin Cabang should be able to read its
+  // own branch's RKA is a real question (`rka.cabang_id` is nullable precisely
+  // so a branch can have one, yet only ADMIN_PUSAT holds `admin.rka`), and it
+  // is filed as OPEN-QUESTIONS item 26 rather than answered here.
+  "admin.rka.view",
 
   "konfigurasi.master",
   "konfigurasi.coa",
@@ -238,21 +278,29 @@ const READ_ONLY: Permission[] = [
   "laporan.view",
   "portal.view",
   "audit.view",
-  // The Auditor's other evidence code. Spec 2 gives the role "read only penuh
+  // The Auditor's other evidence codes. Spec 2 gives the role "read only penuh
   // termasuk semua laporan dan audit trail", and spec 16 scenario 23 requires
   // every report and every audit screen to open for it without one mutating
   // control. The closing checklist and the frozen balances are exactly that
-  // kind of evidence.
+  // kind of evidence, and so is the budget baseline a variance report is
+  // measured against: a variance the Auditor cannot trace to an approved
+  // version is not evidence of anything.
   "admin.closing.view",
+  "admin.rka.view",
 ];
 
 /**
- * Read access every operational role has: the whole Auditor list MINUS the two
+ * Read access every operational role has: the whole Auditor list MINUS the
  * evidence codes that are not everybody's. `audit.view` is the audit trail,
- * `admin.closing.view` is the closing evidence, and both are granted
- * deliberately per role below rather than inherited by anyone who can log in.
+ * `admin.closing.view` is the closing evidence, `admin.rka.view` is the budget
+ * baseline, and each is granted deliberately per role below rather than
+ * inherited by anyone who can log in.
  */
-const HANYA_BUKTI: readonly Permission[] = ["audit.view", "admin.closing.view"];
+const HANYA_BUKTI: readonly Permission[] = [
+  "audit.view",
+  "admin.closing.view",
+  "admin.rka.view",
+];
 
 const LIHAT: Permission[] = READ_ONLY.filter((p) => !HANYA_BUKTI.includes(p));
 
