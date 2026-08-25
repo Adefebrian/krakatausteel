@@ -45,6 +45,7 @@ import {
   type KonfigurasiRepo,
   type KonfigurasiRow,
   type PenyisihanRateRow,
+  type ReferensiRow,
 } from "./repo";
 
 const CACHE_PREFIX = "tjsl:cfg:";
@@ -140,6 +141,14 @@ export interface KonfigurasiService {
   batasan(bumnId: string | null): Promise<BatasanConfig>;
   akuntansi(bumnId: string | null): Promise<AkuntansiConfig>;
   kolektibilitasRanges(bumnId: string | null, perTanggal: string): Promise<KolektibilitasRangeRow[]>;
+  /**
+   * Reference lists the operational screens pick from. Master data, so they
+   * live with the parameters rather than in the module that happens to render
+   * them: `sektor_pumk` is spec 4.3 master data and the cash accounts are the
+   * Bagan Akun of spec 4.2.
+   */
+  sektor(bumnId: string): Promise<ReferensiRow[]>;
+  akunKas(bumnId: string): Promise<ReferensiRow[]>;
   penyisihanRates(bumnId: string | null, perTanggal: string): Promise<PenyisihanRateRow[]>;
 
   update(input: KonfigurasiUpdateInput): Promise<NilaiResolusi>;
@@ -421,6 +430,14 @@ export function createKonfigurasiService({
         kekuranganPenyisihanHapusBuku: kekurangan,
         templateLaporanAktif: template,
       };
+    },
+
+    async sektor(bumnId) {
+      return repo.listSektor(db, bumnId);
+    },
+
+    async akunKas(bumnId) {
+      return repo.listAkunKas(db, bumnId);
     },
 
     async kolektibilitasRanges(bumnId, perTanggal) {

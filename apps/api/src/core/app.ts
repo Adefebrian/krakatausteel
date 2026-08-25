@@ -32,19 +32,21 @@ import { Hono } from "hono";
 import { createDbAdapter } from "./adapters/db";
 import { createKeyValueAdapter } from "./adapters/keyvalue";
 import { createRateLimiterAdapter } from "./adapters/ratelimit";
+import { createS3ObjectStoreAdapter } from "./adapters/s3";
 import { applyHardening } from "./hardening";
 import { createErrorHandler } from "./http";
 import type { DbPort } from "./ports/db";
 import type { KeyValueStorePort } from "./ports/keyvalue";
 import type { RateLimiterPort } from "./ports/ratelimit";
 import type { CachePort } from "./ports/redis";
+import type { ObjectStorePort } from "./ports/s3";
 import { createAuditModule, createAuditService, type AuditService } from "../modules/audit";
 import { auditActor, createAuthModule } from "../modules/auth";
 import { createAngsuranModule } from "../modules/angsuran";
 import { createJurnalModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
-import { createPumkModule } from "../modules/pumk";
+import { createPumkHttpModule } from "../modules/pumk";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -58,6 +60,12 @@ export interface AppOverrides {
    * through for the first module that does.
    */
   cache?: CachePort;
+  /**
+   * Object storage for PUMK attachments. Overridable so a test can exercise
+   * `POST /pumk/lampiran` without an S3 endpoint; the adapter opens no socket
+   * on construction, so the default is safe under `bun test` too.
+   */
+  objectStore?: ObjectStorePort;
   loginLimiter?: RateLimiterPort;
   audit?: AuditService;
   /** Session lifetimes and clock. Tests shorten these to observe expiry. */
@@ -129,13 +137,22 @@ export function createApp(overrides: AppOverrides = {}) {
   // instance above, never by writing jurnal rows itself. That is invariant 11,
   // and migration 0020's posting-path trigger refuses any other route.
   const angsuran = createAngsuranModule({ db, jurnal: jurnal.engine });
-  // Fase 3 (spec 9.1). No HTTP surface yet either: the PUMK screens arrive with
-  // their own routes.ts. Wired here so the business layer reaches the ledger
-  // ONLY through the one journal engine above and the schedule ONLY through the
-  // one instalment engine, which is what invariants 8 and 11 actually rest on.
-  // Both engines satisfy this module's ports structurally, so there is no
-  // adapter in between and no second route to a journal or a schedule row.
-  const pumk = createPumkModule({ db, angsuran: angsuran.engine, jurnal: jurnal.engine });
+  // Fase 3 (spec 9.1), engine AND routes. Wired here so the business layer
+  // reaches the ledger ONLY through the one journal engine above and the
+  // schedule ONLY through the one instalment engine, which is what invariants 8
+  // and 11 actually rest on. Both engines satisfy this module's ports
+  // structurally, so there is no adapter in between and no second route to a
+  // journal or a schedule row. `konfigurasi.service` satisfies the module's
+  // configuration port the same way, so `GET /pumk/batasan` answers from the
+  // parameter rows an accountant edits rather than from a literal.
+  const pumk = createPumkHttpModule({
+    db,
+    angsuran: angsuran.engine,
+    jurnal: jurnal.engine,
+    konfigurasi: konfigurasi.service,
+    penyimpanan: overrides.objectStore ?? createS3ObjectStoreAdapter(),
+    guards: auth.guards,
+  });
 
   // modules/example IS NOT MOUNTED, and must not be.
   //
@@ -157,6 +174,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/auth", auth.routes)
     .route("/organisasi", organisasi.routes)
     .route("/konfigurasi", konfigurasi.routes)
+    .route("/pumk", pumk.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -172,6 +190,7 @@ export function createApp(overrides: AppOverrides = {}) {
     jurnal: jurnal.engine,
     angsuran: angsuran.engine,
     pumk: pumk.engine,
+    pumkBaca: pumk.baca,
   };
 }
 

@@ -120,8 +120,16 @@ export function mapDatabaseError(err: unknown): AppError | null {
  * rules it names are older than any transport. Importing the class here would
  * point core/ at a module and close a cycle (core/http -> modules/jurnal ->
  * modules/auth -> core/http), so this matches on the shape the class
- * guarantees: `name` plus a string `kode`. Any later engine that follows the
- * same convention is handled without touching this file.
+ * guarantees: `name` plus a string `kode`.
+ *
+ * `AngsuranError` and `PumkError` follow the same convention deliberately
+ * (both say so in their own files), and they are LISTED here rather than
+ * matched by duck typing alone: an allowlist of names is what keeps an
+ * unrelated library error that happens to carry a `kode` field from being
+ * reported to a caller as a business refusal. Adding an engine is one line,
+ * and forgetting it is visible immediately -- until modules/pumk was listed,
+ * every branch-scope refusal it raised left the handler as an anonymous 500
+ * with no code and no audit row.
  */
 interface ErrorBerkode extends Error {
   kode: string;
@@ -129,7 +137,7 @@ interface ErrorBerkode extends Error {
   penyebabDb?: string;
 }
 
-const NAMA_ERROR_BERKODE = new Set(["JurnalError"]);
+const NAMA_ERROR_BERKODE = new Set(["JurnalError", "AngsuranError", "PumkError"]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
   if (!(err instanceof Error) || !NAMA_ERROR_BERKODE.has(err.name)) return null;
@@ -145,6 +153,13 @@ function errorBerkode(err: unknown): ErrorBerkode | null {
  */
 const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   TIDAK_BERWENANG: "TIDAK_BERWENANG",
+  // Spec 2 rule 3 / spec 16 scenario 24. A row in another branch is a
+  // REFUSAL, not a bad request: it must be a 403 so the error handler writes
+  // the DITOLAK audit row that spec 2 rule 5 requires.
+  CABANG_DILUAR_SCOPE: "TIDAK_BERWENANG",
+  // The operation names a permission the catalogue does not know, so no role
+  // could hold it. Fail closed, and let the audit row carry the reason.
+  IZIN_BELUM_TERDAFTAR: "TIDAK_BERWENANG",
   MAKER_TIDAK_BOLEH_CHECKER: "SEGREGASI_TUGAS",
   JURNAL_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
   // State conflicts: the request was well formed, the ledger simply refuses it
@@ -160,6 +175,65 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   JURNAL_IDEMPOTENSI_DUPLIKAT: "KONFLIK",
   PEMBALIK_STATE_BISNIS_TIDAK_TERDAFTAR: "KONFLIK",
   EVENT_MAPPING_TIDAK_DITEMUKAN: "KONFLIK",
+
+  // --- modules/angsuran (spec 7) and modules/pumk (spec 9.1) ---------------
+  //
+  // Everything absent from this table is a 400, which is the right default for
+  // the input validations both engines are mostly made of. Listed here are
+  // only the codes where 400 would be a LIE: a lookup that found nothing, a
+  // segregation refusal, and a state the ledger simply will not leave.
+  PROPOSAL_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  MITRA_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  AKAD_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  SEKTOR_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  CLUSTER_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  SUBMISSION_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  JADWAL_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  RESCHEDULE_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  PRESET_ALOKASI_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+
+  // Spec 2 rules 1 and 2, ahead of TJSL-SOD-001 / TJSL-SOD-002.
+  KONFLIK_MAKER_CHECKER: "SEGREGASI_TUGAS",
+  KONFLIK_CHECKER_APPROVER: "SEGREGASI_TUGAS",
+  APPROVER_TIDAK_BOLEH_MAKER: "SEGREGASI_TUGAS",
+
+  // State conflicts: well formed, refused in the current state, and a retry
+  // with the same body would be refused again.
+  TRANSISI_TIDAK_VALID: "KONFLIK",
+  STATUS_TERMINAL: "KONFLIK",
+  MITRA_SUDAH_PUNYA_PINJAMAN_AKTIF: "KONFLIK",
+  SURVEY_SUDAH_ADA: "KONFLIK",
+  SURVEY_BELUM_ADA: "KONFLIK",
+  AKAD_SUDAH_ADA: "KONFLIK",
+  JADWAL_BELUM_SIAP: "KONFLIK",
+  JADWAL_SUDAH_ADA: "KONFLIK",
+  JADWAL_IMMUTABLE: "KONFLIK",
+  PENCAIRAN_SUDAH_ADA: "KONFLIK",
+  PENGAKHIRAN_SUDAH_ADA: "KONFLIK",
+  AKAD_TIDAK_BISA_DIAKHIRI: "KONFLIK",
+  AKAD_TIDAK_BISA_DIANGSUR: "KONFLIK",
+  MITRA_SUDAH_DI_CLUSTER: "KONFLIK",
+  MITRA_BUKAN_ANGGOTA_CLUSTER: "KONFLIK",
+  SUBMISSION_SUDAH_DIKONVERSI: "KONFLIK",
+  RESCHEDULE_SUDAH_DIPROSES: "KONFLIK",
+  RESCHEDULE_BELUM_DISETUJUI: "KONFLIK",
+  OUTSTANDING_NEGATIF: "KONFLIK",
+  TOTAL_POKOK_TIDAK_COCOK: "KONFLIK",
+
+  // A collaborating engine refused, so nothing was written. The caller cannot
+  // fix the body; the state has to change first.
+  JADWAL_GAGAL: "KONFLIK",
+  SETORAN_GAGAL: "KONFLIK",
+  JURNAL_GAGAL: "KONFLIK",
+
+  // Fail-closed refusals: an undecided policy or a missing sanctioned event
+  // mapping. Never a 400, because the request was fine and the SYSTEM is the
+  // one that is not ready.
+  EVENT_MAPPING_BELUM_ADA: "KONFLIK",
+  KEBIJAKAN_BELUM_DIPUTUSKAN: "KONFLIK",
+  BASIS_EKUIVALENSI_BELUM_DIPUTUSKAN: "KONFLIK",
+  KONFIGURASI_TIDAK_ADA: "KONFLIK",
+  KONFIGURASI_TIDAK_VALID: "KONFLIK",
 };
 
 /**
@@ -227,7 +301,11 @@ export function createErrorHandler(deps: ErrorHandlerDeps = {}): ErrorHandler {
   const { audit, actor } = deps;
 
   /** Returns null when the row was written (or was not needed), else the failure. */
-  async function catatPenolakan(c: Context, error: AppError): Promise<unknown> {
+  async function catatPenolakan(
+    c: Context,
+    error: { code: ErrorCode; message: string },
+    kodeDomain?: string,
+  ): Promise<unknown> {
     if (!audit) return null;
     if (error.code !== "TIDAK_BERWENANG" && error.code !== "TIDAK_TERAUTENTIKASI") return null;
     if (denialAlreadyLogged(c)) return null;
@@ -240,7 +318,7 @@ export function createErrorHandler(deps: ErrorHandlerDeps = {}): ErrorHandler {
         entitasId: who.userId,
         nilaiBaru: { metode: c.req.method, path: c.req.path },
         hasil: "DITOLAK",
-        keterangan: `${error.code}: ${error.message}`,
+        keterangan: `${kodeDomain ?? error.code}: ${error.message}`,
       });
       markDenialLogged(c);
       return null;
@@ -262,6 +340,31 @@ export function createErrorHandler(deps: ErrorHandlerDeps = {}): ErrorHandler {
         );
       }
       return c.json(err.toBody(), err.status as 400);
+    }
+
+    // A DENIAL FROM AN ENGINE IS STILL A DENIAL (spec 2 rule 5).
+    //
+    // The branch-scope refusals of spec 16 scenario 24 are thrown by a SERVICE
+    // as a coded domain error (`PumkError` with `CABANG_DILUAR_SCOPE`), not as
+    // an `AppError`, so before this branch existed they took the untouched
+    // path below and left NO audit_log row at all. Precisely the denials the
+    // rule cares about were the ones going unrecorded, and the 403 looked
+    // identical from the outside either way.
+    const berkode = errorBerkode(err);
+    if (berkode) {
+      const code = KODE_KE_HTTP[berkode.kode] ?? "VALIDASI";
+      const gagalAudit = await catatPenolakan(
+        c,
+        { code, message: berkode.message },
+        berkode.kode,
+      );
+      if (gagalAudit) {
+        console.error(`[audit-gagal] ${c.req.method} ${c.req.path}:`, gagalAudit);
+        return c.json(
+          { error: "Terjadi kesalahan pada server", code: "KESALAHAN_SERVER" as const },
+          500,
+        );
+      }
     }
     return handleTanpaAudit(err, c);
   };

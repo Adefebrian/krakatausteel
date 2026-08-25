@@ -8,6 +8,7 @@ import type { Guards } from "./ports";
 export { KATALOG, entriTambahan, periksaNilai, tipeDataUntuk, compareDesimal } from "./katalog";
 export type { KatalogEntri, BentukNilai } from "./katalog";
 export { createKonfigurasiService, konfigurasiRusak, CACHE_TTL_SECONDS } from "./service";
+export type { ReferensiRow } from "./repo";
 export type {
   AkuntansiConfig,
   AngsuranConfig,

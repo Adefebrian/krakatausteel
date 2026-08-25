@@ -36,6 +36,13 @@ export interface PenyisihanRateRow {
   berlaku_dari: string;
 }
 
+/** The shape every reference picker in the SPA renders: id, code, label. */
+export interface ReferensiRow {
+  id: string;
+  kode: string;
+  nama: string;
+}
+
 export interface AlokasiPresetRow {
   komponen: string;
   urutan: number;
@@ -80,6 +87,14 @@ export interface KonfigurasiRepo {
     perTanggal: string,
   ): Promise<PenyisihanRateRow[]>;
   alokasiPreset(runner: QueryRunner, kode: string): Promise<AlokasiPresetRow[]>;
+  /** Active sektor usaha for a bumn (spec 4.3, the PUMK proposal filter). */
+  listSektor(runner: QueryRunner, bumnId: string): Promise<ReferensiRow[]>;
+  /**
+   * Postable cash and bank accounts (spec 4.2 `is_kas`). The one list a form
+   * may offer where a transaction names an account: the journal engine refuses
+   * anything else, so offering more would only produce a rejected posting.
+   */
+  listAkunKas(runner: QueryRunner, bumnId: string): Promise<ReferensiRow[]>;
 }
 
 const KOLOM = `id::text AS id, bumn_id::text AS bumn_id, grup, kunci, nilai, tipe_data,
@@ -196,6 +211,26 @@ export function createKonfigurasiRepo(): KonfigurasiRepo {
             AND (bumn_id IS NULL OR bumn_id = $1)
           ORDER BY kelas_kode, (bumn_id IS NOT NULL) DESC, berlaku_dari DESC`,
         [bumnId, perTanggal],
+      );
+    },
+
+    async listSektor(runner, bumnId) {
+      return runner.query<ReferensiRow>(
+        `SELECT id::text AS id, kode, nama
+           FROM sektor_pumk
+          WHERE bumn_id = $1 AND aktif AND deleted_at IS NULL
+          ORDER BY urutan ASC, kode ASC`,
+        [bumnId],
+      );
+    },
+
+    async listAkunKas(runner, bumnId) {
+      return runner.query<ReferensiRow>(
+        `SELECT id::text AS id, kode, nama
+           FROM akun
+          WHERE bumn_id = $1 AND is_kas AND is_postable AND aktif AND deleted_at IS NULL
+          ORDER BY kode ASC`,
+        [bumnId],
       );
     },
 
