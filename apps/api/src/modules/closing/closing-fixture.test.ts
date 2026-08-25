@@ -406,8 +406,8 @@ describe("fixture closing: prasyarat yang harus bisa dirusak", () => {
   });
 });
 
-describe("fixture closing: temuan yang belum ditutup", () => {
-  test("TEMUAN: kolektibilitas_snapshot belum punya kolom sumber_rate", async () => {
+describe("fixture closing: temuan yang sudah ditutup", () => {
+  test("TEMUAN DITUTUP: kolektibilitas_snapshot mencatat dari mana ratenya berasal", async () => {
     // docs/REGULASI.md is explicit: "Tambahkan kolom `sumber_rate`". With two
     // penyisihan modes live (docs/BUILD-PLAN.md), `rate_penyisihan` alone
     // cannot say whether 0.850000 was typed into `penyisihan_rate` or derived
@@ -416,15 +416,16 @@ describe("fixture closing: temuan yang belum ditutup", () => {
     // which breaks invariant 14 for the one report whose whole job is to
     // reconstruct the allowance journal.
     //
-    // migrations/0011 ships `dasar_perhitungan` and stops there. This module
-    // must NOT invent the column in a fixture: the fix is a migration, and
-    // until it lands the engine has to refuse rather than write a snapshot it
-    // cannot later explain (KODE_CLOSING.SKEMA_BELUM_LENGKAP exists for that).
+    // migrations/0011 shipped `dasar_perhitungan` and stopped there, so this
+    // test was deliberately RED: the fix was a migration, and a fixture that
+    // invented the column would have made the gap invisible instead of
+    // closing it. The migration has since landed, so the assertion stands as
+    // the regression pin rather than as the finding.
     expect(await d.kolomAda("kolektibilitas_snapshot", "dasar_perhitungan")).toBe(true);
     expect(await d.kolomAda("kolektibilitas_snapshot", "sumber_rate")).toBe(true);
   });
 
-  test("TEMUAN: katalog izin belum punya kode baca-saja untuk layar closing", () => {
+  test("TEMUAN DITUTUP: katalog izin punya kode baca-saja untuk layar closing", () => {
     // The three write codes are there and correctly granted.
     expect(canonicalPermission(PERMISSION_CLOSING.KOLEKTIBILITAS)).toBe(
       PERMISSION_CLOSING.KOLEKTIBILITAS,
@@ -440,9 +441,10 @@ describe("fixture closing: temuan yang belum ditutup", () => {
     // a role that must never write, or to lock the auditor out of the evidence.
     //
     // Same shape as `pumk.cluster` and `nonpumk.lpj.verifikasi`: the module
-    // names the code it needs and fails closed until the catalogue carries it.
-    // Adding the string to a fixture's permission list would make this green
-    // and the gap invisible, which is the move both earlier findings survived.
+    // named the code it needed and failed closed until the catalogue carried
+    // it. Adding the string to a fixture's permission list would have made this
+    // green and the gap invisible, which is the move both earlier findings
+    // survived. The catalogue now carries it, so this is the regression pin.
     const kodeLihat: string = PERMISSION_CLOSING.LIHAT;
     expect(canonicalPermission(kodeLihat) as string | null).toBe(kodeLihat);
   });

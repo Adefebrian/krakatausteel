@@ -454,6 +454,7 @@ export interface SnapshotDb {
   tunggakan_jasa: string;
   rate_penyisihan: string;
   dasar_perhitungan: string;
+  sumber_rate: string;
   nilai_penyisihan: string;
 }
 
@@ -1458,7 +1459,7 @@ export async function buatDunia(): Promise<DuniaClosing> {
                 outstanding_jasa::text as outstanding_jasa,
                 tunggakan_pokok::text as tunggakan_pokok,
                 tunggakan_jasa::text as tunggakan_jasa,
-                rate_penyisihan::text as rate_penyisihan, dasar_perhitungan,
+                rate_penyisihan::text as rate_penyisihan, dasar_perhitungan, sumber_rate,
                 nilai_penyisihan::text as nilai_penyisihan
            from kolektibilitas_snapshot
           where periode_id = $1 and deleted_at is null

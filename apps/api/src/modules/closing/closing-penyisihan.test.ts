@@ -241,6 +241,117 @@ describe("spec 8.2: satu jurnal per cabang, lewat postingEvent", () => {
     expect(await d.bacaPenyisihan(p.id)).toHaveLength(0);
   });
 
+  test("re-run setelah kebutuhan BERUBAH memposting selisihnya, dan hanya selisihnya", async () => {
+    // The other half of idempotency, and the half that is easy to get wrong.
+    //
+    // The test above pins the unchanged case: run it twice, nothing moves. This
+    // pins the case where something legitimately DID move between the two runs
+    // (an accountant corrected a rate before closing the month, which is
+    // exactly what spec 8.1 keeps the period OPEN for). The second run must
+    // post the DELTA and not the whole requirement again: re-posting in full
+    // would double the allowance and overstate the expense by the first run's
+    // amount, and both journals would balance perfectly while it happened.
+    const p = d.periode(2027, 6);
+    d.setelJam(p.tanggalAkhir);
+    const akad = await d.buatAkad({ hariTunggakan: 300, padaTanggal: p.tanggalAkhir });
+
+    await d.setelRate("MACET", "0.850000");
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const [pertama] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    const kebutuhanAwal = kaliRate(akad.pokok, "0.850000");
+    expect(pertama.penyisihanDibutuhkan).toBe(kebutuhanAwal);
+
+    // The rate is corrected upward before the period closes.
+    await d.setelRate("MACET", "0.950000");
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const [kedua] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+
+    const kebutuhanBaru = kaliRate(akad.pokok, "0.950000");
+    expect(kedua.penyisihanDibutuhkan).toBe(kebutuhanBaru);
+    expect(kedua.bebanPenyisihanPeriode).toBe(kebutuhanBaru);
+
+    // ONE row, still, and the ledger holds exactly the new requirement rather
+    // than the sum of two full postings.
+    expect(await d.bacaPenyisihan(p.id)).toHaveLength(1);
+    expect(await d.saldoLedger(d.akun.penyisihan.id, p.tanggalAkhir)).toBe(
+      negasiUang(kebutuhanBaru),
+    );
+
+    // The second journal carries the DELTA only.
+    const jurnal = await d.db.query<{ id: string; total_debit: string }>(
+      `select id::text as id, total_debit::text as total_debit
+         from jurnal
+        where periode_id = $1 and jenis = 'PENYISIHAN' and deleted_at is null
+        order by no_jurnal`,
+      [p.id],
+    );
+    expect(jurnal).toHaveLength(2);
+    expect(jurnal[0].total_debit).toBe(kebutuhanAwal);
+    expect(jurnal[1].total_debit).toBe(kurangUang(kebutuhanBaru, kebutuhanAwal));
+    // Both are real, distinct entries. Correction is by ADDING an entry, never
+    // by editing one that is already in the ledger (invariant 4).
+    expect(jurnal[0].id).not.toBe(jurnal[1].id);
+  });
+
+  test("TEMUAN: penyisihan_periode.jurnal_id hanya bisa menunjuk SATU dari beberapa jurnal periode itu", async () => {
+    // A RECORD-KEEPING GAP, NOT AN ACCOUNTING ONE. The ledger above is exactly
+    // right; what cannot be expressed is WHICH entries produced it.
+    //
+    // `penyisihan_periode` (migrations/0011) carries a single `jurnal_id`. When
+    // a re-run posts a delta, the period's provision lives in TWO journals and
+    // the row can name only one of them, so it ends up pointing at the delta
+    // while its own `beban_penyisihan_periode` states the full amount. The row
+    // then says "the provision expense this period was 11.400.000" next to a
+    // link to an entry worth 1.200.000.
+    //
+    // Why it matters beyond tidiness: spec 16 scenario 17 asks an operator to
+    // open Laporan Perhitungan Penyisihan and confirm its total reconstructs
+    // the period's provision journal. A report that follows `jurnal_id` gets
+    // the delta and fails that check; a report that sums every PENYISIHAN
+    // journal of the period reconciles. The two readings are both defensible
+    // from the schema, which is the actual problem.
+    //
+    // NOT FIXED HERE, and deliberately not asserted as a failure: the remedies
+    // are the owner's call (reverse-and-repost a single journal on re-run, or
+    // make the link a join table), and both are schema or engine decisions.
+    // This test pins the behaviour as it stands so the day it changes, it
+    // changes on purpose.
+    const p = d.periode(2027, 6);
+    d.setelJam(p.tanggalAkhir);
+    const akad = await d.buatAkad({ hariTunggakan: 300, padaTanggal: p.tanggalAkhir });
+
+    await d.setelRate("MACET", "0.850000");
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    await d.setelRate("MACET", "0.950000");
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const [baris] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+
+    const jurnal = await d.db.query<{ id: string; total_debit: string }>(
+      `select id::text as id, total_debit::text as total_debit
+         from jurnal
+        where periode_id = $1 and jenis = 'PENYISIHAN' and deleted_at is null
+        order by no_jurnal`,
+      [p.id],
+    );
+
+    // THE AMBIGUITY, stated as an assertion rather than as a comment.
+    const ditunjuk = jurnal.find((j) => j.id === baris.jurnalId);
+    expect(ditunjuk).toBeDefined();
+    expect(ditunjuk?.total_debit).not.toBe(baris.bebanPenyisihanPeriode);
+
+    // What DOES reconcile, and therefore what a report has to do: sum every
+    // provision journal of the period rather than follow the link.
+    expect(jumlahUang(...jurnal.map((j) => j.total_debit))).toBe(
+      baris.bebanPenyisihanPeriode,
+    );
+    // And the snapshot still reconstructs the requirement, which is the other
+    // half of spec 16 scenario 17.
+    expect(
+      jumlahUang(...(await d.bacaSnapshot(p.id)).map((s) => s.nilai_penyisihan)),
+    ).toBe(kaliRate(akad.pokok, "0.950000"));
+  });
+
   test("menjalankan penyisihan dua kali tidak menggandakan jurnal maupun baris", async () => {
     const p = d.periode(2027, 6);
     d.setelJam(p.tanggalAkhir);

@@ -23,7 +23,13 @@
 // distinction exists to prevent.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { KODE_CLOSING } from "./contract";
-import { buatDunia, jumlahUang, tolakDengan, type DuniaClosing } from "./test-support";
+import {
+  buatDunia,
+  jumlahUang,
+  selisihHari,
+  tolakDengan,
+  type DuniaClosing,
+} from "./test-support";
 
 let d: DuniaClosing;
 
@@ -131,27 +137,58 @@ describe("spec 8.3: metode pengakuan dibaca dari konfigurasi", () => {
     expect(kas.metode).not.toBe(akrual.metode);
   });
 
-  test("konfigurasi metode yang hilang di dua level ditolak, bukan diasumsikan ACCRUAL", async () => {
+  test("metode yang tidak terselesaikan ke nilai apa pun ditolak, bukan diasumsikan ACCRUAL", async () => {
     const p = d.periode(2027, 6);
     d.setelJam(p.tanggalAkhir);
     await akadJatuhTempoDiPeriode(d, p.tanggalAkhir, 10);
     await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
 
-    await d.hapusKonfigurasi("akuntansi", "metode_pengakuan_jasa_adm");
-    await d.db.query(
-      `update konfigurasi set deleted_at = now()
-        where bumn_id is null and grup = 'akuntansi' and kunci = 'metode_pengakuan_jasa_adm'
-          and deleted_at is null`,
-    );
+    // THE PARAMETER IS EMPTIED, NOT DELETED, AND THE GLOBAL ROW IS LEFT ALONE.
+    //
+    // An earlier version of this test soft-deleted the SHIPPED (bumn_id IS
+    // NULL) row so the key would be absent at both levels. Two things were
+    // wrong with that, and the second is much worse than the first:
+    //
+    //   1. it omitted `deleted_by`, so `konfigurasi_soft_delete_ck` raised
+    //      23514 inside the test body before the engine was ever called;
+    //   2. `tjsl_test` is shared, and EVERY world in the process resolves
+    //      through that one global row. Deleting it without restoring it
+    //      poisons every suite that runs afterwards, in a database several
+    //      agents are using at once. That class of cross-test contamination
+    //      has already cost this project several hundred phantom failures.
+    //
+    // A `finally` that restored the row would still leave a window in which
+    // another process could observe it, so the row is not touched at all.
+    // Instead the world's OWN bumn-scoped row is set to blank, which is the
+    // state an operator produces by clearing the field in the Konfigurasi
+    // screen. That row wins the resolution order (bumn-scoped over global), so
+    // the parameter resolves to nothing for THIS bumn and for no other.
+    //
+    // It reaches the same guard by the same route: the engine refuses when the
+    // value resolves to null OR to blank, which is the honest statement of the
+    // requirement anyway. "No row anywhere" and "a row an operator emptied" are
+    // the same fact to a calculation that needs a value.
+    await d.setelKonfigurasi("akuntansi", "metode_pengakuan_jasa_adm", "");
 
     // Defaulting in code to the spec's ACCRUAL would post real journals under a
     // policy nobody selected, in a client's audited accounts, and nothing in
     // the ledger would record that the choice was made by a fallback.
-    await tolakDengan(
+    const err = await tolakDengan(
       () => d.engine.jalankanAkrualJasaAdm({ periodeId: p.id }, d.ctx.approver),
       KODE_CLOSING.KONFIGURASI_TIDAK_ADA,
     );
+    // The refusal names the key, because an operator who cannot see WHICH
+    // parameter is missing has a fail-closed guard and no way to clear it.
+    expect(err.message).toContain("akuntansi.metode_pengakuan_jasa_adm");
     expect(await d.bacaAkrual(p.id)).toHaveLength(0);
+
+    // The shipped default is still exactly where it was, for every other world.
+    const global = await d.db.query<{ nilai: string | null }>(
+      `select nilai from konfigurasi
+        where bumn_id is null and grup = 'akuntansi' and kunci = 'metode_pengakuan_jasa_adm'
+          and deleted_at is null`,
+    );
+    expect(global).toHaveLength(1);
   });
 });
 
@@ -159,7 +196,7 @@ describe("spec 8.3: populasi mengikuti akrual_hanya_untuk_kolektibilitas", () =>
   test("kelas di luar daftar tidak diakru; menambahkannya ke daftar membuatnya ikut", async () => {
     const p1 = d.periode(2027, 6);
     const p2 = d.periode(2027, 7);
-    const lancar = await akadJatuhTempoDiPeriode(d, p1.tanggalAkhir, 10);
+    const lancarP1 = await akadJatuhTempoDiPeriode(d, p1.tanggalAkhir, 10);
     const macet = await akadJatuhTempoDiPeriode(d, p1.tanggalAkhir, 300);
 
     d.setelJam(p1.tanggalAkhir);
@@ -167,7 +204,28 @@ describe("spec 8.3: populasi mengikuti akrual_hanya_untuk_kolektibilitas", () =>
     const sempit = await d.engine.jalankanAkrualJasaAdm({ periodeId: p1.id }, d.ctx.approver);
 
     expect(sempit.kelasDiakrual).toEqual(["LANCAR"]);
-    expect(sempit.baris.map((b) => b.akadId)).toEqual([lancar.akadId]);
+    expect(sempit.baris.map((b) => b.akadId)).toEqual([lancarP1.akadId]);
+
+    // P2 GETS A FRESH AKAD RATHER THAN REUSING `lancarP1`, and that is the
+    // whole subtlety of this test.
+    //
+    // Nobody pays `lancarP1`, so its arrears keep growing: 10 days at p1's end
+    // is 41 days at p2's end, which the fixture bands classify as
+    // KURANG_LANCAR. Since the population is filtered on the CURRENT period's
+    // snapshot (asserted directly in the next test), an earlier version of this
+    // test that expected `lancarP1` back under a `["LANCAR","MACET"]` list was
+    // asking for something no correct implementation can do. The akad that must
+    // be LANCAR at p2 is therefore built to be LANCAR at p2.
+    //
+    // Disbursed inside p2, so spec 8.1 step 1's population (AKTIF /
+    // RESCHEDULED / MACET) correctly excluded it from p1 a moment ago.
+    const lancarP2 = await d.buatAkad({
+      hariTunggakan: 10,
+      padaTanggal: p2.tanggalAkhir,
+      janganCairkan: true,
+    });
+    d.setelJam(p2.tanggalMulai);
+    await d.cairkan(lancarP2.akadId, p2.tanggalMulai);
 
     // The reason the default list is narrow is stated in spec 5.6 itself
     // ("jasa administrasi tidak diakrual untuk piutang bermasalah"), but the
@@ -183,8 +241,62 @@ describe("spec 8.3: populasi mengikuti akrual_hanya_untuk_kolektibilitas", () =>
 
     expect(lebar.kelasDiakrual).toEqual(["LANCAR", "MACET"]);
     expect(lebar.baris.map((b) => b.akadId).sort()).toEqual(
-      [lancar.akadId, macet.akadId].sort(),
+      [lancarP2.akadId, macet.akadId].sort(),
     );
+    // And `lancarP1` is absent, not because the list shrank but because the
+    // AKAD moved. Left as an assertion rather than a comment: it is the only
+    // thing separating "the list is honoured" from "the list is ignored and
+    // everything accrues".
+    expect(lebar.baris.map((b) => b.akadId)).not.toContain(lancarP1.akadId);
+  });
+
+  test("kelas yang memburuk antar periode keluar dari populasi akrual tanpa konfigurasi berubah", async () => {
+    // THE DRIFT, PINNED ON ITS OWN.
+    //
+    // This is ordinary behaviour, not an edge case: an unpaid akad ages one
+    // month per month and crosses a band without anyone touching it. Two things
+    // follow, and both matter to an accountant reading the accrual report.
+    //
+    // First, the population is a property of THE PERIOD, not of the akad: it is
+    // filtered on the current period's `kolektibilitas_snapshot`, so an akad
+    // that qualified last month can drop out this month. Second, that is spec
+    // 5.6 working as intended ("jasa administrasi tidak diakrual untuk piutang
+    // bermasalah"): the moment a receivable stops performing, the system stops
+    // recognising income it is unlikely to collect.
+    //
+    // No configuration changes anywhere in this test. Only time passes.
+    const p1 = d.periode(2027, 6);
+    const p2 = d.periode(2027, 7);
+    const akad = await akadJatuhTempoDiPeriode(d, p1.tanggalAkhir, 10);
+
+    d.setelJam(p1.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: p1.id }, d.ctx.approver);
+    const awal = await d.engine.jalankanAkrualJasaAdm({ periodeId: p1.id }, d.ctx.approver);
+    expect((await d.bacaSnapshot(p1.id))[0].kolektibilitas).toBe("LANCAR");
+    expect(awal.baris.map((b) => b.akadId)).toEqual([akad.akadId]);
+
+    // One month later, unpaid. The first instalment was due 10 days before p1
+    // ended and is now that much older; the fixture bands put anything past 30
+    // days into KURANG_LANCAR.
+    d.setelJam(p2.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: p2.id }, d.ctx.approver);
+    const snapshot = (await d.bacaSnapshot(p2.id))[0];
+    expect(snapshot.hari_tunggakan).toBe(
+      selisihHari(akad.tanggalMulaiAngsuran, p2.tanggalAkhir),
+    );
+    expect(snapshot.kolektibilitas).toBe("KURANG_LANCAR");
+
+    d.jurnal.reset();
+    const akhir = await d.engine.jalankanAkrualJasaAdm({ periodeId: p2.id }, d.ctx.approver);
+
+    // Same list, same akad, different answer, and the reason is in the snapshot
+    // rather than in the configuration.
+    expect(akhir.kelasDiakrual).toEqual(["LANCAR"]);
+    expect(akhir.metode).toBe("ACCRUAL");
+    expect(akhir.dilewati).toBe(false);
+    expect(akhir.baris).toEqual([]);
+    expect(akhir.totalPerCabang).toEqual([]);
+    expect(d.jurnal.panggilan.filter((c) => c.eventCode === "AKRUAL_JASA_ADM")).toHaveLength(0);
   });
 
   test("akrual ditolak kalau closing kolektibilitas belum dijalankan", async () => {

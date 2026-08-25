@@ -20,7 +20,7 @@
 //      default. A gap in the bands must not silently resolve to LANCAR: that
 //      under-provisions the whole portfolio and every journal still balances.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { KODE_CLOSING } from "./contract";
+import { KODE_CLOSING, POLA_RATE } from "./contract";
 import {
   buatDunia,
   jumlahUang,
@@ -136,6 +136,182 @@ describe("spec 8.1: rentang hari dibaca dari tabel konfigurasi", () => {
     expect(baris.nilai_penyisihan).toBe(
       kaliRate(jumlahUang(akad.pokok, outstandingJasa), rate),
     );
+  });
+
+  test("mode KOLEKTIF_HISTORIS dengan histori cukup memakai rate dari penagihan, bukan dari tabel", async () => {
+    // THE ALTERNATIVE BASIS, EXERCISED RATHER THAN ASSUMED.
+    //
+    // docs/REGULASI.md finding 3 is that the spec's rate table is in no
+    // regulation currently in force, and that audited PUMK statements impair
+    // COLLECTIVELY from collection history instead. docs/BUILD-PLAN.md
+    // therefore requires both bases as capabilities. Until this test existed
+    // only the refusal path (`HISTORI_TIDAK_CUKUP`) was reachable, because
+    // every fixture world is younger than the shipped 24-month minimum, so the
+    // basis the regulation actually points at was unexercised code.
+    //
+    // It is reachable cheaply, and the way it is reached is itself the point:
+    // `penyisihan_min_bulan_histori` is a PARAMETER, not a constant, so a
+    // client whose history is shorter than two years lowers the row rather
+    // than waiting two years. Nothing here is aged artificially and no clock
+    // is moved; the world genuinely holds seventeen months of ledger.
+    const pAwal = d.periode(2027, 5);
+    const p = d.periode(2027, 6);
+    const akad = await d.buatAkad({
+      hariTunggakan: 300,
+      padaTanggal: pAwal.tanggalAkhir,
+      tanggalPencairan: "2026-01-05",
+    });
+
+    // A PRIOR SNAPSHOT IS A PRECONDITION, not an oversight. Collective
+    // impairment buckets history BY CLASS, so an akad with no class history
+    // contributes to no bucket. The first period is therefore run on the rate
+    // table, which is also how a real client would start.
+    d.setelJam(pAwal.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: pAwal.id }, d.ctx.approver);
+    const dariTabel = (await d.bacaSnapshot(pAwal.id))[0];
+    const rateTabel = await d.bacaRate("MACET");
+    expect(dariTabel.sumber_rate).toBe("TABEL_KONFIGURASI");
+    expect(dariTabel.rate_penyisihan).toBe(rateTabel);
+
+    await d.setelKonfigurasi("akuntansi", "penyisihan_min_bulan_histori", "12");
+    await d.setelKonfigurasi("akuntansi", "mode_penyisihan", "KOLEKTIF_HISTORIS");
+
+    d.setelJam(p.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const dariHistori = (await d.bacaSnapshot(p.id))[0];
+
+    // NOTHING WAS EVER COLLECTED on this akad, so the share of what fell due
+    // that went uncollected is exactly all of it. That is the one input shape
+    // whose answer is forced, which is why it is the one asserted: the test
+    // does not re-implement the engine's window or its formula and therefore
+    // cannot agree with a wrong version of either.
+    expect(dariHistori.sumber_rate).toBe("KOLEKTIF_HISTORIS");
+    expect(dariHistori.rate_penyisihan).toBe("1.000000");
+    expect(dariHistori.nilai_penyisihan).toBe(akad.pokok);
+
+    // And it is genuinely a DIFFERENT number from the table's, which is the
+    // whole reason both bases exist. If the fixture's MACET rate were ever set
+    // to 1.000000 this assertion would go vacuous, so it is stated against the
+    // row rather than against a literal.
+    expect(rateTabel).not.toBe("1.000000");
+    expect(dariHistori.rate_penyisihan).not.toBe(dariTabel.rate_penyisihan);
+
+    // Invariant 14: the snapshot records WHICH basis produced the figure, so a
+    // closed period's Laporan Perhitungan Penyisihan is still reconstructible
+    // after the mode is switched back. This is the column docs/REGULASI.md
+    // asked for, doing the job it was asked for.
+    expect(dariHistori.sumber_rate).not.toBe(dariTabel.sumber_rate);
+  });
+
+  test("penagihan sebagian menurunkan rate kolektif di bawah satu", async () => {
+    // The companion to the forced case above: with money actually collected in
+    // the window, the rate has to fall strictly between nothing and everything.
+    // Asserted as bounds rather than as an exact figure, deliberately. The
+    // METHODOLOGY is still the client accounting team's to confirm
+    // (OPEN-QUESTIONS.md), so pinning a precise rate here would freeze one
+    // reading of "collective impairment" into the test suite and make the
+    // decision look settled.
+    const pAwal = d.periode(2027, 5);
+    const p = d.periode(2027, 6);
+    const akad = await d.buatAkad({
+      hariTunggakan: 300,
+      padaTanggal: pAwal.tanggalAkhir,
+      tanggalPencairan: "2026-01-05",
+    });
+
+    d.setelJam(pAwal.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: pAwal.id }, d.ctx.approver);
+
+    // Real money, through the REAL instalment engine, so the collection history
+    // is one the rest of the system agrees happened.
+    //
+    // DELIBERATELY TOO SMALL TO CLEAR AN INSTALMENT. The allocation order pays
+    // the jasa of every overdue row before any pokok (spec 5.4), so this leaves
+    // several rows SEBAGIAN and none LUNAS. The oldest unpaid row is therefore
+    // still row 1 and the arrears are still 300 days, which keeps the akad in
+    // MACET. That matters: paying a WHOLE instalment would move it to a class
+    // with no collection history at all, and the engine would then refuse
+    // rather than impair it, which is a different property tested on its own
+    // below.
+    const tanggalBayar = `${pAwal.tanggalMulai.slice(0, 8)}10`;
+    d.setelJam(tanggalBayar);
+    await d.bayarSetoran(akad.akadId, tanggalBayar, rp(200_000));
+
+    await d.setelKonfigurasi("akuntansi", "penyisihan_min_bulan_histori", "12");
+    await d.setelKonfigurasi("akuntansi", "mode_penyisihan", "KOLEKTIF_HISTORIS");
+
+    d.setelJam(p.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const baris = (await d.bacaSnapshot(p.id))[0];
+
+    expect(baris.kolektibilitas).toBe("MACET");
+    expect(baris.sumber_rate).toBe("KOLEKTIF_HISTORIS");
+    expect(baris.rate_penyisihan).toMatch(POLA_RATE);
+    const rateMikro = BigInt(baris.rate_penyisihan.replace(".", ""));
+    expect(rateMikro).toBeGreaterThan(0n);
+    expect(rateMikro).toBeLessThan(1_000_000n);
+    // The allowance still follows the stored rate to the sen, whichever basis
+    // produced it, which is what `kolektibilitas_snapshot_nilai_ck` also says.
+    expect(baris.nilai_penyisihan).toBe(
+      kaliRate(baris.outstanding_pokok, baris.rate_penyisihan),
+    );
+  });
+
+  test("mode KOLEKTIF_HISTORIS menolak kelas yang belum punya histori penagihan sama sekali", async () => {
+    // FOUND BY WRITING THE TEST ABOVE, AND WORTH KEEPING.
+    //
+    // Collective impairment buckets history BY CLASS, so a class that nothing
+    // has ever occupied has no collection history and therefore no rate. That
+    // is not a rare corner: it is what happens the first time an akad IMPROVES
+    // into a band the portfolio has never been in, which is the ordinary
+    // consequence of someone starting to pay.
+    //
+    // The engine refuses, and refusing is the only safe answer. A zero rate
+    // would report the improved akad as fully provisioned at nothing, and
+    // falling back to the rate table would put a table rate inside a period
+    // labelled collectively impaired, which is precisely the mixing
+    // `sumber_rate` exists to prevent. The operator's remedy is a real one:
+    // widen the history window, or run the period on the rate table.
+    const pAwal = d.periode(2027, 5);
+    const p = d.periode(2027, 6);
+    const akad = await d.buatAkad({
+      hariTunggakan: 300,
+      padaTanggal: pAwal.tanggalAkhir,
+      tanggalPencairan: "2026-01-05",
+    });
+
+    d.setelJam(pAwal.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: pAwal.id }, d.ctx.approver);
+    expect((await d.bacaSnapshot(pAwal.id))[0].kolektibilitas).toBe("MACET");
+
+    // Three whole instalments, so the arrears fall by three months and the akad
+    // lands in DIRAGUKAN, a class this portfolio has never occupied.
+    const tanggalBayar = `${pAwal.tanggalMulai.slice(0, 8)}10`;
+    d.setelJam(tanggalBayar);
+    await d.bayarSetoran(akad.akadId, tanggalBayar, await d.totalJadwalSampai(akad.akadId, 3));
+
+    await d.setelKonfigurasi("akuntansi", "penyisihan_min_bulan_histori", "12");
+    await d.setelKonfigurasi("akuntansi", "mode_penyisihan", "KOLEKTIF_HISTORIS");
+
+    d.setelJam(p.tanggalAkhir);
+    const err = await tolakDengan(
+      () => d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver),
+      KODE_CLOSING.RATE_PENYISIHAN_TIDAK_ADA,
+    );
+    // The refusal names the class and the mode, because "a rate is missing" with
+    // a full `penyisihan_rate` table in front of the operator is unactionable.
+    expect(err.detail.kelas).toBe("DIRAGUKAN");
+    expect(err.detail.mode).toBe("KOLEKTIF_HISTORIS");
+    expect(await d.jumlahSnapshot(p.id)).toBe(0);
+
+    // ...and the same period computes fine on the rate table, which is the
+    // remedy the message points at.
+    await d.setelKonfigurasi("akuntansi", "mode_penyisihan", "RATE_TABLE");
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const pulih = (await d.bacaSnapshot(p.id))[0];
+    expect(pulih.kolektibilitas).toBe("DIRAGUKAN");
+    expect(pulih.sumber_rate).toBe("TABEL_KONFIGURASI");
+    expect(pulih.rate_penyisihan).toBe(await d.bacaRate("DIRAGUKAN"));
   });
 
   test("mode KOLEKTIF_HISTORIS dengan histori kurang dari minimum ditolak, bukan diam diam jatuh ke tabel rate", async () => {
