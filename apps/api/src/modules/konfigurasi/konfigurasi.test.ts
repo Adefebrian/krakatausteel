@@ -520,9 +520,11 @@ describe("HTTP surface", () => {
 // parameter: it can only be changed with psql, i.e. by a deploy-equivalent.
 // This is DB-driven on purpose. A hand-written list of "keys we shipped" is a
 // second copy of the migrations and drifts from them exactly the way the
-// thirteen keys below did: four Non PUMK (0022), the fixed due day (0019) and
-// eleven integration switches (0016) were all live rows that this catalogue had
-// never heard of, and nothing failed until someone opened the screen.
+// seventeen keys below did: four Non PUMK (0022), the fixed due day (0019) and
+// twelve integration switches (0016) were all live rows that this catalogue had
+// never heard of, and nothing failed until someone opened the screen. One
+// reported gap, seventeen actual gaps: that is what sweeping for the pattern is
+// for.
 // ---------------------------------------------------------------------------
 describe("catalogue and database agree about which parameters exist", () => {
   test("every global row shipped by a migration or the seed has a catalogue entry", async () => {
@@ -555,7 +557,7 @@ describe("catalogue and database agree about which parameters exist", () => {
     expect(hilang).toEqual([]);
   });
 
-  test("the thirteen keys the sweep found are catalogued, with shapes and bounds", () => {
+  test("the seventeen keys the sweep found are catalogued, with shapes and bounds", () => {
     for (const key of [
       // migrations/0019, spec 7.1's fixed due day
       "angsuran.hari_jatuh_tempo_tetap",
