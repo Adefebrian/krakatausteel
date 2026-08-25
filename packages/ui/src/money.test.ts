@@ -5,7 +5,13 @@ import {
   formatMoney,
   formatPercent,
   formatPeriode,
+  formatRate,
   formatRupiah,
+  formatTotal,
+  jumlahkanUang,
+  parseRate,
+  parseUang,
+  uangKeInput,
   UNPARSEABLE,
 } from "./money";
 
@@ -130,5 +136,69 @@ describe("angka lain", () => {
   test("formatPeriode spells the month in Indonesian", () => {
     expect(formatPeriode(2026, 8)).toBe("Agustus 2026");
     expect(formatPeriode(2026, 1)).toBe("Januari 2026");
+  });
+});
+
+describe("parseUang, the input side of the same grammar", () => {
+  test("reads the four ways an Indonesian operator writes one figure", () => {
+    expect(parseUang("1500000")).toBe("1500000.00");
+    expect(parseUang("1.500.000")).toBe("1500000.00");
+    expect(parseUang("1.500.000,50")).toBe("1500000.50");
+    expect(parseUang("1500000,5")).toBe("1500000.50");
+  });
+
+  test("a dot is always a thousands separator here, never a decimal mark", () => {
+    // On an Indonesian form "1.500" is fifteen hundred. Guessing per field is
+    // how the same keystrokes would mean two different amounts on two screens.
+    expect(parseUang("1.500")).toBe("1500.00");
+  });
+
+  test("refuses what is not a figure, and refusing is NOT zero", () => {
+    expect(parseUang("")).toBeNull();
+    expect(parseUang("dua juta")).toBeNull();
+    expect(parseUang("1,5,5")).toBeNull();
+    expect(parseUang("1000,555")).toBeNull();
+    expect(parseUang("-5000")).toBeNull();
+    // The caller must refuse to submit rather than send 0,00 for unread text.
+    expect(parseUang("abc")).not.toBe("0.00");
+  });
+
+  test("round trips through the display format", () => {
+    expect(uangKeInput("1500000.50")).toBe("1.500.000,50");
+    expect(parseUang(uangKeInput("1500000.50"))).toBe("1500000.50");
+    expect(uangKeInput("")).toBe("");
+  });
+
+  test("parseRate and formatRate speak the API's six decimal rate", () => {
+    expect(parseRate("3")).toBe("3.000000");
+    expect(parseRate("3,5")).toBe("3.500000");
+    expect(parseRate("3.5")).toBe("3.500000");
+    expect(parseRate("tiga")).toBeNull();
+    expect(formatRate("3.000000")).toBe("3,00");
+  });
+});
+
+describe("jumlahkanUang and formatTotal", () => {
+  test("adds in integer cents, so a column total actually ties", () => {
+    expect(jumlahkanUang(["0.10", "0.20"])).toBe("0.30");
+    expect(jumlahkanUang(["25000000.00", "10000000.00"])).toBe("35000000.00");
+    expect(jumlahkanUang(["999999999999999.99", "0.01"])).toBe("1000000000000000.00");
+  });
+
+  test("a negative value subtracts, which is how a difference is written", () => {
+    expect(jumlahkanUang(["15000000.00", "-25000000.00"])).toBe("-10000000.00");
+  });
+
+  test("a total over an unreadable value is unknowable, not a partial sum", () => {
+    // Silently dropping the bad row would produce a wrong number with nothing
+    // on the page admitting it. That is the failure mode UNPARSEABLE exists for.
+    expect(jumlahkanUang(["1000.00", "tidak sah"])).toBeNull();
+    expect(formatTotal(["1000.00", "rusak"])).toBe(UNPARSEABLE);
+    expect(formatTotal(["1000.00", "2000.00"])).toBe("3.000,00");
+  });
+
+  test("an empty list totals to a real zero, which still prints 0,00", () => {
+    expect(jumlahkanUang([])).toBe("0.00");
+    expect(formatTotal([])).toBe("0,00");
   });
 });

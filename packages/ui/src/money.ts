@@ -238,3 +238,120 @@ export function formatPeriode(tahun: number, bulan: number): string {
   const nama = NAMA_BULAN[bulan - 1];
   return nama ? `${nama} ${tahun}` : String(tahun);
 }
+
+// ---------------------------------------------------------------------------
+// Input side
+// ---------------------------------------------------------------------------
+
+/**
+ * Read what an operator typed into a money field and produce the API's `Uang`
+ * string: digits, a dot, exactly two decimals, no separators and no sign, the
+ * shape `apps/api`'s POLA_UANG accepts for a NUMERIC(20,2) column.
+ *
+ * Indonesian keyboards and Indonesian habits produce "1.500.000", "1500000",
+ * "1.500.000,50" and "1500000,50" for the same figure, so all four parse. A
+ * dot is ALWAYS a thousands separator here and never a decimal mark: this is
+ * an Indonesian form, and guessing per input would make "1.500" mean fifteen
+ * hundred in one field and one and a half in the next.
+ *
+ * Returns null for anything that is not a figure, and null is not zero: a
+ * caller must refuse to submit rather than send "0.00" for text it could not
+ * read. That is the input-side half of what UNPARSEABLE does on the output
+ * side.
+ */
+export function parseUang(input: string): string | null {
+  const raw = input.trim();
+  if (raw === "") return null;
+  if (!/^[0-9.,]+$/.test(raw)) return null;
+
+  const commas = raw.split(",").length - 1;
+  if (commas > 1) return null;
+
+  const [integerPart, fractionPart = ""] = raw.split(",");
+  const digits = (integerPart ?? "").replace(/\./g, "");
+  if (digits === "" && fractionPart === "") return null;
+  if (!/^\d*$/.test(digits) || !/^\d*$/.test(fractionPart)) return null;
+  if (fractionPart.length > 2) return null;
+
+  const whole = digits.replace(/^0+(?=\d)/, "") || "0";
+  if (whole.length > 18) return null;
+  return `${whole}.${fractionPart.padEnd(2, "0")}`;
+}
+
+/**
+ * The inverse: a `Uang` string as an operator would see it in the field, with
+ * Indonesian separators. Trailing ",00" is kept, because a money field that
+ * silently drops the decimals reads as a different figure to an accountant.
+ */
+export function uangKeInput(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "";
+  const formatted = formatMoney(value);
+  return formatted === UNPARSEABLE ? "" : formatted;
+}
+
+/**
+ * A rate as the API wants it: `POLA_RATE`, three integer digits at most and
+ * exactly six decimals. "3" and "3,5" both come from a form; "3.500000" is
+ * what the akad column holds.
+ */
+export function parseRate(input: string): string | null {
+  const raw = input.trim().replace(",", ".");
+  if (raw === "") return null;
+  if (!/^\d{1,3}(\.\d{1,6})?$/.test(raw)) return null;
+  const [whole, fraction = ""] = raw.split(".");
+  return `${whole}.${fraction.padEnd(6, "0")}`;
+}
+
+/** A rate for display: "3.000000" reads as "3,00". */
+export function formatRate(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "";
+  return formatMoney(value, { decimals: 2 });
+}
+
+/**
+ * Add up `Uang` values exactly.
+ *
+ * Money arrives from the API as a NUMERIC(20,2) string, and the ONE thing a
+ * total must never do is go through a float on the way: `0.1 + 0.2` is the
+ * cheapest way to make a column that does not tie. This adds in integer cents
+ * with BigInt and returns a `Uang` string.
+ *
+ * Returns null when ANY value cannot be read, and null is not zero: a total
+ * over a value the formatter would render as UNPARSEABLE is itself
+ * unknowable, and a caller must render the marker rather than a number that
+ * quietly left a row out.
+ */
+export function jumlahkanUang(values: Iterable<string | number | null | undefined>): string | null {
+  let cents = 0n;
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const raw = typeof value === "number" ? (Number.isFinite(value) ? value.toFixed(2) : "x") : value.trim();
+    const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(raw);
+    if (!match) return null;
+    const sign = match[1] === "-" ? -1n : 1n;
+    const whole = BigInt(match[2] ?? "0");
+    const fraction = BigInt((match[3] ?? "").padEnd(2, "0") || "0");
+    cents += sign * (whole * 100n + fraction);
+  }
+  const negative = cents < 0n;
+  const absolute = negative ? -cents : cents;
+  const whole = absolute / 100n;
+  const fraction = absolute % 100n;
+  return `${negative ? "-" : ""}${whole}.${String(fraction).padStart(2, "0")}`;
+}
+
+/**
+ * Sum and format in one step, the way a column total is written on a screen.
+ *
+ * A total whose inputs contain a value that is not a figure renders as the
+ * UNPARSEABLE marker, never as the sum of the rows that happened to parse: a
+ * total that quietly left a row out is the wrong number with nothing on the
+ * page admitting it, which spec section 10 ranks above a missing feature.
+ */
+export function formatTotal(
+  values: Iterable<string | number | null | undefined>,
+  options: MoneyFormatOptions = {},
+): string {
+  const total = jumlahkanUang(values);
+  return total === null ? UNPARSEABLE : formatMoney(total, options);
+}

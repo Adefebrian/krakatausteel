@@ -129,8 +129,49 @@
   flex: 0 0 auto;
 }
 
+/* Panel bodies stack their blocks at one rhythm, so a table under a summary
+   under a paragraph never ends up flush against its neighbour. */
 .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   min-width: 0;
+}
+
+/*
+ * A KPI card: one title, one figure, one hint. The title is clamped to two
+ * lines AND floored at two lines, which is what puts every figure in a bento
+ * row on the same baseline. Without the floor, a card titled "Outstanding
+ * pokok" sits its figure one line higher than the card next to it titled
+ * "Outstanding Jasa Administrasi", and a row of four cards reads as four
+ * different shapes.
+ */
+.panel-kpi .panel-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The caption above the figure gets the same treatment, for the same reason:
+   a three line caption on one card in a row of four drops that card's figure
+   below its neighbours. */
+.panel-kpi .stat-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The two line floor only matters where cards sit SIDE BY SIDE. In one
+   column it would reserve an empty line under every short title. */
+@media (min-width: 641px) {
+  .panel-kpi .panel-title {
+    min-height: calc(2 * var(--leading-subhead) * 1em);
+  }
+  .panel-kpi .stat-label {
+    min-height: calc(2 * var(--leading-caption) * 1em);
+  }
 }
 
 /* Only a genuinely stretchable visual opts into filling the card height. */
@@ -442,6 +483,19 @@
 .filterbar-pair {
   display: flex;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Two date inputs share the row and each one may shrink. Without min-width:0
+   a date input keeps its intrinsic width and pushes the whole filter card past
+   the viewport on a phone, which is exactly what it did before this line. */
+.filterbar-pair > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.control-with-affix {
+  min-width: 0;
 }
 
 .filterbar-actions {
@@ -453,8 +507,16 @@
     flex-direction: column;
     align-items: stretch;
   }
+  .filterbar-group,
+  .filterbar-group.is-grow {
+    width: 100%;
+    flex: 0 0 auto;
+  }
   .filterbar-actions {
     margin-left: 0;
+  }
+  .filterbar-actions .btn {
+    width: 100%;
   }
 }
 
