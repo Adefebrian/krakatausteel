@@ -66,6 +66,7 @@ import { SQL } from "bun";
 import { expect } from "bun:test";
 import { createAngsuranModule, type AngsuranContext, type Jadwal } from "../angsuran/index";
 import { createJurnalModule, type Jurnal, type JurnalContext } from "../jurnal/index";
+import { createDbAdapter } from "../../core/adapters/db";
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
 import { permissionsForRole, seedRbac } from "../../seed/rbac";
 import {
@@ -429,6 +430,18 @@ export interface DuniaPumk {
   buatMitra(opsi?: { cabangId?: string; nama?: string; nik?: string }): Promise<MitraFixture>;
 
   /**
+   * A cluster of its own, for a test that asserts on a ROSTER SIZE.
+   *
+   * `clusterId` and `clusterLainId` are shared by the whole file, and
+   * membership is deliberately not cleaned up between tests (physical DELETE is
+   * blocked on several of these tables by design). So `toHaveLength(1)` against
+   * a shared cluster is really an assertion about test ORDER, and it breaks the
+   * moment another test in the same file adds a member. Same rule as every
+   * other key in this fixture: unique per call, via `kunci()`.
+   */
+  buatCluster(opsi?: { cabangId?: string; nama?: string }): Promise<{ id: string; kode: string }>;
+
+  /**
    * Builds a proposal (and whatever supporting rows the target status implies)
    * DIRECTLY IN SQL. These are PRECONDITIONS, not behaviour under test: the
    * module is unimplemented, so routing "a proposal already at
@@ -543,8 +556,8 @@ const PERLU_JADWAL: readonly StatusProposal[] = ["JADWAL_SIAP", "DICAIRKAN"];
 
 /**
  * Builds a minimal but complete world: one bumn, two branches, monthly OPEN
- * periods for 2026-01 .. 2028-12, the SHIPPED chart of accounts and all 19
- * SHIPPED event mappings, the SHIPPED RBAC matrix with one user per role, this
+ * periods for 2026-01 .. 2028-12, the SHIPPED chart of accounts and every
+ * SHIPPED event mapping (the 19 of spec 6.4 plus the three owner decisions), the SHIPPED RBAC matrix with one user per role, this
  * module's configuration rows scoped to the world's bumn, one sektor, one
  * karyawan and two clusters.
  */
@@ -594,7 +607,22 @@ export async function buatDunia(): Promise<DuniaPumk> {
   // The SHIPPED permission catalogue, the six SHIPPED system roles and the
   // SHIPPED grant matrix. Idempotent, so another agent's `db:reset` mid-run is
   // repaired by the next world that needs it.
-  await seedRbac(db);
+  //
+  // THROUGH THE node-postgres ADAPTER ON PURPOSE, not through this world's
+  // `bun:sql` port. `seedRbac` reconciles each role's grants with
+  // `kode = ANY($2::text[])`, i.e. it binds a JS ARRAY, and driver fact 3 in
+  // modules/jurnal/repo.ts applies: `bun:sql` serialises a JS array as a bare
+  // comma-joined string, which `text[]` rejects with 22P02 "malformed array
+  // literal". node-postgres serialises it correctly. The same choice, for the
+  // same reason, is made and explained in modules/jurnal/jurnal-gabungan.test.ts.
+  //
+  // Safe to run on a second connection: RBAC rows are global (no bumn_id, no
+  // cabang_id), they are seeded idempotently, and nothing else in this world
+  // depends on them being inside the world's own transaction. `createDbAdapter`
+  // opens no socket on import and shares one lazily-built pool across the whole
+  // test process, so this costs no extra connection per world.
+  const dbRbac = createDbAdapter();
+  await seedRbac(dbRbac);
 
   const ROLE_UNTUK: Record<keyof typeof userId, string> = {
     maker: "MAKER",
@@ -610,7 +638,7 @@ export async function buatDunia(): Promise<DuniaPumk> {
   };
   const izinRole = new Map<string, string[]>();
   for (const kodeRole of new Set(Object.values(ROLE_UNTUK))) {
-    izinRole.set(kodeRole, await permissionsForRole(db, kodeRole));
+    izinRole.set(kodeRole, await permissionsForRole(dbRbac, kodeRole));
   }
   for (const [nama, kodeRole] of Object.entries(ROLE_UNTUK)) {
     await db.query(
@@ -636,7 +664,7 @@ export async function buatDunia(): Promise<DuniaPumk> {
     }
   }
 
-  // The SHIPPED COA and the SHIPPED 19 event mappings, by the same code path
+  // The SHIPPED COA and every SHIPPED event mapping, by the same code path
   // `bun run db:seed` uses.
   const { akun: akunIdByKode } = await seedCoaDanEventMapping(db, bumn.id, userId.adminPusat);
   const akun = {} as Record<KunciAkun, AkunFixture>;
@@ -737,8 +765,39 @@ export async function buatDunia(): Promise<DuniaPumk> {
     return { id: m.id, kodeMitra: kode, nama, nik };
   }
 
+  /**
+   * THE ADMIN PUSAT CONTEXT, NOT THE MAKER'S, AND THAT IS THE WHOLE POINT.
+   *
+   * These two helpers build PRECONDITIONS, not the behaviour under test. The
+   * maker's context is scoped to cabang A (spec 2 rule 3), so
+   * `siapkanProposal(status, { cabangId: cabangLain.id })` at JADWAL_SIAP or
+   * DICAIRKAN used to die IN SETUP with the collaborating engine's own
+   * `CABANG_DILUAR_SCOPE`, before the engine under test was ever called. The
+   * cross-branch tests that then went red were reporting a fixture fault as if
+   * it were a scope defect, which is the most expensive kind of false negative:
+   * it looks exactly like the thing it is hiding.
+   *
+   * Admin Pusat is the honest choice rather than a widened maker context,
+   * because spec 2 rule 3 genuinely exempts it from branch scoping, so the
+   * fixture is using a real capability instead of faking one. Nothing is
+   * weakened: every scope assertion in this folder is made against the engine
+   * under test with the role that owns the operation, never against these.
+   */
+  async function buatCluster(
+    opsi: { cabangId?: string; nama?: string } = {},
+  ): Promise<{ id: string; kode: string }> {
+    const kode = kunci("CLS");
+    const c = await satu<{ id: string }>(
+      db,
+      `insert into cluster (cabang_id, kode, nama, sektor_id) values ($1, $2, $3, $4)
+       returning id::text as id`,
+      [opsi.cabangId ?? cabang.id, kode, opsi.nama ?? `Cluster ${kode}`, sektor.id],
+    );
+    return { id: c.id, kode };
+  }
+
   async function generateJadwalLewatEngine(akadId: string): Promise<Jadwal> {
-    return angsuranEngine.generateJadwal({ akadId }, ctxAngsuran(ctx.maker));
+    return angsuranEngine.generateJadwal({ akadId }, ctxAngsuran(ctx.adminPusat));
   }
 
   async function cairkanLewatEngine(akadId: string, pokok: Uang, jasa: Uang): Promise<string> {
@@ -762,7 +821,7 @@ export async function buatDunia(): Promise<DuniaPumk> {
         referensiTipe: "pumk_pencairan",
         referensiId: akadId,
       },
-      ctxJurnal(ctx.maker),
+      ctxJurnal(ctx.adminPusat),
     );
     await db.query(
       `update pumk_akad
@@ -941,10 +1000,21 @@ export async function buatDunia(): Promise<DuniaPumk> {
     userId,
     ctx,
     buatMitra,
+    buatCluster,
     siapkanProposal,
     cairkanLewatEngine,
     generateJadwalLewatEngine,
 
+    /**
+     * `$4::text::jsonb`, NOT `$4::jsonb`. Driver fact 1 in
+     * modules/jurnal/repo.ts: a `jsonb` parameter bound from a JS STRING is
+     * stored as a JSON string SCALAR, so `jsonb_typeof(data_json)` returns
+     * 'string', `data_json->>'jumlah_diajukan'` is NULL, and `bacaSubmission`
+     * hands back a string where the caller expects an object. The portal
+     * payload is the one thing scenario 21 asks to be copied CORRECTLY, so a
+     * fixture that stores it double-encoded cannot answer the question the
+     * test is asking, whatever the engine does about it.
+     */
     async buatSubmissionPortal(opsi = {}) {
       const noTiket = kunci("TKT");
       const data = opsi.data ?? {
@@ -962,7 +1032,7 @@ export async function buatDunia(): Promise<DuniaPumk> {
         `insert into portal_submission
            (bumn_id, jenis, no_tiket, data_json, dokumen_json, email_kontak, telepon_kontak,
             status, converted_proposal_id)
-         values ($1, $2, $3, $4::jsonb, '[]'::jsonb, $5, $6, $7, $8)
+         values ($1, $2, $3, $4::text::jsonb, '[]'::jsonb, $5, $6, $7, $8)
          returning id::text as id`,
         [
           bumn.id,
@@ -1422,11 +1492,23 @@ const POLA_KEBOCORAN_DB =
  * bare `Error("not implemented")` must NOT satisfy this, otherwise every
  * rejection test in this folder would go green against an unimplemented
  * module, which is the one failure mode a tests-first suite exists to prevent.
+ *
+ * TAKES A PROMISE OR A THUNK. Prefer the thunk. A method that rejects from a
+ * guard clause placed before its first `await`, in a function that is not
+ * declared `async`, throws SYNCHRONOUSLY: the argument expression blows up at
+ * the call site and this assertion never runs, so the test fails with a raw
+ * stack instead of "expected KODE_X, got KODE_Y". That is exactly how today's
+ * `belumDiimplementasikan()` stub behaves, and it is a shape a real
+ * implementation can reach by accident. Wrapping the call in a thunk makes the
+ * two paths indistinguishable to the caller.
  */
-export async function tolakDengan(janji: Promise<unknown>, kode: KodePumk): Promise<PumkError> {
+export async function tolakDengan(
+  janji: Promise<unknown> | (() => Promise<unknown> | unknown),
+  kode: KodePumk,
+): Promise<PumkError> {
   let ditangkap: unknown;
   try {
-    await janji;
+    await (typeof janji === "function" ? janji() : janji);
   } catch (e) {
     ditangkap = e;
   }

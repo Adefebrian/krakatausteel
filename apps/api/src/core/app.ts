@@ -44,6 +44,7 @@ import { createAngsuranModule } from "../modules/angsuran";
 import { createJurnalModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
+import { createPumkModule } from "../modules/pumk";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -128,6 +129,13 @@ export function createApp(overrides: AppOverrides = {}) {
   // instance above, never by writing jurnal rows itself. That is invariant 11,
   // and migration 0020's posting-path trigger refuses any other route.
   const angsuran = createAngsuranModule({ db, jurnal: jurnal.engine });
+  // Fase 3 (spec 9.1). No HTTP surface yet either: the PUMK screens arrive with
+  // their own routes.ts. Wired here so the business layer reaches the ledger
+  // ONLY through the one journal engine above and the schedule ONLY through the
+  // one instalment engine, which is what invariants 8 and 11 actually rest on.
+  // Both engines satisfy this module's ports structurally, so there is no
+  // adapter in between and no second route to a journal or a schedule row.
+  const pumk = createPumkModule({ db, angsuran: angsuran.engine, jurnal: jurnal.engine });
 
   // modules/example IS NOT MOUNTED, and must not be.
   //
@@ -163,6 +171,7 @@ export function createApp(overrides: AppOverrides = {}) {
     nomor,
     jurnal: jurnal.engine,
     angsuran: angsuran.engine,
+    pumk: pumk.engine,
   };
 }
 
@@ -175,4 +184,5 @@ export const audit = instance.audit;
 export const nomor = instance.nomor;
 export const jurnal = instance.jurnal;
 export const angsuran = instance.angsuran;
+export const pumk = instance.pumk;
 export type AppType = typeof app;

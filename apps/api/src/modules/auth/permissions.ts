@@ -43,6 +43,18 @@ export const PERMISSIONS = [
   "pumk.reschedule",
   "pumk.hapusbuku",
   "pumk.penagihan",
+  // Spec 9.1's cluster page ("kelola kelompok, tambah dan keluarkan anggota,
+  // lihat performa kolektibilitas per cluster") had NO code in this catalogue,
+  // so modules/pumk had to fail closed on every cluster operation and not even
+  // Admin Pusat (built as a spread of PERMISSIONS) could hold it.
+  //
+  // It is its own code, deliberately, and neither of the two tempting reuses:
+  // `pumk.create` would let any Maker restructure the very groups whose
+  // kolektibilitas performance is reported per cluster, and `konfigurasi.master`
+  // would put an operational PUMK screen behind Admin Pusat. Granted to
+  // ADMIN_CABANG (and so to ADMIN_PUSAT) below: managing a group's roster is
+  // branch operational administration, not day-to-day proposal work.
+  "pumk.cluster",
 
   "nonpumk.view",
   "nonpumk.create",
@@ -239,7 +251,17 @@ const APPROVER: Permission[] = [
 // change the jasa administrasi rate is a branch admin who can change every
 // future journal in that branch.
 const ADMIN_CABANG: Permission[] = [
-  ...new Set<Permission>([...MAKER, ...CHECKER, ...APPROVER, "konfigurasi.user", "tools.integritas"]),
+  ...new Set<Permission>([
+    ...MAKER,
+    ...CHECKER,
+    ...APPROVER,
+    "konfigurasi.user",
+    "tools.integritas",
+    // Cluster membership is roster administration for the branch, so it sits
+    // with the branch admin rather than with the Maker who files the proposals
+    // whose kolektibilitas the cluster report aggregates.
+    "pumk.cluster",
+  ]),
 ];
 
 const ADMIN_PUSAT: Permission[] = [...PERMISSIONS];

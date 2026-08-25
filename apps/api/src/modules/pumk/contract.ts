@@ -3,12 +3,11 @@
 // FASE 3, MODUL PENDANAAN UMK (spec 9.1). Types, error codes, the state
 // machine AS DATA, and a factory whose every method throws `not implemented`.
 //
-// THIS FILE IS A SPECIFICATION, NOT AN IMPLEMENTATION. It exists so the tests
-// in this folder can be written first and can fail for the RIGHT reason. The
-// behaviour belongs in a future ./service.ts; when it lands, the only change
-// here is that `createPumkEngine` delegates to it instead of to
-// `belumDiimplementasikan()`, exactly as modules/jurnal and modules/angsuran
-// are wired.
+// THIS FILE IS THE SPECIFICATION AND THE PUBLIC SHAPE, NOT THE BEHAVIOUR. It
+// was written before the engine so the tests in this folder could be written
+// first and fail for the RIGHT reason. The behaviour now lives in ./service.ts
+// and `createPumkEngine` delegates to it, exactly as modules/jurnal and
+// modules/angsuran are wired.
 //
 // WHAT THIS MODULE IS
 // The business layer that DRIVES the two engines. It owns the proposal state
@@ -46,6 +45,7 @@ import type {
   Uang,
 } from "../angsuran/index";
 import type { Jurnal, JurnalContext } from "../jurnal/index";
+import { buatEnginePumk } from "./service";
 
 export type { RateTahunan, Uang, MetodePerhitungan, StatusAkad };
 
@@ -899,56 +899,21 @@ export interface PumkEngine {
 // ---------------------------------------------------------------------------
 
 /**
- * DELIBERATELY A PLAIN `Error`, NOT A `PumkError`.
+ * The one implementation site. The engine itself lives in ./service.ts; this
+ * stays the single named entry point so nothing outside the module has to know
+ * that file exists, exactly as modules/jurnal and modules/angsuran are wired.
  *
- * ./test-support.ts's `tolakDengan` asserts `instanceof PumkError` and a
- * matching `kode`. If this threw a `PumkError` with, say,
- * `TRANSISI_TIDAK_VALID`, every rejection test in this folder would go GREEN
- * against an unimplemented module, which is the exact failure mode a
- * tests-first suite exists to avoid. So the stub throws something no
- * assertion in this folder can mistake for the real thing.
- */
-function belumDiimplementasikan(nama: string): never {
-  throw new Error(
-    `PumkEngine.${nama}: not implemented. Fase 3 (spec 9.1) belum dibangun; ` +
-      "lihat apps/api/src/modules/pumk/contract.ts dan test di folder yang sama.",
-  );
-}
-
-/**
- * The one implementation site. Today every method is a stub; when ./service.ts
- * lands this becomes `return buatEnginePumk(deps)` and nothing else in the
- * repo changes.
+ * `deps` is passed through: the wiring in the composition root and in the
+ * tests is part of what this module's tests pin, and a factory with no
+ * parameters would let a wrong wiring compile.
  *
- * `deps` is intentionally accepted and ignored rather than omitted: the wiring
- * in the composition root and in the tests is part of what these tests pin,
- * and a factory with no parameters would let a wrong wiring compile.
+ * THE CIRCULAR IMPORT IS SAFE AND DELIBERATE, for the reason both sibling
+ * engines record: ./service.ts imports only TYPES plus `STATUS_TERMINAL` and
+ * `transisiUntuk` from here, and reads them inside function bodies only, so
+ * nothing here is touched while it is still in its temporal dead zone. Its
+ * permission list and ./kesalahan.ts's message catalogue are written with
+ * string literals for exactly that reason.
  */
 export function createPumkEngine(deps: PumkEngineDeps): PumkEngine {
-  void deps;
-  return {
-    buatProposal: () => belumDiimplementasikan("buatProposal"),
-    tambahJaminan: () => belumDiimplementasikan("tambahJaminan"),
-    submitUntukSurvey: () => belumDiimplementasikan("submitUntukSurvey"),
-    inputSurvey: () => belumDiimplementasikan("inputSurvey"),
-    ajukanKeChecker: () => belumDiimplementasikan("ajukanKeChecker"),
-    review: () => belumDiimplementasikan("review"),
-    putuskanPersetujuan: () => belumDiimplementasikan("putuskanPersetujuan"),
-    timeline: () => belumDiimplementasikan("timeline"),
-    daftarProposal: () => belumDiimplementasikan("daftarProposal"),
-    buatAkad: () => belumDiimplementasikan("buatAkad"),
-    generateJadwal: () => belumDiimplementasikan("generateJadwal"),
-    catatPencairan: () => belumDiimplementasikan("catatPencairan"),
-    terimaAngsuran: () => belumDiimplementasikan("terimaAngsuran"),
-    ajukanReschedule: () => belumDiimplementasikan("ajukanReschedule"),
-    setujuiReschedule: () => belumDiimplementasikan("setujuiReschedule"),
-    catatPengakhiran: () => belumDiimplementasikan("catatPengakhiran"),
-    catatTindakLanjut: () => belumDiimplementasikan("catatTindakLanjut"),
-    daftarTindakLanjut: () => belumDiimplementasikan("daftarTindakLanjut"),
-    tambahAnggotaCluster: () => belumDiimplementasikan("tambahAnggotaCluster"),
-    keluarkanAnggotaCluster: () => belumDiimplementasikan("keluarkanAnggotaCluster"),
-    daftarAnggotaCluster: () => belumDiimplementasikan("daftarAnggotaCluster"),
-    kartuPiutang: () => belumDiimplementasikan("kartuPiutang"),
-    konversiSubmissionPortal: () => belumDiimplementasikan("konversiSubmissionPortal"),
-  };
+  return buatEnginePumk(deps);
 }
