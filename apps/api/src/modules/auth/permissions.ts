@@ -102,6 +102,29 @@ export const PERMISSIONS = [
 
   "laporan.view",
 
+  // READING the closing evidence: the prerequisite checklist, the run history,
+  // the migration matrix and a closed period's frozen balances. No right to
+  // run anything.
+  //
+  // It is its own code, and neither of the two things that were available
+  // without it. Gating the closing read paths on `admin.closing.periode` hands
+  // a WRITE code to the Auditor, whom spec 2 makes read only ("Tidak bisa
+  // mengubah apa pun") and whose evidence this is; `ROLES_READ_ONLY` would then
+  // be the only thing standing between that grant and a write, which is a far
+  // thinner guarantee than not holding the right. Leaving the reads ungated
+  // makes the whole closing history readable to any authenticated account.
+  //
+  // `laporan.view` does not reach it either: how a period was closed, and
+  // against which checklist, is not one of the 31 reports in spec 10.4, so a
+  // code that gates those reports says nothing about this screen.
+  //
+  // Same shape as `pumk.cluster` and `nonpumk.lpj.verifikasi`: modules/closing
+  // names the code (`PERMISSION_CLOSING.LIHAT`) and fails closed with
+  // IZIN_BELUM_TERDAFTAR while it is absent. Granted to AUDITOR and APPROVER
+  // below (and so to ADMIN_CABANG and ADMIN_PUSAT), deliberately NOT to Maker
+  // or Checker: neither closes a period, and spec 9.3's two closing screens are
+  // the Approver's.
+  "admin.closing.view",
   "admin.closing.kolektibilitas",
   "admin.closing.periode",
   "admin.periode.reopen",
@@ -215,10 +238,23 @@ const READ_ONLY: Permission[] = [
   "laporan.view",
   "portal.view",
   "audit.view",
+  // The Auditor's other evidence code. Spec 2 gives the role "read only penuh
+  // termasuk semua laporan dan audit trail", and spec 16 scenario 23 requires
+  // every report and every audit screen to open for it without one mutating
+  // control. The closing checklist and the frozen balances are exactly that
+  // kind of evidence.
+  "admin.closing.view",
 ];
 
-/** Read access every operational role has. Only the Auditor sees audit.view. */
-const LIHAT: Permission[] = READ_ONLY.filter((p) => p !== "audit.view");
+/**
+ * Read access every operational role has: the whole Auditor list MINUS the two
+ * evidence codes that are not everybody's. `audit.view` is the audit trail,
+ * `admin.closing.view` is the closing evidence, and both are granted
+ * deliberately per role below rather than inherited by anyone who can log in.
+ */
+const HANYA_BUKTI: readonly Permission[] = ["audit.view", "admin.closing.view"];
+
+const LIHAT: Permission[] = READ_ONLY.filter((p) => !HANYA_BUKTI.includes(p));
 
 const MAKER: Permission[] = [
   ...LIHAT,
@@ -268,6 +304,9 @@ const APPROVER: Permission[] = [
   "nonpumk.approve",
   "jurnal.post",
   "jurnal.reversal",
+  // Reading the checklist is a separate act from executing the close, and the
+  // Approver does the first before deciding whether to do the second.
+  "admin.closing.view",
   "admin.closing.kolektibilitas",
   "admin.closing.periode",
 ];

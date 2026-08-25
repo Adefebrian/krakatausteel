@@ -766,3 +766,51 @@ beban kolektif (misalnya karena pengembalian dilaporkan terpisah dari realisasi 
 berubah satu baris `event_jurnal_mapping`: `kredit_dari_payload = false` dan `akun_kredit_id`
 diarahkan ke akun kolektif itu. Tidak ada kode yang berubah, dan jurnal yang sudah terposting tidak
 ikut berubah karena jurnal menyimpan `akun_id` hasil resolusinya, bukan pemetaannya.
+
+## A-46. Jendela histori adalah satu satunya masukan tambahan yang perlu dibekukan untuk rate kolektif
+
+**Diasumsikan:** `kolektibilitas_snapshot.sumber_rate` (migrasi 0024) hanya punya dua nilai,
+`TABEL_KONFIGURASI` dan `KOLEKTIF_HISTORIS`, dan untuk nilai kedua **jendela histori**
+(`rate_histori_dari`, `rate_histori_sampai`) sudah cukup untuk menghitung ulang rate-nya. Artinya
+kami mengasumsikan rate kolektif adalah fungsi dari (jendela waktu, data penagihan), dan data
+penagihan itu hidup di buku besar serta tabel angsuran yang bersifat append only, sehingga tidak
+perlu ikut dibekukan.
+
+**Kenapa:** yang hilang permanen kalau tidak dicatat hanyalah jendelanya, karena
+`akuntansi.penyisihan_min_bulan_histori` adalah baris `konfigurasi` yang diubah di tempat dan pasti
+sudah berbeda saat seseorang bertanya bertahun tahun kemudian. Angka penyisihannya sendiri sudah
+bisa dibangun ulang dari kolom yang ada (`rate_penyisihan` kali basis, dijaga CHECK sejak 0011),
+jadi yang ditambahkan 0024 adalah **asal** rate itu, bukan hasilnya. Menyimpan pointer ke versi
+baris konfigurasi ditolak dengan alasan yang ditulis penuh di ADR 0014: `version` adalah penghitung
+optimistic lock, bukan kunci riwayat, jadi pointer itu akan menunjuk ke nilai hari ini sambil
+mengaku sebagai nilai yang dipakai.
+
+**Dampak kalau salah:** kalau metode kolektif yang disepakati KAP ternyata memakai masukan lain di
+luar jendela dan data penagihan (misalnya segmentasi populasi tersendiri, faktor pemulihan yang
+ditetapkan manajemen, atau *management overlay*), maka jendela saja tidak cukup dan snapshot butuh
+kolom tambahan untuk masukan itu. Perubahannya aditif: satu migrasi menambah kolom, `sumber_rate`
+dan CHECK yang ada tidak berubah, dan periode yang sudah tertutup tetap terbaca. Yang **tidak**
+diasumsikan di sini adalah rumus rate kolektifnya sendiri; itu masih pertanyaan terbuka ke tim
+akuntansi klien (docs/REGULASI.md temuan 2).
+
+## A-47. Pemegang `admin.closing.view` adalah Auditor dan Approver, bukan Maker atau Checker
+
+**Diasumsikan:** kode izin baca saja untuk layar closing dipegang AUDITOR (lewat daftar read only)
+dan APPROVER (eksplisit), sehingga ADMIN_CABANG mewarisinya dari APPROVER dan ADMIN_PUSAT dari
+sebaran `PERMISSIONS`. MAKER dan CHECKER tidak memegangnya.
+
+**Kenapa:** Bagian 2 memberi Auditor "read only penuh termasuk semua laporan dan audit trail" dan
+skenario 23 Bagian 16 mengujinya, sementara checklist prasyarat, riwayat run, dan saldo beku bukan
+salah satu dari 31 laporan Bagian 10, jadi `laporan.view` tidak menjangkaunya. Dua jalan keluar
+lain sama sama salah: memakai `admin.closing.periode` berarti memberi kode **tulis** kepada peran
+yang tidak boleh mengubah apa pun, dan membiarkan jalur baca tanpa izin membuat seluruh riwayat
+closing terbaca oleh siapa pun yang bisa login. Approver mendapatkannya karena membaca checklist
+adalah tindakan terpisah dari mengeksekusi closing, dan ia melakukan yang pertama sebelum
+memutuskan yang kedua. Maker dan Checker tidak menutup periode dan dua layar closing di Bagian 9.3
+adalah wewenang Approver.
+
+**Dampak kalau salah:** kalau klien ingin Maker atau Checker ikut memantau kesiapan closing
+(misalnya untuk membereskan jurnal DRAFT sebelum tutup buku), yang berubah satu baris: tambahkan
+`"admin.closing.view"` ke daftar MAKER atau CHECKER di
+`apps/api/src/modules/auth/permissions.ts` dan cerminkan di `apps/web/src/permissions.ts`. Tidak
+ada jalur tulis yang ikut terbuka, karena kode ini tidak menggerakkan satu pun operasi closing.

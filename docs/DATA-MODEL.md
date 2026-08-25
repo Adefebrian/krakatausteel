@@ -1,6 +1,6 @@
 # TJSL Online data model
 
-74 tables and 13 views, created by `migrations/0002` through `migrations/0021`. This document is
+74 tables and 13 views, created by `migrations/0002` through `migrations/0024`. This document is
 the map; the migrations are the source of truth and every non-obvious column is commented there.
 
 Sections 1 to 13 are the core system, which works standalone and holds the books.
@@ -132,9 +132,9 @@ transaction date fall in", shared by the journal guard and the closing engine.
 | Table | Purpose |
 |---|---|
 | `closing_kolektibilitas` | One collectibility run: preview or committed, with the migration matrix as JSON. At most one committed run per (periode, cabang). |
-| `kolektibilitas_snapshot` | Per akad per period: arrears days, class, outstanding, arrears, the rate and basis used, and the resulting provision. A CHECK re-derives the provision from the stored inputs, which is what makes report 28 reproducible. Unique per (periode, akad). |
+| `kolektibilitas_snapshot` | Per akad per period: arrears days, class, outstanding, arrears, the rate and basis used, and the resulting provision. A CHECK re-derives the provision from the stored inputs, which is what makes report 28 reproducible. Since 0024 the row also states WHERE the rate came from (`sumber_rate`, plus `rate_histori_dari` / `rate_histori_sampai` for a collectively derived one), so report 28 survives a change of `akuntansi.mode_penyisihan`; provenance is copied, never pointed at a config row that is mutated in place (ADR 0014). Unique per (periode, akad). |
 | `penyisihan_periode` | Per branch per period: opening provision balance, required provision, and the expense or recovery, with a CHECK that the third equals the second minus the first. |
-| `akrual_jasa_snapshot` | Per akad per period service-fee accrual, so spec 8.3 is idempotent and report 30 is reproducible. |
+| `akrual_jasa_snapshot` | Per akad per period service-fee accrual, so spec 8.3 is idempotent and report 30 is reproducible. Does NOT yet record `akuntansi.akrual_hanya_untuk_kolektibilitas`, the eligible-class list in force, so a later edit to that list leaves "why was this akad not accrued" unanswerable from the snapshot: the same reconstruction gap 0024 closed for the provision rate, open as OPEN-QUESTIONS item 23. |
 | `saldo_akun_periode` | Frozen trial balance per (periode, cabang, akun). All four amount columns are debit-positive, and a CHECK enforces closing = opening + debit - credit. Deleted when a period is reopened, by design. |
 
 ## 9. Ledger (0010)

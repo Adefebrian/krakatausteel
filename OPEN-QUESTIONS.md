@@ -350,3 +350,42 @@ lokal butuh role yang sama supaya perilaku dev dan produksi tidak berbeda.
 **Sampai keputusan itu diambil:** trigger 0020 adalah kontrolnya, `tools/check-boundaries.ts`
 adalah penegakan utama di CI, dan keduanya didokumentasikan apa adanya di ADR 0012. Jangan
 menuliskan di dokumen mana pun bahwa jalur posting "tidak bisa dilewati", karena hari ini bisa.
+
+---
+
+## 23. Akrual jasa: di mana daftar kelas yang layak diakrual dibekukan?
+
+**Pola yang sama, di tabel yang lain.** Migrasi 0024 menutup lubang rekonstruksi di
+`kolektibilitas_snapshot` (asal rate penyisihan). Pemeriksaan dua tabel snapshot lain di 0011
+menemukan satu lubang sejenis dan satu bukan:
+
+- `saldo_akun_periode` **tidak** punya lubang ini. Empat kolomnya adalah angka debit positif hasil
+  agregasi buku besar yang append only, saling diikat satu CHECK, dan tidak membaca satu pun
+  parameter kebijakan, jadi tidak ada masukan yang bisa berubah di belakangnya. Risiko yang ada di
+  sana adalah predikat status jurnal yang dipakai engine (butir 20 di dokumen ini, ADR 0010), bukan
+  kolom yang hilang.
+- `akrual_jasa_snapshot` **punya**. Ia menyimpan jasa jatuh tempo, jasa diterima, dan jasa
+  diakrual per akad, tetapi tidak menyimpan `akuntansi.akrual_hanya_untuk_kolektibilitas`, yaitu
+  daftar kelas yang berhak diakrual saat run itu berjalan. `HasilAkrual` menghitung daftar itu
+  (`kelasDiakrual`) lalu membuangnya. Begitu daftarnya diubah, pertanyaan "kenapa akad DIRAGUKAN
+  ini tidak diakrual di periode itu" tidak bisa dijawab dari snapshot, dan Laporan Akrual Piutang
+  Jasa Administrasi (Bagian 10.4 laporan 30) kehilangan penjelasan populasinya. Persis invarian 14
+  yang sama.
+
+**Kenapa tidak langsung ditambal seperti 0024.** Faktanya bersifat **per run**, bukan per akad,
+dan berbeda dengan kolektibilitas yang punya tabel induk `closing_kolektibilitas`, akrual tidak
+punya baris induk untuk menggantungkannya. Jadi ada dua bentuk yang masuk akal dan keduanya
+keputusan desain engine akrual, bukan tebakan migrasi:
+
+1. tabel induk `closing_akrual` (periode, cabang, metode, daftar kelas, dijalankan_oleh), sejajar
+   dengan `closing_kolektibilitas`, dan snapshot menunjuk ke sana; atau
+2. satu kolom boolean per baris, misalnya `layak_akrual`, yang hanya berguna kalau engine memang
+   menulis baris untuk akad yang tidak layak sekalipun.
+
+**Yang dipakai sampai diputuskan:** tidak ada. Kolomnya belum ada, dan `akrual_jasa_snapshot`
+masih kosong di setiap database karena engine-nya belum ada. Batas waktunya jelas: keputusan ini
+harus diambil **sebelum periode produksi pertama ditutup**, karena setelah itu daftar kelas untuk
+periode yang sudah tertutup tidak bisa dibangun ulang dan kolom baru hanya bisa diisi NULL.
+
+**Pemilik keputusan:** pemilik engine closing (bentuk 1 atau 2), bukan tim akuntansi klien;
+pertanyaan ke klien hanya soal isi daftar kelasnya, yang sudah menjadi baris konfigurasi.

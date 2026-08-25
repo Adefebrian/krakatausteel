@@ -46,6 +46,12 @@ export const PERMISSIONS = [
 
   "laporan.view",
 
+  // Reading the closing evidence (prerequisite checklist, run history, frozen
+  // balances) without the right to run anything. Mirrors the server's own code:
+  // the Auditor is read only (spec 2) and this is the screen its work lives on,
+  // so gating those reads on `admin.closing.periode` would have meant handing a
+  // write code to a role that must never write.
+  "admin.closing.view",
   "admin.closing.kolektibilitas",
   "admin.closing.periode",
   "admin.periode.reopen",
@@ -93,10 +99,24 @@ const READ_ONLY: Permission[] = [
   "laporan.view",
   "portal.view",
   "audit.view",
+  "admin.closing.view",
 ];
 
+/**
+ * The two evidence codes in READ_ONLY that are the Auditor's and not every
+ * signed in user's. Mirrors `HANYA_BUKTI` on the server: the operational roles
+ * are built from READ_ONLY minus these, and get them back only where the server
+ * grants them (the Approver holds `admin.closing.view`, nobody but the Auditor
+ * and Admin Pusat holds `audit.view`).
+ */
+const HANYA_BUKTI: readonly Permission[] = ["audit.view", "admin.closing.view"];
+
+const LIHAT: Permission[] = READ_ONLY.filter(
+  (permission) => !HANYA_BUKTI.includes(permission),
+);
+
 const MAKER: Permission[] = [
-  ...READ_ONLY.filter((permission) => permission !== "audit.view"),
+  ...LIHAT,
   "pumk.create",
   "pumk.survey",
   "pumk.akad",
@@ -114,7 +134,7 @@ const MAKER: Permission[] = [
 ];
 
 const CHECKER: Permission[] = [
-  ...READ_ONLY.filter((permission) => permission !== "audit.view"),
+  ...LIHAT,
   "pumk.review",
   "nonpumk.review",
   // Verifying an LPJ is a decision ON SOMEONE ELSE'S FILING, so it sits with
@@ -126,12 +146,15 @@ const CHECKER: Permission[] = [
 ];
 
 const APPROVER: Permission[] = [
-  ...READ_ONLY.filter((permission) => permission !== "audit.view"),
+  ...LIHAT,
   "pumk.approve",
   "pumk.hapusbuku",
   "nonpumk.approve",
   "jurnal.post",
   "jurnal.reversal",
+  // Reading the checklist is a separate act from executing the close, and the
+  // Approver does the first before deciding whether to do the second.
+  "admin.closing.view",
   "admin.closing.kolektibilitas",
   "admin.closing.periode",
 ];
