@@ -46,6 +46,7 @@ import { createAngsuranModule } from "../modules/angsuran";
 import { createJurnalModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
+import { createNonPumkModule } from "../modules/nonpumk";
 import { createPumkHttpModule } from "../modules/pumk";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
@@ -154,6 +155,16 @@ export function createApp(overrides: AppOverrides = {}) {
     guards: auth.guards,
   });
 
+  // Fase 4 (spec 9.2), the grant line. ENGINE ONLY, NO ROUTES YET, and that is
+  // deliberate rather than unfinished: modules/nonpumk/index.ts exposes no
+  // router because the screens of spec 9.2 do not exist, and mounting an
+  // unreferenced surface is how modules/example became an unauthenticated hole.
+  // Wired here anyway so the module reaches the ledger ONLY through the one
+  // journal engine above, which is what invariant 11 actually rests on;
+  // `jurnal.engine` satisfies `PorterJurnalNonPumk` structurally, so there is no
+  // adapter in between and no second route to a journal row.
+  const nonpumk = createNonPumkModule({ db, jurnal: jurnal.engine });
+
   // modules/example IS NOT MOUNTED, and must not be.
   //
   // It is the repo template's reference module and it is unauthenticated by
@@ -191,6 +202,7 @@ export function createApp(overrides: AppOverrides = {}) {
     angsuran: angsuran.engine,
     pumk: pumk.engine,
     pumkBaca: pumk.baca,
+    nonpumk: nonpumk.engine,
   };
 }
 
@@ -204,4 +216,5 @@ export const nomor = instance.nomor;
 export const jurnal = instance.jurnal;
 export const angsuran = instance.angsuran;
 export const pumk = instance.pumk;
+export const nonpumk = instance.nonpumk;
 export type AppType = typeof app;

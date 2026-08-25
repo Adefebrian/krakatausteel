@@ -63,6 +63,23 @@ export const PERMISSIONS = [
   "nonpumk.approve",
   "nonpumk.penyaluran",
   "nonpumk.lpj",
+  // Verifying (and rejecting) the LPJ, spec 4.5: `nonpumk_lpj` carries a
+  // DIVERIFIKASI status with verified_by / verified_at, and the Fase 4 exit
+  // criterion is one proposal running "sampai LPJ diverifikasi". No code here
+  // covered that act, so the engine had to fail closed for EVERY role,
+  // including Admin Pusat (built as a spread of PERMISSIONS), and no
+  // accountability report could ever be signed off. Same class of gap as
+  // `pumk.cluster`.
+  //
+  // It is its own code, and none of the three tempting reuses:
+  //   nonpumk.lpj     is the MAKER's own filing code, so reusing it would let
+  //                   the author of a report verify their own report;
+  //   nonpumk.review  is the review of the PROPOSAL, and the Approver who
+  //                   released the money does not hold it;
+  //   nonpumk.approve was the decision to give the money, months earlier, not
+  //                   the decision that the money was accounted for.
+  // Granted to CHECKER below.
+  "nonpumk.lpj.verifikasi",
 
   "jurnal.view",
   "jurnal.create",
@@ -230,6 +247,16 @@ const CHECKER: Permission[] = [
   ...LIHAT,
   "pumk.review",
   "nonpumk.review",
+  // Verifying the LPJ sits with the Checker for the same reason
+  // `jurnal.verify` does: it is a decision ON SOMEONE ELSE'S FILING, not an
+  // input. Spec 2 says the Checker inputs nothing, and it does not: the Maker
+  // files the LPJ (`nonpumk.lpj`), the Checker accepts or rejects it. Putting
+  // it on the Maker would let an author sign off their own report; putting it
+  // on the Approver would make the person who released the money also the
+  // person who certifies it was spent, which is the control this split exists
+  // to keep. ADMIN_CABANG inherits it through this list, ADMIN_PUSAT through
+  // the spread of PERMISSIONS.
+  "nonpumk.lpj.verifikasi",
   "jurnal.verify",
   "tools.rekonsiliasi",
 ];

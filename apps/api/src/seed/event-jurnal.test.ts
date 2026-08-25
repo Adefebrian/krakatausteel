@@ -19,6 +19,8 @@ import {
   EVENT_KEPUTUSAN_PEMILIK,
   EVENT_SPEC_6_4,
   KATALOG_EVENT_JURNAL,
+  debitDariPayload,
+  kreditDariPayload,
   seedCoaDanEventMapping,
   seedEventJurnalMapping,
 } from "./event-jurnal";
@@ -121,11 +123,77 @@ describe("the catalogue matches spec 6.4, plus the owner's three decisions", () 
     }
   });
 
-  test("exactly the two 'per bidang / per jenis' events resolve a leg from the payload", () => {
+  test("exactly the three 'per bidang / per jenis' events resolve a leg from the payload", () => {
     const dariPayload = KATALOG_EVENT_JURNAL.filter(
-      (ev) => ev.debitKode === null || ev.kreditKode === null,
+      (ev) => debitDariPayload(ev) || kreditDariPayload(ev),
     ).map((ev) => ev.code);
-    expect(dariPayload).toEqual(["PENYALURAN_NON_PUMK", "BEBAN_OPERASIONAL"]);
+    expect(dariPayload).toEqual([
+      "PENYALURAN_NON_PUMK",
+      "PENGEMBALIAN_SISA_NON_PUMK",
+      "BEBAN_OPERASIONAL",
+    ]);
+  });
+
+  test("the Non PUMK refund credits back the SAME per-bidang account the disbursement debited", () => {
+    // The bug this pins: the disbursement's debit came from the form (per
+    // bidang, spec 6.4) while the refund's credit was bound to the pooled
+    // 5.1.03. A bidang with its own expense account therefore had that account
+    // debited on the way out and the POOLED account credited on the way back,
+    // overstating the bidang's expense by the refund and driving the pooled
+    // account negative by the same amount, with both journals balancing.
+    const byCode = new Map(KATALOG_EVENT_JURNAL.map((ev) => [ev.code, ev]));
+    const salur = byCode.get("PENYALURAN_NON_PUMK")!;
+    const kembali = byCode.get("PENGEMBALIAN_SISA_NON_PUMK")!;
+    // Cash on the opposite side of each, and the expense leg from the payload
+    // on BOTH, which is what makes them each other's reverse.
+    expect(salur).toMatchObject({ debitKode: null, kreditKode: "1.1.01" });
+    expect(kembali).toMatchObject({ debitKode: "1.1.01", kreditKode: null });
+  });
+
+  test("no event takes a leg from the payload on one side and pins its reverse to a fixed account", () => {
+    // Generalised from the refund bug: for every pair of events that reverse
+    // each other, a payload leg on one side must be a payload leg on the other.
+    // Kept as a list, so adding a reversing pair means declaring it here.
+    const byCode = new Map(KATALOG_EVENT_JURNAL.map((ev) => [ev.code, ev]));
+    const pasangan: ReadonlyArray<[string, string]> = [
+      ["PENYALURAN_NON_PUMK", "PENGEMBALIAN_SISA_NON_PUMK"],
+      ["TERIMA_KELEBIHAN_ANGSURAN", "KEMBALIKAN_KELEBIHAN_ANGSURAN"],
+      ["BEBAN_PENYISIHAN", "PEMULIHAN_PENYISIHAN"],
+    ];
+    for (const [maju, mundur] of pasangan) {
+      const a = byCode.get(maju)!;
+      const b = byCode.get(mundur)!;
+      // The non-cash leg of one is the non-cash leg of the other, swapped.
+      expect(debitDariPayload(a)).toBe(kreditDariPayload(b));
+      expect(kreditDariPayload(a)).toBe(debitDariPayload(b));
+      if (a.debitKode !== null && b.kreditKode !== null) {
+        expect(a.debitKode).toBe(b.kreditKode);
+        expect(a.kreditKode).toBe(b.debitKode);
+      }
+    }
+  });
+
+  test("a payload leg never ships with a fixed account beside it", () => {
+    // The rejected alternative, argued on EventJurnalDef: keep the pooled
+    // 5.1.03 on PENGEMBALIAN_SISA_NON_PUMK as a "default" while the flag says
+    // the caller supplies the leg. modules/jurnal resolves a leg as
+    // `dari_payload ? payload.akun : row.akun`, with no fallback, so that
+    // account would be read by nothing and would sit in the exact column where
+    // the wrong answer used to be, ready to be believed. Either the row decides
+    // the account or the caller does.
+    for (const ev of KATALOG_EVENT_JURNAL) {
+      expect(`${ev.code}:${debitDariPayload(ev) && ev.debitKode !== null}`).toBe(`${ev.code}:false`);
+      expect(`${ev.code}:${kreditDariPayload(ev) && ev.kreditKode !== null}`).toBe(`${ev.code}:false`);
+    }
+  });
+
+  test("the flag is stated on the payload rows, not inferred from a null", () => {
+    // One null used to mean two things at once ("may be overridden" and "no
+    // account here"), which is why they could not be discussed separately.
+    const byCode = new Map(KATALOG_EVENT_JURNAL.map((ev) => [ev.code, ev]));
+    expect(byCode.get("PENYALURAN_NON_PUMK")!.debitDariPayload).toBe(true);
+    expect(byCode.get("PENGEMBALIAN_SISA_NON_PUMK")!.kreditDariPayload).toBe(true);
+    expect(byCode.get("BEBAN_OPERASIONAL")!.debitDariPayload).toBe(true);
   });
 
   test("no event has both legs from the payload, and no event debits its own credit", () => {

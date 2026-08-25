@@ -659,3 +659,110 @@ ekstrakomtabel, bukan jurnal. Kasus yang perlu menghapus tagihan atas piutang ya
 dikerjakan dua langkah: hapus buku dulu, lalu hapus tagih. Dua kode event yang menghasilkan jurnal
 identik adalah jebakan rekonsiliasi. Status pertanyaannya ada di `docs/REGULASI.md` butir 4 dan
 menunggu jawaban unit TJSL klien.
+
+---
+
+# Parameter Non PUMK (A-41 sampai A-44)
+
+Empat asumsi berikut berbeda derajatnya dari semua asumsi di atas, dan pembedanya penting.
+Asumsi A-01 sampai A-40 adalah **tafsir atas angka atau aturan yang ada di spesifikasi**.
+Empat yang berikut adalah **angka yang tidak ada sama sekali di spesifikasi**: Bagian 5.5
+"Batasan Program" hanya memuat batasan PUMK (plafon, tenor, grace period, jaminan, jumlah akad
+aktif, skor survey), sementara Bagian 9.2 tetap menuntut engine Non PUMK memeriksa rentang nilai
+bantuan, ambang skor penilaian, dan tenggat LPJ. Jadi angkanya **kami karang**, dan dikirim di
+`migrations/0022_parameter_non_pumk.sql` sebagai baris global (`bumn_id NULL`) dengan
+`perlu_konfirmasi = true`.
+
+Ini **bukan klaim kepatuhan**. Tidak satu pun dari keempat angka ini punya dasar regulasi atau
+dasar spesifikasi; semuanya menunggu **konfirmasi tertulis unit TJSL dan tim keuangan klien**.
+Yang bisa kami pertanggungjawabkan hanyalah alasan pemilihannya, dan bahwa mengubahnya adalah satu
+baris data, bukan deploy: `UPDATE konfigurasi SET nilai = ... WHERE bumn_id IS NULL AND grup =
+'batasan' AND kunci = ...`, atau override per BUMN lewat menu Konfigurasi.
+
+Kalau klien menjawab "belum ada kebijakannya", jawaban itu sendiri adalah keputusan yang harus
+dicatat: menghapus barisnya membuat engine Non PUMK menolak dengan `KONFIGURASI_TIDAK_ADA` dan
+menghentikan seluruh alur, jadi pilihannya adalah menetapkan angka, bukan membiarkannya kosong.
+
+## A-41. Nilai bantuan Non PUMK minimum Rp 1.000.000
+
+**Diasumsikan:** `konfigurasi (bumn_id NULL, batasan, nilai_min_non_pumk) = 1000000.00`.
+
+**Kenapa:** batas bawah ada supaya proposal yang biaya prosesnya melebihi manfaatnya tidak masuk
+alur enam tahap (proposal, penilaian, review, persetujuan, penyaluran, LPJ). Rp 1 juta dipilih
+sebagai angka bulat terkecil yang masih masuk akal untuk sebuah program dengan penerima manfaat,
+bukan karena ada rujukan yang menyebut angka itu.
+
+**Dampak kalau salah:** ganti nilainya di satu baris. Kalau klien menyatakan tidak boleh ada batas
+bawah sama sekali, isi `0.00`; jangan menghapus barisnya, karena baris yang hilang membuat engine
+menolak seluruh pengajuan, bukan melewatkan pemeriksaannya.
+
+## A-42. Nilai bantuan Non PUMK maksimum Rp 500.000.000
+
+**Diasumsikan:** `konfigurasi (bumn_id NULL, batasan, nilai_max_non_pumk) = 500000000.00`.
+
+**Kenapa:** dua kali plafon PUMK Rp 250.000.000 yang **memang** ada di Bagian 5.5. Non PUMK adalah
+hibah kepada lembaga untuk satu program, bukan pinjaman kepada satu usaha mikro, sehingga memakai
+plafon yang sama terlalu rendah, sedangkan tanpa batas atas berarti tidak ada plafon sama sekali
+dan setiap nilai lolos tanpa eskalasi.
+
+**Dampak kalau salah:** satu baris. Yang perlu diperiksa bersamaan kalau angkanya naik: apakah di
+atas nilai tertentu persetujuan harus naik ke Direksi atau ke BUMN Pembina. Spesifikasi tidak
+menyebut jenjang persetujuan bertingkat untuk Non PUMK, jadi engine sekarang hanya mengenal satu
+Approver; kalau klien menghendaki jenjang, itu perubahan alur (state machine Bagian 9.2), bukan
+perubahan parameter, dan harus dijadwalkan sendiri.
+
+## A-43. Skor penilaian minimum lolos Non PUMK 70
+
+**Diasumsikan:** `konfigurasi (bumn_id NULL, batasan, skor_penilaian_minimum_lolos_non_pumk) = 70`.
+
+**Kenapa:** sama dengan `skor_survey_minimum_lolos` = 70 yang Bagian 5.5 tetapkan untuk survey
+PUMK. Dua program dalam satu sistem sebaiknya tidak punya ambang kelulusan yang berbeda **secara
+tidak sengaja**; kalau klien memang ingin Non PUMK lebih ketat atau lebih longgar, sekarang itu
+menjadi keputusan yang dinyatakan, bukan efek samping.
+
+**Dampak kalau salah:** satu baris. Perlu diingat skalanya: `nonpumk_penilaian.skor_total` adalah
+rata rata berbobot dari lima komponen Bagian 4.5 (kelayakan, urgensi, dampak, kesesuaian bidang,
+kesesuaian SDG) pada skala 0 sampai 100, jadi mengubah **bobot** komponen mengubah arti angka 70
+walau angkanya tidak diubah. Keduanya harus dikonfirmasi bersamaan.
+
+## A-44. Batas penyampaian LPJ Non PUMK 60 hari sejak penyaluran terakhir
+
+**Diasumsikan:** `konfigurasi (bumn_id NULL, batasan, batas_hari_lpj_non_pumk) = 60`, dihitung dari
+tanggal penyaluran **terakhir** (bukan pertama), dan hanya menentukan flag `terlambat` di
+monitoring.
+
+**Kenapa:** Bagian 9.2 sendiri memakai ember aging 30, 60, dan 90 hari, jadi tenggatnya sebaiknya
+salah satu dari ketiganya. Pada 30 hari, program yang berjalan satu kuartal sudah terlambat sebelum
+selesai; pada 90 hari, dua ember pertama tidak akan pernah berisi LPJ terlambat dan dasbor
+monitoring yang diminta spesifikasi baru menyala di ember terakhir. 60 hari adalah satu satunya
+pilihan yang menyisakan dasbor itu berguna.
+
+**Dampak kalau salah:** satu baris, dan efeknya hanya pada kolom `terlambat` serta laporan
+monitoring; tidak ada jurnal dan tidak ada saldo yang bergantung padanya. Yang **belum** diputuskan
+dan tidak diasumsikan di sini: apa akibat keterlambatan (blokir pengajuan berikutnya dari pemohon
+yang sama, surat teguran, atau tidak ada akibat sama sekali). Ambang 30/60/90 itu sendiri konstanta
+spesifikasi dan sengaja **tidak** dijadikan parameter.
+
+## A-45. Kredit `PENGEMBALIAN_SISA_NON_PUMK` adalah akun beban bidang yang sama dengan debit penyalurannya
+
+**Diasumsikan:** pada tabel Bagian 6.4, baris `PENYALURAN_NON_PUMK` menulis debit "Beban Penyaluran
+Non PUMK **(per bidang)**" sedangkan baris `PENGEMBALIAN_SISA_NON_PUMK` menulis kredit "Beban
+Penyaluran Non PUMK" tanpa keterangan itu. Kami membacanya sebagai **akun yang sama**, yaitu akun
+beban bidang yang didebit saat penyaluran, bukan satu akun beban kolektif. Karena itu baris
+pemetaannya sekarang `kredit_dari_payload = true` dan pemanggilnya mengirim `akun_beban_id` termin
+yang bersangkutan.
+
+**Kenapa:** pengembalian sisa adalah pembalikan sebagian dari penyaluran tertentu. Kalau uang keluar
+lewat akun yang dipilih di form (per bidang) sementara uang kembali dikreditkan ke satu akun tetap,
+maka untuk setiap bidang yang punya akun sendiri: beban bidang itu tetap lebih besar sebesar sisa
+yang dikembalikan, dan akun kolektifnya bergerak negatif sebesar angka yang sama. Kedua jurnalnya
+balance, jadi invarian "debit sama dengan kredit" tidak akan pernah menangkapnya; yang salah hanya
+kelihatan di Laporan Rekap Penyaluran Non PUMK per Bidang (Bagian 10 laporan 13), berbulan bulan
+kemudian. Membaca kedua baris itu sebagai akun yang berbeda menghasilkan laporan per bidang yang
+salah secara diam diam, jadi pembacaan ini yang dipakai.
+
+**Dampak kalau salah:** kalau tim keuangan menyatakan pengembalian sisa memang harus masuk satu akun
+beban kolektif (misalnya karena pengembalian dilaporkan terpisah dari realisasi per bidang), yang
+berubah satu baris `event_jurnal_mapping`: `kredit_dari_payload = false` dan `akun_kredit_id`
+diarahkan ke akun kolektif itu. Tidak ada kode yang berubah, dan jurnal yang sudah terposting tidak
+ikut berubah karena jurnal menyimpan `akun_id` hasil resolusinya, bukan pemetaannya.

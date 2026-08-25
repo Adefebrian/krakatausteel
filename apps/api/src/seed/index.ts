@@ -9,6 +9,14 @@
 //                            (EVENT_MAPPING_TIDAK_DITEMUKAN), so nothing can
 //                            be disbursed, repaid or written off at all. See
 //                            ./event-jurnal.ts.
+//   seedMasterProgram        spec 4.1 sektor PUMK, bidang Non PUMK and the 17
+//                            SDG. Always, and NOT demo data: a PUMK proposal
+//                            carries a sektor_id and a Non PUMK proposal is
+//                            REQUIRED to name a bidang and at least one SDG
+//                            (spec 9.2), so an empty master makes those forms
+//                            unsubmittable. This was missing, which is why the
+//                            Daftar Proposal screen showed "Belum diisi" in
+//                            the Sektor column of every row.
 //   seedDemo                 DEMO ACCOUNTS. Never on a production database.
 //
 // Later phases add their own module here (spec 13 asks for 24 months of demo
@@ -19,6 +27,7 @@ import { seedRbac } from "./rbac";
 import { seedKonfigurasiTambahan } from "./konfigurasi";
 import { DEMO_PASSWORD, DEMO_USERS, seedDemo } from "./demo";
 import { seedCoaDanEventMapping } from "./event-jurnal";
+import { seedMasterProgram } from "./master-program";
 
 export { seedRbac, permissionsForRole } from "./rbac";
 export { seedKonfigurasiTambahan } from "./konfigurasi";
@@ -36,6 +45,15 @@ export {
   seedEventJurnalMapping,
   type EventJurnalDef,
 } from "./event-jurnal";
+export {
+  BIDANG_NON_PUMK,
+  SDG,
+  SEKTOR_PUMK,
+  seedMasterProgram,
+  seedSdg,
+  type ReferensiDef,
+  type SeedMasterProgramResult,
+} from "./master-program";
 export {
   databaseBolehDemo,
   seedDemo,
@@ -71,11 +89,14 @@ async function bumnIds(db: DbPort): Promise<{ id: string; kode: string }[]> {
   );
 }
 
-/** COA + event mapping for every bumn present. Idempotent, safe to repeat. */
+/**
+ * COA + event mapping + programme master for every bumn present. Idempotent,
+ * safe to repeat.
+ */
 async function seedLedgerReferensi(db: DbPort, log: (line: string) => void): Promise<void> {
   const entitas = await bumnIds(db);
   if (entitas.length === 0) {
-    log("  ledger      belum ada bumn; COA inti dan event mapping dilewati");
+    log("  ledger      belum ada bumn; COA inti, event mapping dan master program dilewati");
     return;
   }
   for (const bumn of entitas) {
@@ -85,6 +106,13 @@ async function seedLedgerReferensi(db: DbPort, log: (line: string) => void): Pro
     log(
       `  ledger      ${bumn.kode}: ${hasil.akun.size} akun inti, ` +
         `${hasil.event.seeded} dari ${hasil.event.total} event mapping baru`,
+    );
+    // Separate transaction from the ledger's: reference data failing must not
+    // roll back a correct COA, and neither half depends on the other.
+    const master = await db.transaction((tx) => seedMasterProgram(tx, bumn.id));
+    log(
+      `  master      ${bumn.kode}: ${master.sektor} sektor PUMK, ` +
+        `${master.bidang} bidang Non PUMK, ${master.sdg} SDG baru`,
     );
   }
 }

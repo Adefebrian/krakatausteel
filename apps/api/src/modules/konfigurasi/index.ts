@@ -5,8 +5,15 @@ import { createKonfigurasiRoutes } from "./routes";
 import { createKonfigurasiService, type KonfigurasiServiceDeps } from "./service";
 import type { Guards } from "./ports";
 
-export { KATALOG, entriTambahan, periksaNilai, tipeDataUntuk, compareDesimal } from "./katalog";
-export type { KatalogEntri, BentukNilai } from "./katalog";
+export {
+  KATALOG,
+  entriTambahan,
+  entriPerluKonfirmasiKlien,
+  periksaNilai,
+  tipeDataUntuk,
+  compareDesimal,
+} from "./katalog";
+export type { AsalNilai, KatalogEntri, BentukNilai } from "./katalog";
 export { createKonfigurasiService, konfigurasiRusak, CACHE_TTL_SECONDS } from "./service";
 export type { ReferensiRow } from "./repo";
 export type {

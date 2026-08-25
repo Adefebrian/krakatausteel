@@ -35,6 +35,7 @@ import {
   lookupKatalog,
   periksaNilai,
   tipeDataUntuk,
+  type AsalNilai,
   type KatalogEntri,
 } from "./katalog";
 import type { DbPort, KeyValueStorePort, QueryRunner } from "./ports";
@@ -61,7 +62,20 @@ export interface NilaiResolusi {
   version: number;
   diubahAt: string;
   diubahOleh: string | null;
+  /**
+   * Per ROW and per entity: this VALUE still needs the client's confirmation.
+   * `insertOverride` writes false when an operator sets a value, because an
+   * explicit override is the confirmation.
+   */
   perluKonfirmasi: boolean;
+  /**
+   * Where the SHIPPED DEFAULT came from, straight out of the catalogue, or null
+   * for a row the catalogue does not describe. ASUMSI means we invented the
+   * number (ASSUMPTIONS.md), which the Konfigurasi screen must show rather than
+   * presenting it as settled policy. Unlike `perluKonfirmasi` this never
+   * changes when the value does: it is a fact about the default, not the value.
+   */
+  asalNilaiDefault: AsalNilai | null;
   /** true when no catalogue entry describes this row (added outside this module). */
   diLuarKatalog: boolean;
 }
@@ -188,6 +202,7 @@ function resolveRows(rows: KonfigurasiRow[]): Map<string, NilaiResolusi> {
       diubahAt: row.diubah_at,
       diubahOleh: row.diubah_oleh,
       perluKonfirmasi: row.perlu_konfirmasi,
+      asalNilaiDefault: lookupKatalog(row.grup, row.kunci)?.asalNilaiDefault ?? null,
       diLuarKatalog: lookupKatalog(row.grup, row.kunci) === null,
     });
   }
@@ -559,6 +574,7 @@ export function createKonfigurasiService({
         diubahAt: hasil.diubah_at,
         diubahOleh: hasil.diubah_oleh,
         perluKonfirmasi: hasil.perlu_konfirmasi,
+        asalNilaiDefault: entri.asalNilaiDefault,
         diLuarKatalog: false,
       };
     },

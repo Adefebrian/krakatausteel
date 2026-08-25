@@ -9,7 +9,15 @@
 import { describe, expect, test } from "bun:test";
 import { createMemoryKeyValueStore } from "../../core/adapters/keyvalue";
 import { createFixture } from "../../testing/harness";
-import { KATALOG, entriTambahan, periksaNilai, compareDesimal, tipeDataUntuk } from "./katalog";
+import {
+  KATALOG,
+  entriPerluKonfirmasiKlien,
+  entriTambahan,
+  katalogKey,
+  periksaNilai,
+  compareDesimal,
+  tipeDataUntuk,
+} from "./katalog";
 
 /** A fixture plus a konfigurasi service sharing its db, kv and audit. */
 async function setup(options: Parameters<typeof createFixture>[0] = {}) {
@@ -502,5 +510,300 @@ describe("HTTP surface", () => {
     const cookie = await f.login(f.users.ADMIN_PUSAT.username);
     const res = await f.request("/konfigurasi/batasan/tidak_ada", { cookie });
     expect(res.status).toBe(404);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The sweep. A parameter that is shipped but not catalogued is invisible to the
+// Konfigurasi screen and un-PUT-able, which is spec rule 3 broken for that
+// parameter: it can only be changed with psql, i.e. by a deploy-equivalent.
+// This is DB-driven on purpose. A hand-written list of "keys we shipped" is a
+// second copy of the migrations and drifts from them exactly the way the
+// thirteen keys below did: four Non PUMK (0022), the fixed due day (0019) and
+// eleven integration switches (0016) were all live rows that this catalogue had
+// never heard of, and nothing failed until someone opened the screen.
+// ---------------------------------------------------------------------------
+describe("catalogue and database agree about which parameters exist", () => {
+  test("every global row shipped by a migration or the seed has a catalogue entry", async () => {
+    const f = await createFixture();
+    const rows = await f.db.query<{ grup: string; kunci: string }>(
+      `SELECT grup, kunci FROM konfigurasi
+        WHERE bumn_id IS NULL AND deleted_at IS NULL ORDER BY grup, kunci`,
+    );
+    expect(rows.length).toBeGreaterThan(30);
+    const asing = rows
+      .map((r) => katalogKey(r.grup, r.kunci))
+      .filter((key) => KATALOG[key] === undefined);
+    // Named in the failure, so the fix is obvious: add the entry, do not delete
+    // the row.
+    expect(asing).toEqual([]);
+  });
+
+  test("every entry that claims to come from a migration really has a global row", async () => {
+    // The other direction: an entry marked `dariMigrasi: true` that no
+    // migration ships is a parameter the seed will never create either
+    // (`entriTambahan` skips it), so the first read of it fails in production.
+    const f = await createFixture();
+    const rows = await f.db.query<{ grup: string; kunci: string }>(
+      `SELECT grup, kunci FROM konfigurasi WHERE bumn_id IS NULL AND deleted_at IS NULL`,
+    );
+    const ada = new Set(rows.map((r) => katalogKey(r.grup, r.kunci)));
+    const hilang = Object.entries(KATALOG)
+      .filter(([key, entri]) => entri.dariMigrasi && !ada.has(key))
+      .map(([key]) => key);
+    expect(hilang).toEqual([]);
+  });
+
+  test("the thirteen keys the sweep found are catalogued, with shapes and bounds", () => {
+    for (const key of [
+      // migrations/0019, spec 7.1's fixed due day
+      "angsuran.hari_jatuh_tempo_tetap",
+      // migrations/0022, the invented Non PUMK limits
+      "batasan.nilai_min_non_pumk",
+      "batasan.nilai_max_non_pumk",
+      "batasan.skor_penilaian_minimum_lolos_non_pumk",
+      "batasan.batas_hari_lpj_non_pumk",
+      // migrations/0016, the integration switches
+      "integrasi.integrasi_akuntansi_aktif",
+      "integrasi.sistem_akuntansi_target",
+      "integrasi.pemegang_buku_resmi",
+      "integrasi.adapter_ekspor",
+      "integrasi.granularitas_push",
+      "integrasi.maks_baris_per_dokumen",
+      "integrasi.maks_percobaan_kirim",
+      "integrasi.batas_menit_anggap_ambigu",
+      "integrasi.wajib_pemetaan_lengkap_sebelum_push",
+      "integrasi.wajib_pihak_valid_sebelum_push",
+      "integrasi.verifikasi_remote_setiap_hari",
+      "integrasi.kirim_dimensi_program",
+    ]) {
+      const entri = KATALOG[key];
+      expect(`${key}:${entri !== undefined}`).toBe(`${key}:true`);
+      // Every numeric key carries at least a floor, or an out-of-range value
+      // would validate and then disable the check it configures.
+      if (entri!.bentuk === "INTEGER" || entri!.bentuk === "DESIMAL") {
+        expect(`${key}:${entri!.min !== undefined}`).toBe(`${key}:true`);
+      }
+      if (entri!.bentuk === "ENUM") {
+        expect((entri!.pilihan ?? []).length).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  test("the fixed due day matches the ENGINE's range, not the migration comment's", () => {
+    // migrations/0019 says values above 28 are refused; nothing enforces that,
+    // modules/angsuran/service.ts refuses only above 31, and
+    // angsuran-jadwal.test.ts pins hariTetap = 31 producing 31 Jan / 28 Feb /
+    // 31 Mar. A catalogue stricter than the engine would make the screen refuse
+    // a supported, tested setting.
+    const entri = KATALOG["angsuran.hari_jatuh_tempo_tetap"]!;
+    expect(periksaNilai(entri, "31")).toEqual([]);
+    expect(periksaNilai(entri, "0")).toEqual([]);
+    expect(periksaNilai(entri, "32")).not.toEqual([]);
+    expect(periksaNilai(entri, "-1")).not.toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four invented Non PUMK parameters (migrations/0022, ASSUMPTIONS A-41..44)
+// ---------------------------------------------------------------------------
+describe("parameter Non PUMK yang nilainya dikarang", () => {
+  test("provenance says ASUMSI, so a screen cannot present them as settled policy", () => {
+    const dikarang = entriPerluKonfirmasiKlien().map((e) => katalogKey(e.grup, e.kunci));
+    for (const key of [
+      "batasan.nilai_min_non_pumk",
+      "batasan.nilai_max_non_pumk",
+      "batasan.skor_penilaian_minimum_lolos_non_pumk",
+      "batasan.batas_hari_lpj_non_pumk",
+    ]) {
+      expect(dikarang).toContain(key);
+      expect(KATALOG[key]!.asalNilaiDefault).toBe("ASUMSI");
+    }
+    // And a value the spec actually states is NOT marked as invented, or the
+    // marking would mean nothing.
+    expect(KATALOG["batasan.plafon_max_pumk"]!.asalNilaiDefault).toBe("SPEC");
+  });
+
+  test("the shipped rows carry perlu_konfirmasi and the API hands it to the screen", async () => {
+    const f = await createFixture();
+    const rows = await f.db.query<{ kunci: string; perlu_konfirmasi: boolean }>(
+      `SELECT kunci, perlu_konfirmasi FROM konfigurasi
+        WHERE bumn_id IS NULL AND deleted_at IS NULL AND kunci LIKE '%non_pumk%'`,
+    );
+    expect(rows).toHaveLength(4);
+    for (const row of rows) expect(`${row.kunci}:${row.perlu_konfirmasi}`).toBe(`${row.kunci}:true`);
+
+    const cookie = await f.login(f.users.ADMIN_PUSAT.username);
+    const res = await f.request("/konfigurasi/batasan/batas_hari_lpj_non_pumk", { cookie });
+    const body = (await res.json()) as {
+      nilai: string;
+      perluKonfirmasi: boolean;
+      asalNilaiDefault: string | null;
+      override: boolean;
+    };
+    expect(body).toMatchObject({
+      nilai: "60",
+      perluKonfirmasi: true,
+      asalNilaiDefault: "ASUMSI",
+      override: false,
+    });
+  });
+
+  test("bounds refuse what would silently disable the check the engine believes it does", () => {
+    const hari = KATALOG["batasan.batas_hari_lpj_non_pumk"]!;
+    expect(periksaNilai(hari, "60")).toEqual([]);
+    // 0 would make every LPJ late on the day the money moves.
+    expect(periksaNilai(hari, "0")).not.toEqual([]);
+    // "60 hari" is the shape that becomes NaN and then compares false against
+    // everything, i.e. a deadline nobody ever misses.
+    expect(periksaNilai(hari, "60 hari")).not.toEqual([]);
+    expect(periksaNilai(hari, "")).not.toEqual([]);
+
+    const skor = KATALOG["batasan.skor_penilaian_minimum_lolos_non_pumk"]!;
+    expect(periksaNilai(skor, "70")).toEqual([]);
+    // skor_total is a 0..100 weighted average, so 101 is a pass mark no
+    // proposal can reach and -1 is no pass mark at all.
+    expect(periksaNilai(skor, "101")).not.toEqual([]);
+    expect(periksaNilai(skor, "-1")).not.toEqual([]);
+
+    const maks = KATALOG["batasan.nilai_max_non_pumk"]!;
+    expect(periksaNilai(maks, "500000000.00")).toEqual([]);
+    // A ceiling of zero rejects every proposal ever filed.
+    expect(periksaNilai(maks, "0")).not.toEqual([]);
+    // Rupiah with a thousands separator, the classic import artefact.
+    expect(periksaNilai(maks, "500.000.000")).not.toEqual([]);
+    expect(periksaNilai(maks, "500,000,000.00")).not.toEqual([]);
+  });
+
+  test("no third fallback: with the override AND the global row gone, the read fails closed", async () => {
+    // The condition attached to shipping these defaults at all. The engine's
+    // KONFIGURASI_TIDAK_ADA path must stay reachable, so nothing in the
+    // catalogue may quietly answer from `nilaiDefault`: that field is what the
+    // SEED writes for keys with no migration, never a read-time default.
+    const { f, konfigurasi } = await setup();
+    await f.db.query(
+      `UPDATE konfigurasi SET deleted_at = now(), deleted_by = $1
+        WHERE bumn_id IS NULL AND grup = 'batasan' AND kunci = 'batas_hari_lpj_non_pumk'`,
+      [f.users.ADMIN_PUSAT.id],
+    );
+    try {
+      await konfigurasi.invalidate(f.bumnId);
+      await expect(
+        konfigurasi.getInteger(f.bumnId, "batasan", "batas_hari_lpj_non_pumk"),
+      ).rejects.toThrow(/tidak ada di tabel konfigurasi/);
+    } finally {
+      await f.db.query(
+        `UPDATE konfigurasi SET deleted_at = NULL, deleted_by = NULL
+          WHERE bumn_id IS NULL AND grup = 'batasan' AND kunci = 'batas_hari_lpj_non_pumk'`,
+      );
+      await konfigurasi.invalidate(f.bumnId);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "It is in the catalogue" and "an operator can change it" are different
+// claims, and spec rule 3 is about the second one.
+// ---------------------------------------------------------------------------
+describe("round trip lewat PUT /konfigurasi/:grup/:kunci (spec rule 3)", () => {
+  test("an Admin Pusat changes an invented Non PUMK limit end to end, no deploy", async () => {
+    const f = await createFixture();
+    const cookie = await f.login(f.users.ADMIN_PUSAT.username);
+    const jalur = "/konfigurasi/batasan/batas_hari_lpj_non_pumk";
+
+    const sebelum = (await (await f.request(jalur, { cookie })).json()) as {
+      nilai: string;
+      override: boolean;
+      perluKonfirmasi: boolean;
+    };
+    expect(sebelum).toMatchObject({ nilai: "60", override: false, perluKonfirmasi: true });
+
+    const put = await f.request(jalur, {
+      method: "PUT",
+      cookie,
+      body: { nilai: "45", alasan: "hasil rapat unit TJSL" },
+    });
+    expect(put.status).toBe(200);
+    const hasil = (await put.json()) as {
+      nilai: string;
+      override: boolean;
+      perluKonfirmasi: boolean;
+      asalNilaiDefault: string;
+    };
+    // The override IS the confirmation of the value, so the row stops asking
+    // for one; the PROVENANCE of the shipped default does not change, because
+    // it is a fact about where the number came from.
+    expect(hasil).toMatchObject({
+      nilai: "45",
+      override: true,
+      perluKonfirmasi: false,
+      asalNilaiDefault: "ASUMSI",
+    });
+
+    const sesudah = (await (await f.request(jalur, { cookie })).json()) as { nilai: string };
+    expect(sesudah.nilai).toBe("45");
+    // And the ENGINE-side read agrees, which is the half that matters: the
+    // cache was invalidated, so the next calculation uses the new number
+    // without a restart.
+    expect(await f.ctx.konfigurasi.getInteger(f.bumnId, "batasan", "batas_hari_lpj_non_pumk")).toBe(45);
+
+    // The shipped default is untouched, so "what did we ship, and what did this
+    // entity decide" stays answerable.
+    const global = await f.db.query<{ nilai: string }>(
+      `SELECT nilai FROM konfigurasi
+        WHERE bumn_id IS NULL AND grup = 'batasan' AND kunci = 'batas_hari_lpj_non_pumk'
+          AND deleted_at IS NULL`,
+    );
+    expect(global[0]!.nilai).toBe("60");
+
+    // The change is in the audit trail with the reason, because a parameter is
+    // evidence for how a number was calculated.
+    // Scoped to THIS fixture's user: audit_log is append-only and shared by
+    // every run against this database, so an unscoped count would grow by one
+    // per run and pass only the first time.
+    const audit = await f.db.query<{ nilai_baru_json: { nilai: string }; keterangan: string }>(
+      `SELECT nilai_baru_json, keterangan FROM audit_log
+        WHERE aksi = 'konfigurasi.update' AND user_id = $1 ORDER BY waktu DESC`,
+      [f.users.ADMIN_PUSAT.id],
+    );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.keterangan).toBe("hasil rapat unit TJSL");
+    expect(audit[0]!.nilai_baru_json.nilai).toBe("45");
+  });
+
+  test("a value outside the catalogue bounds is a 400 and changes nothing", async () => {
+    const f = await createFixture();
+    const cookie = await f.login(f.users.ADMIN_PUSAT.username);
+    const jalur = "/konfigurasi/batasan/skor_penilaian_minimum_lolos_non_pumk";
+
+    for (const nilai of ["101", "-1", "70 persen", "70.5"]) {
+      const res = await f.request(jalur, { method: "PUT", cookie, body: { nilai } });
+      expect(`${nilai}:${res.status}`).toBe(`${nilai}:400`);
+      const body = (await res.json()) as { code: string; detail: Record<string, string[]> };
+      expect(body.code).toBe("VALIDASI");
+      expect(body.detail.nilai).toBeDefined();
+    }
+    const get = (await (await f.request(jalur, { cookie })).json()) as { nilai: string };
+    expect(get.nilai).toBe("70");
+  });
+
+  test("an integration switch shipped by 0016 is now editable too, not only visible", async () => {
+    // It was `diLuarKatalog` until this change, so PUT answered 400: the master
+    // switch for the whole integration layer could only be turned on with psql.
+    const f = await createFixture();
+    const cookie = await f.login(f.users.ADMIN_PUSAT.username);
+    const jalur = "/konfigurasi/integrasi/integrasi_akuntansi_aktif";
+    const put = await f.request(jalur, { method: "PUT", cookie, body: { nilai: "true" } });
+    expect(put.status).toBe(200);
+    expect(await f.ctx.konfigurasi.getBoolean(f.bumnId, "integrasi", "integrasi_akuntansi_aktif")).toBe(
+      true,
+    );
+    const daftar = (await (await f.request("/konfigurasi", { cookie })).json()) as {
+      data: { kunci: string; diLuarKatalog: boolean }[];
+    };
+    const baris = daftar.data.find((row) => row.kunci === "integrasi_akuntansi_aktif");
+    expect(baris).toBeDefined();
+    expect(baris!.diLuarKatalog).toBe(false);
   });
 });

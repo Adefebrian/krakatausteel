@@ -48,11 +48,24 @@
 //
 // PAYLOAD LEGS. Three events resolve one leg at runtime rather than from the
 // row (the migration's own comment says so): PENYALURAN_NON_PUMK debits a
-// per-bidang expense account and BEBAN_OPERASIONAL debits a per-type expense
-// account, both chosen on the form. A `null` code below means exactly that,
+// per-bidang expense account, PENGEMBALIAN_SISA_NON_PUMK CREDITS that same
+// per-bidang account back, and BEBAN_OPERASIONAL debits a per-type expense
+// account, all chosen on the form. A `null` code below means exactly that,
 // and it is what sets `debit_dari_payload` / `kredit_dari_payload`. The cash
 // leg is bound to 1.1.01 here and can be overridden per posting by the
 // akun_kas_id the form supplies.
+//
+// A PAYLOAD LEG THAT IS NOT MIRRORED BY ITS REVERSE IS A BUG, and it is the
+// reason the refund row changed. If the money went out through an account the
+// FORM chose, then a fixed account on the way back credits a DIFFERENT
+// account from the one that was debited, in every case where the two differ.
+// The journal still balances, so no invariant catches it; only the per-bidang
+// report does, months later. The rest of the catalogue was re-checked for the
+// same shape and there is no second instance: the other reversing pairs
+// (TERIMA/KEMBALIKAN_KELEBIHAN_ANGSURAN, BEBAN/PEMULIHAN_PENYISIHAN) name
+// fixed accounts on both sides, and BEBAN_OPERASIONAL has no reversing event
+// at all -- correcting one is `reversalJurnal`, which copies the ORIGINAL
+// journal's account ids rather than re-reading this table.
 import type { QueryRunner } from "../core/ports/db";
 import { seedCoaInti, type AkunIdByKode } from "./coa-inti";
 
@@ -69,11 +82,45 @@ export type JenisJurnal =
 
 export interface EventJurnalDef {
   code: string;
-  /** Account code, or null when the posting engine must supply this leg. */
+  /** Account code, or null when the caller must supply this leg per posting. */
   debitKode: string | null;
   kreditKode: string | null;
+  /**
+   * "This leg is resolved by the CALLER, not by this row", stated rather than
+   * inferred.
+   *
+   * It used to be derived from `debitKode === null`, which made one null carry
+   * two different statements ("may be overridden" and "there is no account
+   * here") and meant they could never be separated. They are separable
+   * concepts, so they are separate fields now. Defaults to "null means from
+   * payload", so the 19 fixed rows say nothing extra.
+   *
+   * SETTING A FLAG *AND* AN ACCOUNT IS REFUSED BY `seedEventJurnalMapping`,
+   * deliberately. modules/jurnal resolves a leg as
+   * `dari_payload ? payload.akun : row.akun` -- with NO fallback -- so an
+   * account stored next to a raised flag is a value nothing reads, sitting in
+   * the exact column where the wrong answer used to be. The next person to
+   * grep for "which account does a refund credit" would find it and believe
+   * it. If the engine ever gains a `payload ?? row` fallback, that guard is
+   * the one place to relax, and the change has to be argued there: a caller
+   * that forgets the account would then post to the pooled account silently
+   * instead of being refused, which is the class of bug this whole row exists
+   * to have fixed.
+   */
+  debitDariPayload?: boolean;
+  kreditDariPayload?: boolean;
   jenis: JenisJurnal;
   deskripsi: string;
+}
+
+/** Whether the caller supplies the debit leg of this event. */
+export function debitDariPayload(ev: EventJurnalDef): boolean {
+  return ev.debitDariPayload ?? ev.debitKode === null;
+}
+
+/** Whether the caller supplies the credit leg of this event. */
+export function kreditDariPayload(ev: EventJurnalDef): boolean {
+  return ev.kreditDariPayload ?? ev.kreditKode === null;
 }
 
 /**
@@ -149,6 +196,7 @@ export const KATALOG_EVENT_JURNAL: readonly EventJurnalDef[] = [
     code: "PENYALURAN_NON_PUMK",
     // Per bidang: the expense account comes from the form (spec 6.4 "per bidang").
     debitKode: null,
+    debitDariPayload: true,
     kreditKode: "1.1.01",
     jenis: "OTOMATIS",
     deskripsi: "Penyaluran bantuan Non PUMK, akun beban per bidang dari form",
@@ -156,9 +204,21 @@ export const KATALOG_EVENT_JURNAL: readonly EventJurnalDef[] = [
   {
     code: "PENGEMBALIAN_SISA_NON_PUMK",
     debitKode: "1.1.01",
-    kreditKode: "5.1.03",
+    // PER BIDANG, and it has to be, because the DEBIT of PENYALURAN_NON_PUMK
+    // above is. This row used to bind the credit to the pooled 5.1.03 while
+    // the disbursement debited whatever expense account the bidang carries, so
+    // a bidang with its own account had THAT account debited on the way out
+    // and the POOLED account credited on the way back: the bidang's expense
+    // stayed overstated by the refund and the pooled account drifted negative
+    // by exactly the same amount. Both journals balance, every balance check
+    // passes, and the per-bidang report is wrong. A refund is the reversal of
+    // a specific disbursement, so its credit is the account that disbursement
+    // debited: the caller passes the termin's own `akun_beban_id` as
+    // `akunKreditId` and the engine honours it because of the null here.
+    kreditKode: null,
+    kreditDariPayload: true,
     jenis: "OTOMATIS",
-    deskripsi: "Sisa dana Non PUMK dikembalikan setelah LPJ",
+    deskripsi: "Sisa dana Non PUMK dikembalikan setelah LPJ, akun beban per bidang dari form",
   },
   {
     code: "PENYALURAN_PINBUK",
@@ -213,6 +273,7 @@ export const KATALOG_EVENT_JURNAL: readonly EventJurnalDef[] = [
     code: "BEBAN_OPERASIONAL",
     // Per jenis: the expense account comes from the form (spec 6.4 "per jenis").
     debitKode: null,
+    debitDariPayload: true,
     kreditKode: "1.1.01",
     jenis: "OTOMATIS",
     deskripsi: "Beban operasional unit TJSL, akun beban per jenis dari form",
@@ -301,6 +362,22 @@ export async function seedEventJurnalMapping(
     byKode = new Map(rows.map((row) => [row.kode, row.id]));
   }
 
+  // A raised flag with an account next to it is refused before anything is
+  // written: see the note on EventJurnalDef. This is a catalogue bug, so it
+  // throws rather than being silently normalised away.
+  const rancu = KATALOG_EVENT_JURNAL.filter(
+    (ev) =>
+      (debitDariPayload(ev) && ev.debitKode !== null) ||
+      (kreditDariPayload(ev) && ev.kreditKode !== null),
+  ).map((ev) => ev.code);
+  if (rancu.length > 0) {
+    throw new Error(
+      `seedEventJurnalMapping: event berikut menyatakan kaki dari payload SEKALIGUS akun tetap: ` +
+        `${rancu.join(", ")}. modules/jurnal tidak pernah membaca akun itu ketika flagnya menyala, ` +
+        "jadi barisnya akan menyimpan nilai yang tidak dibaca siapa pun.",
+    );
+  }
+
   const perlu = new Set(
     KATALOG_EVENT_JURNAL.flatMap((ev) => [ev.debitKode, ev.kreditKode]).filter(
       (kode): kode is string => kode !== null,
@@ -329,8 +406,8 @@ export async function seedEventJurnalMapping(
         ev.deskripsi,
         ev.debitKode ? byKode.get(ev.debitKode) : null,
         ev.kreditKode ? byKode.get(ev.kreditKode) : null,
-        ev.debitKode === null,
-        ev.kreditKode === null,
+        debitDariPayload(ev),
+        kreditDariPayload(ev),
         ev.jenis,
         userId,
       ],
