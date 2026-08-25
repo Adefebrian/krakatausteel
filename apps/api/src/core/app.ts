@@ -43,10 +43,11 @@ import type { ObjectStorePort } from "./ports/s3";
 import { createAuditModule, createAuditService, type AuditService } from "../modules/audit";
 import { auditActor, createAuthModule } from "../modules/auth";
 import { createAngsuranModule } from "../modules/angsuran";
+import { createClosingModule } from "../modules/closing";
 import { createJurnalModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
-import { createNonPumkModule } from "../modules/nonpumk";
+import { createNonPumkHttpModule } from "../modules/nonpumk";
 import { createPumkHttpModule } from "../modules/pumk";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
@@ -155,15 +156,24 @@ export function createApp(overrides: AppOverrides = {}) {
     guards: auth.guards,
   });
 
-  // Fase 4 (spec 9.2), the grant line. ENGINE ONLY, NO ROUTES YET, and that is
-  // deliberate rather than unfinished: modules/nonpumk/index.ts exposes no
-  // router because the screens of spec 9.2 do not exist, and mounting an
-  // unreferenced surface is how modules/example became an unauthenticated hole.
-  // Wired here anyway so the module reaches the ledger ONLY through the one
-  // journal engine above, which is what invariant 11 actually rests on;
-  // `jurnal.engine` satisfies `PorterJurnalNonPumk` structurally, so there is no
-  // adapter in between and no second route to a journal row.
-  const nonpumk = createNonPumkModule({ db, jurnal: jurnal.engine });
+  // Fase 4 (spec 9.2), the grant line, ENGINE AND ROUTES. Wired here so the
+  // module reaches the ledger ONLY through the one journal engine above, which
+  // is what invariant 11 actually rests on; `jurnal.engine` satisfies
+  // `PorterJurnalNonPumk` structurally, so there is no adapter in between and
+  // no second route to a journal row. The read side of the module is handed
+  // that same engine instance, so no screen can show a row the engine would
+  // have refused on branch scope.
+  const nonpumk = createNonPumkHttpModule({ db, jurnal: jurnal.engine, guards: auth.guards });
+
+  // Fase 5 (spec 8), the closing engine. NO HTTP SURFACE YET, deliberately:
+  // spec 9.3's two closing screens arrive with their own routes. Wired here for
+  // the same reason the ledger engine is, and it matters more here than
+  // anywhere: `jurnal.engine` satisfies `PorterJurnalClosing` structurally, so
+  // there is no path from closing to a `jurnal` row that does not go through
+  // `postingEvent`, and invariant 11 holds by construction rather than by
+  // convention. `audit` is the same instance every other module uses, so a
+  // closing and the login that led to it land in one audit_log stream.
+  const closing = createClosingModule({ db, jurnal: jurnal.engine, audit });
 
   // modules/example IS NOT MOUNTED, and must not be.
   //
@@ -186,6 +196,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/organisasi", organisasi.routes)
     .route("/konfigurasi", konfigurasi.routes)
     .route("/pumk", pumk.routes)
+    .route("/nonpumk", nonpumk.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -203,6 +214,8 @@ export function createApp(overrides: AppOverrides = {}) {
     pumk: pumk.engine,
     pumkBaca: pumk.baca,
     nonpumk: nonpumk.engine,
+    nonpumkBaca: nonpumk.baca,
+    closing: closing.engine,
   };
 }
 
@@ -217,4 +230,5 @@ export const jurnal = instance.jurnal;
 export const angsuran = instance.angsuran;
 export const pumk = instance.pumk;
 export const nonpumk = instance.nonpumk;
+export const closing = instance.closing;
 export type AppType = typeof app;

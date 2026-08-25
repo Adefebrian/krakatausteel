@@ -16,13 +16,17 @@
 //   rule 4       the check that matters is the server's, so these call the
 //                engine directly rather than a route
 //
-// ONE FINDING IS FILED HERE AND IS RED ON PURPOSE. The read paths (the
+// ONE FINDING WAS FILED HERE AND IS NOW CLOSED. The read paths (the
 // prerequisite checklist, the run history, a closed period's frozen balances)
-// have no read-only permission in the catalogue, so an Auditor whose whole job
-// is to examine how a period was closed cannot reach the evidence without
-// being granted a WRITE code. See `PERMISSION_CLOSING.LIHAT`.
+// had no read-only permission in the catalogue, so an Auditor whose whole job
+// is to examine how a period was closed could not reach the evidence without
+// being granted a WRITE code. This file used to pin that as a FAIL-CLOSED
+// refusal (`IZIN_BELUM_TERDAFTAR`); the catalogue now carries
+// `admin.closing.view`, so the last describe block asserts the positive
+// behaviour instead. See `PERMISSION_CLOSING.LIHAT` and the block's own note
+// for what changed and what is still pinned.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PERMISSIONS_BY_ROLE } from "../auth";
+import { canonicalPermission, PERMISSIONS_BY_ROLE } from "../auth";
 import { KODE_CLOSING, PERMISSION_CLOSING } from "./contract";
 import { buatDunia, rp, tolakDengan, type DuniaClosing } from "./test-support";
 
@@ -227,64 +231,125 @@ describe("spec 2 aturan 3: scope cabang", () => {
   });
 });
 
-describe("TEMUAN: jalur baca closing tidak punya kode izin baca-saja", () => {
-  test("jalur baca gagal tertutup selama kodenya belum ada di katalog", async () => {
-    // FAIL-CLOSED, and red on purpose until the catalogue carries the code.
-    //
-    // Reading the prerequisite checklist, the run history and a closed
-    // period's frozen balances is EVIDENCE, not an operation. Spec 2 gives the
-    // Auditor "read only penuh termasuk semua laporan dan audit trail" and
-    // spec 16 scenario 23 tests that every report opens for them; how a period
-    // was closed is not one of the 31 reports in spec 10, so `laporan.view`
-    // does not reach it.
-    //
-    // The two ways out are both wrong. Gating the reads on
-    // `admin.closing.periode` hands a WRITE code to a role that must never
-    // write, and `ROLES_READ_ONLY` would then be the only thing preventing a
-    // write, which is a much thinner guarantee than not holding the right.
-    // Leaving the reads ungated makes the whole closing history world-readable
-    // to any authenticated user.
-    //
-    // So the engine names `admin.closing.view`, refuses until it exists, and
-    // this test stays red. Adding the string to `d.ctx.auditor.permissions`
-    // would make it pass and the gap invisible, which is the move `pumk.cluster`
-    // and `nonpumk.lpj.verifikasi` both survived.
+describe("TEMUAN DITUTUP: jalur baca closing punya kode izin baca-saja", () => {
+  // WHAT THIS BLOCK USED TO ASSERT, AND WHY IT WAS INVERTED.
+  //
+  // Until `admin.closing.view` existed, these four reads FAILED CLOSED with
+  // `IZIN_BELUM_TERDAFTAR` and this block asserted exactly that, deliberately
+  // red, because the two ways out were both wrong: gating the reads on
+  // `admin.closing.periode` hands a WRITE code to a role spec 2 makes read
+  // only, and leaving them ungated makes the whole closing history readable to
+  // any authenticated account. The module named the code it needed and refused
+  // until the catalogue carried it, which is the same shape that closed
+  // `pumk.cluster` and `nonpumk.lpj.verifikasi`.
+  //
+  // The catalogue now carries it, granted to AUDITOR and APPROVER and inherited
+  // by ADMIN_CABANG and ADMIN_PUSAT, so the correct assertion is now the
+  // POSITIVE one: an Auditor reaches the evidence holding no write code at all.
+  // The fail-closed guard itself is NOT dropped with the finding; the third
+  // test below keeps it from quietly becoming dead code.
+
+  test("Auditor membaca bukti closing tanpa memegang satu pun kode tulis", async () => {
+    const p = d.periode(2027, 6);
+    d.setelJam(p.tanggalAkhir);
+    await d.buatAkad({ hariTunggakan: 45, padaTanggal: p.tanggalAkhir });
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+
+    // Spec 2: "Auditor / Viewer: Read only penuh termasuk semua laporan dan
+    // audit trail". How a period was closed, and against which checklist, is
+    // the auditor's primary object, and it is not one of the 31 reports in
+    // spec 10, so `laporan.view` never reached it.
+    expect(d.ctx.auditor.permissions).toContain(PERMISSION_CLOSING.LIHAT);
+    for (const kode of [
+      PERMISSION_CLOSING.KOLEKTIBILITAS,
+      PERMISSION_CLOSING.PERIODE,
+      PERMISSION_CLOSING.REOPEN,
+    ]) {
+      expect(d.ctx.auditor.permissions).not.toContain(kode);
+    }
+
+    const daftar = await d.engine.periksaPrasyarat(p.id, d.ctx.auditor);
+    expect(daftar.hasil).toHaveLength(10);
+    const riwayat = await d.engine.riwayatKolektibilitas(p.id, d.ctx.auditor);
+    expect(riwayat.filter((r) => r.status === "SELESAI")).toHaveLength(1);
+    const snapshot = await d.engine.snapshotKolektibilitas({ periodeId: p.id }, d.ctx.auditor);
+    expect(snapshot).toHaveLength(1);
+    // Nothing is frozen yet for an OPEN period, and an empty list is the right
+    // answer rather than a refusal.
+    expect(await d.engine.saldoAkunPeriode({ periodeId: p.id }, d.ctx.auditor)).toEqual([]);
+
+    // Reading is not writing. The read code must not have widened anything.
+    await tolakDengan(
+      () => d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.auditor),
+      KODE_CLOSING.TIDAK_BERWENANG,
+    );
+  });
+
+  test("role yang tidak memegang kode baca ditolak TIDAK_BERWENANG, bukan dibiarkan lewat", async () => {
     const p = d.periode(2027, 6);
     d.setelJam(p.tanggalAkhir);
     await d.buatAkad({ hariTunggakan: 45, padaTanggal: p.tanggalAkhir });
 
-    const err = await tolakDengan(
-      () => d.engine.periksaPrasyarat(p.id, d.ctx.auditor),
-      KODE_CLOSING.IZIN_BELUM_TERDAFTAR,
-    );
-    // The refusal has to name what is missing, or an operator sees a 403 with
-    // nothing to escalate.
-    expect(JSON.stringify(err.detail)).toContain(PERMISSION_CLOSING.LIHAT);
-
-    await tolakDengan(
-      () => d.engine.riwayatKolektibilitas(p.id, d.ctx.auditor),
-      KODE_CLOSING.IZIN_BELUM_TERDAFTAR,
-    );
-    await tolakDengan(
-      () => d.engine.saldoAkunPeriode({ periodeId: p.id }, d.ctx.auditor),
-      KODE_CLOSING.IZIN_BELUM_TERDAFTAR,
-    );
-    await tolakDengan(
-      () => d.engine.snapshotKolektibilitas({ periodeId: p.id }, d.ctx.auditor),
-      KODE_CLOSING.IZIN_BELUM_TERDAFTAR,
-    );
+    // Maker and Checker close nothing, and spec 9.3's two closing screens are
+    // the Approver's. A read code that everybody inherits would make the whole
+    // closing history world-readable to any authenticated account, which is one
+    // of the two outcomes the finding existed to prevent.
+    for (const nama of ["maker", "checker"] as const) {
+      expect(d.ctx[nama].permissions).not.toContain(PERMISSION_CLOSING.LIHAT);
+      await tolakDengan(
+        () => d.engine.periksaPrasyarat(p.id, d.ctx[nama]),
+        KODE_CLOSING.TIDAK_BERWENANG,
+      );
+      await tolakDengan(
+        () => d.engine.riwayatKolektibilitas(p.id, d.ctx[nama]),
+        KODE_CLOSING.TIDAK_BERWENANG,
+      );
+      await tolakDengan(
+        () => d.engine.snapshotKolektibilitas({ periodeId: p.id }, d.ctx[nama]),
+        KODE_CLOSING.TIDAK_BERWENANG,
+      );
+      await tolakDengan(
+        () => d.engine.saldoAkunPeriode({ periodeId: p.id }, d.ctx[nama]),
+        KODE_CLOSING.TIDAK_BERWENANG,
+      );
+    }
   });
 
-  test("sampai kodenya ada, TIDAK ADA satu pun role yang bisa membaca jalur itu, termasuk Admin Pusat", () => {
-    // The precise shape of the earlier findings: a code that no role can hold
-    // is not a stricter system, it is a dead screen. ADMIN_PUSAT is built as a
-    // spread of `PERMISSIONS`, so if the code were in the catalogue this would
-    // already be satisfied; it is not, which is the whole content of the
-    // finding.
+  test("fail closed masih hidup: kode di luar katalog tidak pernah dianggap sudah diberikan", () => {
+    // THE HALF OF THE FINDING THAT SURVIVES ITS CLOSURE.
+    //
+    // The mechanism that produced three findings is "resolve the code against
+    // the SHIPPED catalogue, and refuse with IZIN_BELUM_TERDAFTAR when it is
+    // not there". Deleting this assertion along with the finding would leave
+    // the branch unexercised and the next missing code would resolve to
+    // `undefined`, fail the `includes` test, and be reported as
+    // TIDAK_BERWENANG: a configuration fault wearing the costume of a policy
+    // decision, which is exactly how such a gap stays invisible.
+    //
+    // So: the catalogue must still DISCRIMINATE, and the code must still exist
+    // for the guard to raise.
+    expect(canonicalPermission("admin.closing.tidak.pernah.ada")).toBeNull();
+    expect(canonicalPermission(PERMISSION_CLOSING.LIHAT)).toBe(PERMISSION_CLOSING.LIHAT);
+    expect(Object.values(KODE_CLOSING)).toContain(KODE_CLOSING.IZIN_BELUM_TERDAFTAR);
+  });
+
+  test("matriks terkirim memberi kode baca ke pemegang bukti, bukan ke semua orang", () => {
+    // A code no role can hold is not a stricter system, it is a dead screen;
+    // a code every role holds is not a control. Asserted against the SHIPPED
+    // matrix, so a change to the grant table is a failing test here and not a
+    // silent widening discovered in production.
     const kodeLihat: string = PERMISSION_CLOSING.LIHAT;
     const pemegang = Object.entries(PERMISSIONS_BY_ROLE)
       .filter(([, izin]) => (izin as readonly string[]).includes(kodeLihat))
-      .map(([role]) => role);
+      .map(([role]) => role)
+      .sort();
     expect(pemegang).not.toEqual([]);
+    expect(pemegang).toContain("AUDITOR");
+    expect(pemegang).toContain("APPROVER");
+    expect(pemegang).toContain("ADMIN_PUSAT");
+    expect(pemegang).not.toContain("MAKER");
+    expect(pemegang).not.toContain("CHECKER");
+    // ...and holding the read code never implies holding a write one.
+    expect(PERMISSIONS_BY_ROLE.AUDITOR).not.toContain(PERMISSION_CLOSING.PERIODE);
   });
 });
