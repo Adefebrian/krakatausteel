@@ -110,6 +110,21 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         ],
       },
       {
+        path: "/pumk/proposal/:proposalId",
+        label: "Detail Proposal",
+        title: "Detail Proposal Pendanaan UMK",
+        permission: "pumk.view",
+        summary:
+          "Satu proposal dengan seluruh datanya: identitas mitra, nilai yang diajukan, hasil survey, jaminan, dan timeline persetujuan.",
+        willContain: [
+          "Timeline persetujuan: siapa memindahkan dokumen ke status apa, kapan, dengan catatan apa",
+          "Data proposal, data Mitra Binaan, dan hasil survey pada satu halaman",
+          "Daftar jaminan yang tercatat pada proposal ini",
+          "Aksi lanjutan sesuai status dan hak akses pengguna",
+        ],
+        hideFromNav: true,
+      },
+      {
         path: "/pumk/survey",
         label: "Hasil Survey",
         title: "Input Hasil Survey",
@@ -250,6 +265,21 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         ],
       },
       {
+        path: "/pumk/kartu-piutang/:akadId",
+        label: "Kartu Piutang",
+        title: "Kartu Piutang Mitra Binaan",
+        permission: "pumk.view",
+        summary:
+          "Kartu piutang satu akad: data mitra, syarat akad, jadwal seluruh versi, setiap setoran, riwayat kolektibilitas, dan outstanding terkini.",
+        willContain: [
+          "Ringkasan outstanding pokok, outstanding Jasa Administrasi, dan rekonsiliasi terhadap Buku Besar",
+          "Jadwal angsuran versi aktif beserta status tiap baris",
+          "Seluruh setoran dengan rincian alokasi pokok, jasa, dan kelebihan",
+          "Riwayat kolektibilitas per periode dan tautan ke jurnal terkait",
+        ],
+        hideFromNav: true,
+      },
+      {
         path: "/pumk/mitra",
         label: "Mitra Binaan",
         title: "Mitra Binaan",
@@ -275,6 +305,21 @@ export const NAV_GROUPS: readonly NavGroup[] = [
           "Tautan ke Jurnal Pinbuk yang dibebankan ke cluster",
           "Riwayat perubahan keanggotaan pada audit trail",
         ],
+      },
+      {
+        path: "/pumk/cluster/:clusterId",
+        label: "Detail Cluster",
+        title: "Detail Cluster Mitra Binaan",
+        permission: "pumk.view",
+        summary:
+          "Satu cluster dengan daftar anggotanya, riwayat masuk dan keluar, serta performa kolektibilitas kelompok.",
+        willContain: [
+          "Daftar anggota aktif beserta tanggal masuk dan kolektibilitas terakhir",
+          "Tambah anggota dan keluarkan anggota beserta tanggal efektif dan alasannya",
+          "Komposisi kolektibilitas dan outstanding pokok kelompok",
+          "Riwayat keanggotaan yang pernah tercatat, termasuk yang sudah keluar",
+        ],
+        hideFromNav: true,
       },
       {
         path: "/pumk/reschedule",
@@ -948,13 +993,65 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 /** Every route in the product, module pages and report pages alike. */
 export const ALL_ROUTES: readonly PageRoute[] = NAV_GROUPS.flatMap((group) => group.items);
 
+export interface RouteMatch {
+  route: PageRoute;
+  /** Values of the `:name` segments, e.g. { proposalId: "9f2c..." }. */
+  params: Record<string, string>;
+}
+
+function normalize(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+/**
+ * Match one path against one route pattern. A `:name` segment matches exactly
+ * one non empty segment, and nothing else in the pattern is special: no
+ * wildcards, no optional segments, no regular expressions. A matcher that can
+ * only do this cannot silently swallow a path that was meant for another page.
+ */
+function matchPattern(pattern: string, path: string): Record<string, string> | null {
+  if (!pattern.includes("/:")) return pattern === path ? {} : null;
+  const patternParts = pattern.split("/");
+  const pathParts = path.split("/");
+  if (patternParts.length !== pathParts.length) return null;
+  const params: Record<string, string> = {};
+  for (let index = 0; index < patternParts.length; index += 1) {
+    const expected = patternParts[index] ?? "";
+    const actual = pathParts[index] ?? "";
+    if (expected.startsWith(":")) {
+      if (actual === "") return null;
+      params[expected.slice(1)] = decodeURIComponent(actual);
+      continue;
+    }
+    if (expected !== actual) return null;
+  }
+  return params;
+}
+
+/**
+ * Resolve a path to its page. An EXACT route always wins over a parameterised
+ * one, so /pumk/proposal/baru opens the input form and never gets read as a
+ * proposal whose id is the word "baru".
+ */
+export function matchRoute(path: string): RouteMatch | undefined {
+  const normalized = normalize(path);
+  const exact = ALL_ROUTES.find((route) => route.path === normalized);
+  if (exact) return { route: exact, params: {} };
+  for (const route of ALL_ROUTES) {
+    const params = matchPattern(route.path, normalized);
+    if (params) return { route, params };
+  }
+  return undefined;
+}
+
 export function findRoute(path: string): PageRoute | undefined {
-  const normalized = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
-  return ALL_ROUTES.find((route) => route.path === normalized);
+  return matchRoute(path)?.route;
 }
 
 export function groupOfPath(path: string): NavGroup | undefined {
-  return NAV_GROUPS.find((group) => group.items.some((item) => item.path === path));
+  const route = matchRoute(path)?.route;
+  if (!route) return undefined;
+  return NAV_GROUPS.find((group) => group.items.some((item) => item.path === route.path));
 }
 
 /**

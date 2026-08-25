@@ -571,3 +571,91 @@ akan membuat operasi yang sah menjadi mustahil.
 **Dampak kalau salah:** kalau auditor klien menganggap snapshot periode tertutup juga bukti,
 proteksi harus diperluas dan mekanisme reopen harus diganti dengan pengarsipan berlapis, bukan
 penghapusan. Lihat OPEN-QUESTIONS butir 7 yang sudah mencatat pertanyaan itu.
+
+---
+
+# Tiga event jurnal yang tidak ada di spesifikasi Bagian 6.4 (A-38 sampai A-40)
+
+Bagian 6.4 mendaftarkan 19 kode event. Tiga peristiwa uang yang nyata tidak punya kode di daftar
+itu, sementara modul bisnis Fase 3 sampai 5 harus mencatatnya. Pemilik repo memutuskan mengambil
+pembacaan yang paling masuk akal sekarang dan menandainya bisa diganti belakangan; alasan
+lengkapnya ada di `docs/BUILD-PLAN.md`, bagian "Keputusan sementara: event yang tidak ada di
+spesifikasi Bagian 6.4". Katalognya ada di `apps/api/src/seed/event-jurnal.ts`.
+
+Tiga entri berikut adalah **asumsi yang wajib dikonfirmasi tim keuangan klien bersama KAP mereka**,
+dan **bukan klaim kepatuhan** terhadap peraturan mana pun. Tidak satu pun berasal dari naskah
+peraturan yang sudah dibaca utuh; ketiganya adalah pembacaan kami atas praktik akuntansi yang
+lazim, diambil supaya kode bisnis tidak mengarang jurnalnya sendiri (invarian 11).
+
+Biaya membetulkannya sengaja dibuat murah: pasangan akun tiap event adalah satu baris di
+`event_jurnal_mapping`, jadi koreksi berarti `UPDATE` satu baris, bukan deploy. Yang tidak murah
+adalah alternatif yang dihindari, yaitu modul bisnis menulis jurnal sendiri karena tidak ada kode
+event yang cocok.
+
+## A-38. Kekurangan penyisihan saat hapus buku dibebankan ke periode berjalan
+
+**Diasumsikan:** kalau saldo Penyisihan Penurunan Nilai Piutang lebih kecil dari outstanding yang
+dihapus buku, penyisihan dipakai lebih dulu sampai habis dan **sisanya dibebankan ke periode
+berjalan** lewat event `HAPUS_BUKU_KEKURANGAN_PENYISIHAN` (debit Beban Penyisihan Penurunan Nilai
+Piutang, kredit Piutang Pinjaman Mitra Binaan). Perlakuan ini adalah nilai default
+`akuntansi.kekurangan_penyisihan_hapus_buku = BEBAN_PERIODE`; nilai `TOLAK` menolak hapus bukunya
+sampai penyisihannya dibentuk lebih dulu.
+
+**Kenapa:** `HAPUS_BUKU_PIUTANG` di Bagian 6.4 mendebit penyisihan sebesar **seluruh** outstanding.
+Itu hanya benar kalau saldo penyisihan menutup outstanding, yang berlaku pada rate Macet 100
+persen tetapi tidak berlaku pada dasar penurunan nilai kolektif yang menurut `docs/REGULASI.md`
+justru dipakai di laporan PUMK yang diaudit. Dengan penyisihan yang lebih kecil, jurnal Bagian 6.4
+apa adanya membuat akun kontra aset bersaldo debit, dan pengurang aset yang negatif tampil sebagai
+**piutang yang lebih besar**, persis sebesar angka yang seharusnya keluar dari neraca. Jurnalnya
+balance dan tetap salah, sehingga invarian "debit sama dengan kredit" tidak akan pernah
+menangkapnya. Ini cacat di spesifikasi, bukan di implementasi.
+
+**Dampak kalau salah:** kalau tim keuangan dan KAP menyatakan kekurangan penyisihan tidak boleh
+menjadi beban periode berjalan (misalnya harus lewat koreksi penyisihan pada periode pembentukan,
+atau hapus buku ditolak sampai penyisihannya cukup), ubah baris `konfigurasi` menjadi `TOLAK` dan
+alur hapus buku akan menolak transaksinya dengan `PENYISIHAN_TIDAK_CUKUP`. Kalau yang berubah
+adalah akun bebannya, yang berubah satu baris `event_jurnal_mapping`. Yang **tidak** boleh dilakukan
+adalah kembali memakai `postingEvent("HAPUS_BUKU_PIUTANG")` untuk seluruh outstanding: itu
+mengembalikan cacat neraca di atas. Konsumsi penyisihan dan pemisahan kekurangannya dikerjakan
+`postingHapusBukuPiutang` di `apps/api/src/modules/jurnal`, dan dijaga oleh
+`apps/api/src/modules/jurnal/jurnal-hapus-buku.test.ts`.
+
+## A-39. Restrukturisasi yang menaikkan pokok mengkapitalisasi jasa administrasi terakrual
+
+**Diasumsikan:** reschedule yang menaikkan pokok dicatat dengan `RESTRUKTUR_POKOK_NAIK`, debit
+Piutang Pinjaman Mitra Binaan, kredit **Piutang Jasa Administrasi**.
+
+**Kenapa:** pokok naik tanpa uang keluar berarti tagihan yang sudah diakui dikapitalisasi ke pokok,
+dan kandidat yang paling mungkin adalah jasa administrasi yang sudah diakrual tetapi belum dibayar.
+Total piutang tidak berubah karena ini reklasifikasi, bukan pengakuan tagihan baru.
+
+**Dampak kalau salah:** kalau yang dikapitalisasi ternyata bukan jasa administrasi terakrual
+(misalnya denda, biaya penagihan, atau pokok tambahan yang memang dicairkan), baris pemetaan
+diganti dan jurnal berikutnya langsung ikut, tanpa deploy. Kalau ternyata kenaikan pokok **selalu**
+disertai pencairan uang, event ini tidak dipakai sama sekali dan penambahan pokok memakai
+`PENCAIRAN_PUMK`; dampaknya ada di modul restrukturisasi Fase 5, bukan di engine jurnal.
+
+## A-40. Restrukturisasi yang menurunkan pokok diserap penyisihan lebih dulu
+
+**Diasumsikan:** reschedule yang menurunkan pokok dicatat dengan `RESTRUKTUR_POKOK_TURUN`, debit
+Penyisihan Penurunan Nilai Piutang, kredit Piutang Pinjaman Mitra Binaan. Kalau penyisihannya tidak
+cukup, sisanya lewat `HAPUS_BUKU_KEKURANGAN_PENYISIHAN` dengan alasan yang sama seperti A-38.
+
+**Kenapa:** penurunan pokok adalah pengurangan tagihan, dan tagihan yang berkurang wajar diserap
+penyisihan yang sudah dibentuk untuk piutang bermasalah itu sebelum menjadi beban baru.
+
+**Dampak kalau salah:** kalau tim keuangan menyatakan penurunan pokok adalah beban periode berjalan
+tanpa menyentuh penyisihan (atau pengurang pendapatan), baris pemetaannya diganti. Yang perlu
+diperiksa bersamaan: penurunan pokok yang menembus saldo penyisihan harus memakai pemisahan yang
+sama seperti hapus buku, atau akun kontra asetnya akan negatif dengan cara yang sama.
+
+## Catatan penghapustagihan (sengaja tanpa kode event)
+
+Penghapustagihan **tidak** diberi kode event, dan itu bukan kelalaian. Menurut SK-277/MBU/10/2023,
+penghapusbukuan mengeluarkan piutang dari neraca sementara hak tagih tetap ada dan dicatat
+ekstrakomtabel. Menghapus hak tagih itu kemudian tidak menggeser saldo apa pun karena piutangnya
+sudah tidak ada di neraca, jadi perlakuannya adalah peristiwa memorandum pada register
+ekstrakomtabel, bukan jurnal. Kasus yang perlu menghapus tagihan atas piutang yang masih di neraca
+dikerjakan dua langkah: hapus buku dulu, lalu hapus tagih. Dua kode event yang menghasilkan jurnal
+identik adalah jebakan rekonsiliasi. Status pertanyaannya ada di `docs/REGULASI.md` butir 4 dan
+menunggu jawaban unit TJSL klien.

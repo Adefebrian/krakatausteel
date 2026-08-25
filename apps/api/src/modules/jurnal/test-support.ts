@@ -172,6 +172,12 @@ function buatPortDb(): PortUji {
 // a test would be putting test scaffolding into production data.
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
 import { KATALOG_EVENT_JURNAL } from "../../seed/event-jurnal";
+// Same reasoning one level up: the capability switches that have no migration
+// (among them akuntansi.kekurangan_penyisihan_hapus_buku, which decides what a
+// write-off does with a shortfall) are seeded by the function `seedFase0`
+// runs, not restated here. A fixture carrying its own copy of a default is a
+// fixture that keeps passing after the real default changes.
+import { seedKonfigurasiTambahan } from "../../seed/konfigurasi";
 
 type TipeAkun = "ASET" | "LIABILITAS" | "ASET_NETO" | "PENDAPATAN" | "BEBAN";
 
@@ -322,6 +328,13 @@ export interface DuniaJurnal {
   };
   tutupPeriode(periode: Periode): Promise<void>;
   setelKategoriPinbuk(kategori: string[]): Promise<void>;
+  /**
+   * Overrides `akuntansi.kekurangan_penyisihan_hapus_buku` FOR THIS WORLD's
+   * bumn only. The shipped default is a global row (bumn_id NULL) seeded by
+   * the same function the real seed runs, so a test that flips the policy must
+   * not edit that row: every other world reads it too.
+   */
+  setelKebijakanKekurangan(nilai: "BEBAN_PERIODE" | "TOLAK"): Promise<void>;
   gantiAkunMapping(eventCode: string, kolom: "akun_debit_id" | "akun_kredit_id", akunId: string): Promise<void>;
   tutup(): Promise<void>;
 }
@@ -577,6 +590,11 @@ export async function buatDunia(): Promise<DuniaJurnal> {
     ],
   );
 
+  // The global (bumn_id NULL) capability defaults, from the real seed. The
+  // insert is ON CONFLICT DO NOTHING on a NULLS NOT DISTINCT unique index, so
+  // repeating it once per world is idempotent and worlds cannot fight over it.
+  await seedKonfigurasiTambahan(db);
+
   const tanggalKini = `${periodeKini.tahun}-${String(periodeKini.bulan).padStart(2, "0")}-10`;
   const tanggalAwal = `${periodeAwal.tahun}-${String(periodeAwal.bulan).padStart(2, "0")}-15`;
   const jam = () => new Date(`${tanggalKini}T04:00:00.000Z`);
@@ -639,6 +657,17 @@ export async function buatDunia(): Promise<DuniaJurnal> {
           JSON.stringify(kategori),
           KUNCI_KONFIGURASI.KATEGORI_PINBUK.kunci,
         ],
+      );
+    },
+    async setelKebijakanKekurangan(nilai): Promise<void> {
+      await db.query(
+        `insert into konfigurasi
+           (bumn_id, grup, kunci, nilai, tipe_data, deskripsi, perlu_konfirmasi)
+         values ($1, 'akuntansi', 'kekurangan_penyisihan_hapus_buku', $2, 'ENUM',
+                 'Override per bumn (fixture)', true)
+         on conflict (bumn_id, grup, kunci) where deleted_at is null
+           do update set nilai = excluded.nilai, diubah_at = now()`,
+        [bumn.id, nilai],
       );
     },
     async gantiAkunMapping(eventCode, kolom, akunId): Promise<void> {

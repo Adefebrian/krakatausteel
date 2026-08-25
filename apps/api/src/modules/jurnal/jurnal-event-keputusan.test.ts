@@ -252,9 +252,13 @@ describe("hapus buku dengan penyisihan yang KURANG", () => {
     // The case the shortfall event exists for. The spec's HAPUS_BUKU_PIUTANG
     // debits the allowance for the FULL outstanding, which only works when the
     // allowance covers it; under a collective-impairment basis it can be
-    // smaller. Splitting is the CALLER's job, and this is the shape that job
-    // has to produce: ONE journal, the allowance consumed exactly, the
-    // remainder as expense of the current period.
+    // smaller. This test states the SHAPE the split has to produce, with the
+    // amounts written out by hand: ONE journal, the allowance consumed
+    // exactly, the remainder as expense of the current period. Computing that
+    // split from the ledger is `postingHapusBukuPiutang`, and
+    // ./jurnal-hapus-buku.test.ts is where the arithmetic and the boundaries
+    // are pinned. Both are worth having: this one would still fail if the
+    // combined-posting mechanics broke under an engine that split correctly.
     const dunia = await buatDunia();
     try {
       const mesin = createJurnalEngine({ db: dunia.db, jam: dunia.jam });
@@ -410,11 +414,13 @@ describe("hapus buku dengan penyisihan yang KURANG", () => {
 
   test("engine tidak menebak: memakai HAPUS_BUKU_PIUTANG untuk seluruh outstanding memang membuat penyisihan negatif", async () => {
     // Stated as a test rather than as a comment, because it is the reason the
-    // shortfall event exists and the reason splitting is the caller's job. The
-    // engine posts what the mapping says; it has no opinion about whether an
-    // allowance is sufficient, and inventing one here would put an accounting
-    // policy inside the ledger engine where nobody can configure it. The
-    // guard belongs in the PUMK write-off flow, which must split the amount.
+    // shortfall event exists. `postingEvent` stays what it is: it posts what
+    // the mapping row says, for the amount it is handed, with no opinion about
+    // whether an allowance is sufficient. That is why a write-off must NOT go
+    // through this method; `postingHapusBukuPiutang` is the path that reads
+    // the allowance and splits, and this test is what it is protecting
+    // against. If it ever goes green for a new reason, the naive journal has
+    // stopped being possible and the guard can be re-examined.
     const dunia = await buatDunia();
     try {
       const mesin = createJurnalEngine({ db: dunia.db, jam: dunia.jam });

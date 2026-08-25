@@ -4,8 +4,12 @@
 // NO HTTP SURFACE YET, deliberately. Fase 1 (spec 14) is the engine and its
 // tests; the journal screens of spec 9 come later and will add routes.ts here.
 // Business modules (PUMK, Non PUMK, closing) must reach the ledger through
-// `postingEvent` or `postingEventGabungan` on the engine built here, and never
-// write jurnal rows themselves (invariant 11).
+// `postingEvent`, `postingEventGabungan` or `postingHapusBukuPiutang` on the
+// engine built here, and never write jurnal rows themselves (invariant 11).
+// A write-off in particular must use `postingHapusBukuPiutang` and not
+// `postingEvent("HAPUS_BUKU_PIUTANG", ...)`: the latter debits the allowance
+// for whatever it is handed and will drive that contra-asset negative when the
+// allowance is short of the outstanding.
 //
 // THE ENGINE IS A DEPENDENCY, NOT A SINGLETON. There is no module-global
 // instance and no free-function surface over one: an earlier version had both,
@@ -30,6 +34,8 @@ export type {
   BuatJurnalInput,
   DimensiBaris,
   EventPayload,
+  HapusBukuPiutang,
+  HapusBukuPiutangInput,
   JenisJurnal,
   Jurnal,
   JurnalContext,

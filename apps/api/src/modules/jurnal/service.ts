@@ -40,6 +40,8 @@ import type {
   BarisJurnalInput,
   DimensiBaris,
   EventPayload,
+  HapusBukuPiutang,
+  HapusBukuPiutangInput,
   JenisJurnal,
   Jurnal,
   JurnalContext,
@@ -83,11 +85,25 @@ const PERMISSION = {
 } as const;
 
 const KONFIGURASI_KATEGORI_PINBUK = { grup: "JURNAL", kunci: "kategori_kegiatan_pinbuk" };
+/** BEBAN_PERIODE | TOLAK. See KUNCI_KONFIGURASI.KEKURANGAN_PENYISIHAN. */
+const KONFIGURASI_KEKURANGAN_PENYISIHAN = {
+  grup: "akuntansi",
+  kunci: "kekurangan_penyisihan_hapus_buku",
+};
 
 /** Event whose mapping row DEFINES the receivable account (validation 6.2.8). */
 const EVENT_PIUTANG_MITRA = "PENCAIRAN_PUMK";
 /** Event whose mapping row DEFINES the Pinbuk preset account (spec 6.5). */
 const EVENT_PRESET_PINBUK = "PENYALURAN_PINBUK";
+/**
+ * The write-off pair. The first is spec 6.4's, and its DEBIT leg is also the
+ * definition of "the allowance account" for the balance read below: the
+ * account is data, so the read follows the row rather than a hardcoded code.
+ * The second is the owner's decision for the part the allowance cannot cover
+ * (docs/BUILD-PLAN.md, ASSUMPTIONS.md A-38).
+ */
+const EVENT_HAPUS_BUKU = "HAPUS_BUKU_PIUTANG";
+const EVENT_HAPUS_BUKU_KEKURANGAN = "HAPUS_BUKU_KEKURANGAN_PENYISIHAN";
 
 const POLA_TANGGAL = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -838,6 +854,144 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
   }
 
   // -------------------------------------------------------------------------
+  // Penghapusbukuan: the allowance first, the period's expense for the rest
+  // -------------------------------------------------------------------------
+
+  /**
+   * The client's policy for a shortfall, read fresh from `konfigurasi`. A
+   * missing row throws LOUDLY and is deliberately not a domain rejection, for
+   * the same reason as `kategoriPinbuk`: this is a configuration fault, and
+   * answering "penyisihan tidak cukup" would blame the operator for it. Nor is
+   * there a `?? "BEBAN_PERIODE"` fallback, which would decide the accounting
+   * treatment of a client's write-offs in code that cannot be changed without
+   * a deploy.
+   */
+  async function kebijakanKekuranganPenyisihan(
+    tx: JurnalTx,
+    bumnId: string,
+  ): Promise<"BEBAN_PERIODE" | "TOLAK"> {
+    const nilai = await repo.konfigurasi(
+      tx,
+      bumnId,
+      KONFIGURASI_KEKURANGAN_PENYISIHAN.grup,
+      KONFIGURASI_KEKURANGAN_PENYISIHAN.kunci,
+    );
+    const kunciPenuh = `${KONFIGURASI_KEKURANGAN_PENYISIHAN.grup}.${KONFIGURASI_KEKURANGAN_PENYISIHAN.kunci}`;
+    if (nilai === null) {
+      throw new Error(
+        `Parameter ${kunciPenuh} belum ada; hapus buku tidak bisa memutuskan perlakuan ` +
+          "kekurangan penyisihan tanpa kebijakan yang tersimpan.",
+      );
+    }
+    if (nilai !== "BEBAN_PERIODE" && nilai !== "TOLAK") {
+      throw new Error(`Parameter ${kunciPenuh} harus BEBAN_PERIODE atau TOLAK, bukan "${nilai}".`);
+    }
+    return nilai;
+  }
+
+  async function hapusBukuPiutang(
+    tx: JurnalTx,
+    input: HapusBukuPiutangInput,
+    ctx: JurnalContext,
+  ): Promise<HapusBukuPiutang> {
+    // The allowance account is whatever HAPUS_BUKU_PIUTANG's mapping row
+    // debits. Repointing that row therefore moves the balance read with it,
+    // and no account code enters this file.
+    const map = await repo.mappingEvent(tx, ctx.bumnId, EVENT_HAPUS_BUKU);
+    if (!map) throw tolak("EVENT_MAPPING_TIDAK_DITEMUKAN", { eventCode: EVENT_HAPUS_BUKU });
+    const akunPenyisihan = map.akun_debit_id;
+    if (map.debit_dari_payload || !akunPenyisihan) {
+      // A payload-supplied allowance leg would mean the account to measure is
+      // not knowable before the caller names it, and the split would be
+      // computed against an account nobody can point to. Refuse instead.
+      throw tolak("EVENT_PAYLOAD_TIDAK_LENGKAP", {
+        eventCode: EVENT_HAPUS_BUKU,
+        butuhDebit: true,
+        butuhKredit: false,
+      });
+    }
+
+    const outstanding = bacaUang(input.outstanding);
+    if (outstanding.bentuk === "rusak") {
+      throw tolak("NILAI_BUKAN_DESIMAL", { nilai: input.outstanding });
+    }
+    if (outstanding.negatif) throw tolak("NILAI_NEGATIF", { nilai: input.outstanding });
+
+    const saldo = bacaUang(
+      await repo.saldoNormalAkun(tx, ctx.bumnId, akunPenyisihan, input.tanggalTransaksi),
+    );
+    // A contra-asset already in a debit balance (someone posted the naive
+    // journal before this path existed) has NOTHING left to consume; treating
+    // its negative balance as capacity would deepen the very hole this
+    // operation exists to prevent.
+    const saldoSen = saldo.bentuk === "ok" ? saldo.sen : 0n;
+    let tersedia = saldoSen > 0n ? saldoSen : 0n;
+
+    if (input.penyisihanMaksimal !== undefined) {
+      const batas = bacaUang(input.penyisihanMaksimal);
+      if (batas.bentuk === "rusak") {
+        throw tolak("NILAI_BUKAN_DESIMAL", { nilai: input.penyisihanMaksimal });
+      }
+      if (batas.negatif) throw tolak("NILAI_NEGATIF", { nilai: input.penyisihanMaksimal });
+      // A ceiling only ever lowers: the ledger balance stays the hard limit.
+      if (batas.sen < tersedia) tersedia = batas.sen;
+    }
+
+    const dariPenyisihan = tersedia < outstanding.sen ? tersedia : outstanding.sen;
+    const kekurangan = outstanding.sen - dariPenyisihan;
+
+    if (kekurangan > 0n && (await kebijakanKekuranganPenyisihan(tx, ctx.bumnId)) === "TOLAK") {
+      throw tolak("PENYISIHAN_TIDAK_CUKUP", {
+        outstanding: input.outstanding,
+        penyisihanTersedia: dariSen(tersedia),
+        kekurangan: dariSen(kekurangan),
+      });
+    }
+
+    const dasar = {
+      mitraId: input.mitraId ?? null,
+      akadId: input.akadId ?? null,
+      keterangan: input.keterangan ?? null,
+    };
+    const komponen: KomponenEvent[] = [];
+    // A "0.00" component would be refused as a line with neither side filled
+    // (6.2.3), so each is present only when it carries money. The one
+    // exception is an outstanding of zero, which keeps a single component so
+    // the engine's own validation names the mistake instead of this code
+    // inventing a rejection for it.
+    if (dariPenyisihan > 0n || outstanding.sen === 0n) {
+      komponen.push({ eventCode: EVENT_HAPUS_BUKU, nilai: dariSen(dariPenyisihan), ...dasar });
+    }
+    if (kekurangan > 0n) {
+      komponen.push({
+        eventCode: EVENT_HAPUS_BUKU_KEKURANGAN,
+        nilai: dariSen(kekurangan),
+        ...dasar,
+      });
+    }
+
+    const jurnal = await tulisGabungan(
+      tx,
+      {
+        cabangId: input.cabangId,
+        tanggalTransaksi: input.tanggalTransaksi,
+        komponen,
+        keterangan: input.keterangan ?? null,
+        referensiTipe: input.referensiTipe ?? null,
+        referensiId: input.referensiId ?? null,
+        kunciIdempotensi: input.kunciIdempotensi ?? null,
+      },
+      ctx,
+    );
+    return {
+      ...jurnal,
+      dariPenyisihan: dariSen(dariPenyisihan),
+      kekurangan: dariSen(kekurangan),
+      penyisihanTersedia: dariSen(tersedia),
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // The engine surface (spec 6.1)
   // -------------------------------------------------------------------------
 
@@ -1248,6 +1402,14 @@ export function buatEngineJurnal(deps: JurnalEngineDeps): JurnalEngine {
           return jurnal;
         }),
       );
+    },
+
+    postingHapusBukuPiutang(input, tx, ctx) {
+      // Same permission stance as postingEvent and postingEventGabungan: a
+      // write-off is a business action the caller already authorised, and its
+      // ledger consequence must not need a second right that the same role
+      // does not hold. Branch scope and every 6.2 validation still run.
+      return bersihkanKesalahan(() => hapusBukuPiutang(tx, input, ctx));
     },
 
     postingEventGabungan(input, tx, ctx) {

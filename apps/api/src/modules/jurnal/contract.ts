@@ -118,6 +118,15 @@ export const PERMISSION_JURNAL = {
 export const KUNCI_KONFIGURASI = {
   /** JSON array of allowed Pinbuk activity categories (spec 6.5). */
   KATEGORI_PINBUK: { grup: "JURNAL", kunci: "kategori_kegiatan_pinbuk" },
+  /**
+   * What a write-off does with the part of the outstanding the allowance does
+   * not cover: `BEBAN_PERIODE` charges it to the current period through
+   * `HAPUS_BUKU_KEKURANGAN_PENYISIHAN`, `TOLAK` refuses the write-off until an
+   * allowance is formed. Seeded by apps/api/src/seed/konfigurasi.ts from the
+   * konfigurasi catalogue; NOT defaulted in this module, because a default in
+   * code cannot be changed without a deploy.
+   */
+  KEKURANGAN_PENYISIHAN: { grup: "akuntansi", kunci: "kekurangan_penyisihan_hapus_buku" },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -177,6 +186,10 @@ export const KODE_JURNAL = {
   // event posting (spec 6.4)
   EVENT_MAPPING_TIDAK_DITEMUKAN: "EVENT_MAPPING_TIDAK_DITEMUKAN",
   EVENT_PAYLOAD_TIDAK_LENGKAP: "EVENT_PAYLOAD_TIDAK_LENGKAP",
+  // Write-off with an allowance short of the outstanding, when the client's
+  // policy row says TOLAK rather than BEBAN_PERIODE. Not a spec code: the spec
+  // never contemplates a short allowance (see KUNCI_KONFIGURASI above).
+  PENYISIHAN_TIDAK_CUKUP: "PENYISIHAN_TIDAK_CUKUP",
 
   // manual journal types (spec 6.5)
   KAS_BANK_TANPA_AKUN_KAS: "KAS_BANK_TANPA_AKUN_KAS",
@@ -504,6 +517,47 @@ export interface JurnalGabungan extends Jurnal {
 }
 
 // ---------------------------------------------------------------------------
+// Write-off (penghapusbukuan) with an allowance that may not cover it
+// ---------------------------------------------------------------------------
+
+/**
+ * Input for `postingHapusBukuPiutang`. `outstanding` is the WHOLE amount
+ * leaving the balance sheet; how it splits between the allowance and the
+ * period's expense is computed here, never by the caller.
+ */
+export interface HapusBukuPiutangInput {
+  cabangId: string;
+  tanggalTransaksi: string;
+  /** The full outstanding pokok being written off. */
+  outstanding: Uang;
+  mitraId?: string | null;
+  akadId?: string | null;
+  keterangan?: string | null;
+  referensiTipe?: string | null;
+  referensiId?: string | null;
+  kunciIdempotensi?: string | null;
+  /**
+   * Ceiling on how much allowance THIS write-off may consume, for the
+   * `RATE_TABLE` mode where the allowance is computed per akad while the
+   * ledger holds it as one pooled contra account (no akad dimension is allowed
+   * on it, see `DIMENSI_PIUTANG_SALAH_AKUN`). Absent means the whole pooled
+   * balance is available. The ledger balance is always the harder limit: this
+   * can only lower the amount consumed, never raise it above what exists.
+   */
+  penyisihanMaksimal?: Uang;
+}
+
+/** The journal, plus the split that produced it, so a caller can record it. */
+export interface HapusBukuPiutang extends JurnalGabungan {
+  /** Charged to the allowance via `HAPUS_BUKU_PIUTANG`. */
+  dariPenyisihan: Uang;
+  /** Charged to the period via `HAPUS_BUKU_KEKURANGAN_PENYISIHAN`. Often "0.00". */
+  kekurangan: Uang;
+  /** Allowance balance the split was computed against, at `tanggalTransaksi`. */
+  penyisihanTersedia: Uang;
+}
+
+// ---------------------------------------------------------------------------
 // The engine (spec 6.1)
 // ---------------------------------------------------------------------------
 
@@ -630,6 +684,58 @@ export interface JurnalEngine {
     tx: JurnalTx,
     ctx: JurnalContext,
   ): Promise<JurnalGabungan>;
+
+  /**
+   * Penghapusbukuan, with the allowance consumed FIRST and only the remainder
+   * charged to the period. The one operation in this engine that computes an
+   * amount instead of posting the one it is handed, and it exists because the
+   * spec's own journal is defective without it.
+   *
+   * WHAT THE SPEC SAYS AND WHY IT IS NOT ENOUGH. Spec 6.4's
+   * `HAPUS_BUKU_PIUTANG` debits Penyisihan Penurunan Nilai Piutang for the
+   * FULL outstanding. That is only correct when the allowance covers the
+   * outstanding, which holds at a 100 percent Macet rate but not under the
+   * collective-impairment basis docs/REGULASI.md found to be the basis
+   * actually in force. With a smaller allowance, the spec's journal drives a
+   * contra-ASSET account into a debit balance, which presents as a NEGATIVE
+   * deduction from receivables, i.e. as receivables overstated by the very
+   * amount that was supposed to leave the balance sheet. It balances, and it
+   * is wrong.
+   *
+   * WHAT THIS DOES:
+   *   - reads the allowance balance from the ledger, at `tanggalTransaksi`,
+   *     for the account the `HAPUS_BUKU_PIUTANG` mapping row names (so an
+   *     accountant repointing that row moves this read too, invariant 11);
+   *   - consumes `min(allowance, outstanding)` through `HAPUS_BUKU_PIUTANG`;
+   *   - routes the remainder through `HAPUS_BUKU_KEKURANGAN_PENYISIHAN`
+   *     (debit Beban Penyisihan, credit Piutang Pokok);
+   *   - emits ONE journal, because both components credit the same receivable
+   *     for the same akad and merge into a single credit line of the full
+   *     outstanding, which is what a write-off is;
+   *   - never emits a component worth "0.00", so an allowance that covers the
+   *     write-off produces exactly the spec's two-line journal and an
+   *     allowance of zero produces the shortfall journal alone.
+   *
+   * The allowance can therefore reach zero and never crosses it. It is read
+   * over POSTED **and REVERSED** journals, because a reversed formation's
+   * lines are still in the ledger and are offset by its reversal; counting
+   * only POSTED would subtract the reversal without adding the original and
+   * report an allowance that never existed.
+   *
+   * WHAT IS POLICY AND STAYS OUT OF CODE: whether a shortfall may be charged
+   * at all is `akuntansi.kekurangan_penyisihan_hapus_buku`. `BEBAN_PERIODE`
+   * splits, `TOLAK` refuses with `PENYISIHAN_TIDAK_CUKUP` so the allowance is
+   * formed first. Absent configuration is a configuration fault and throws,
+   * rather than quietly picking a treatment for the client's accounts.
+   *
+   * Takes the CALLER'S transaction, like `postingEventGabungan`: a write-off
+   * also closes an akad, and the two must commit together or not at all.
+   */
+  postingHapusBukuPiutang(
+    input: HapusBukuPiutangInput,
+    tx: JurnalTx,
+    ctx: JurnalContext,
+  ): Promise<HapusBukuPiutang>;
 }
 
 /**

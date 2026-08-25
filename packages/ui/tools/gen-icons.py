@@ -1,4 +1,4 @@
-import json, re, subprocess, sys, os
+import json, re, subprocess, sys, os, urllib.request
 
 OUT = "/Users/brianeedsleep/Documents/krakatausteel/packages/ui/src/icon-data.ts"
 VER = "1.2.0"
@@ -35,14 +35,33 @@ MAP = {
     "download": "Download2",
     "eye": "Eye",
     "eyeOff": "EyeOff",
+    # Fase 3 (spec 9.1) additions: the PUMK screens need a back affordance, a
+    # photo/document upload, a cluster (people) mark, a receipt, a calculator,
+    # a history mark and a cash-account mark. Same source and same weight.
+    "arrowLeft": "ArrowLeft",
+    "arrowRight": "ArrowRight",
+    "upload": "Upload",
+    "users": "Users",
+    "file": "FileText",
+    "trash": "Trash",
+    "calculator": "Calculator",
+    "phone": "Phone",
+    "camera": "Camera",
+    "handshake": "Handshake",
+    "wallet": "Wallet",
+    "receipt": "Receipt",
+    "checkCircle": "CheckCircle",
+    "minus": "Minus",
+    "history": "History",
+    "bank": "Bank",
 }
 
 def fetch(name):
     url = f"https://cdn.jsdelivr.net/npm/reicon-react@{VER}/icons/{name}.js"
-    r = subprocess.run(["curl", "-sS", "-m", "30", url], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise SystemExit(f"fetch failed {name}: {r.stderr[:200]}")
-    return r.stdout
+    try:
+        return urllib.request.urlopen(url, timeout=30).read().decode()
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"fetch failed {name}: {exc}")
 
 paths = {}
 problems = []

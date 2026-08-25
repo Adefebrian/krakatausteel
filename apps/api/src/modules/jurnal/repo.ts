@@ -159,6 +159,19 @@ export interface JurnalRepo {
   akun(tx: JurnalTx, bumnId: string, ids: readonly string[]): Promise<AkunBaris[]>;
   mappingEvent(tx: JurnalTx, bumnId: string, eventCode: string): Promise<MappingBaris | null>;
   konfigurasi(tx: JurnalTx, bumnId: string, grup: string, kunci: string): Promise<string | null>;
+  /**
+   * Balance of one account ON ITS NORMAL SIDE, up to and including `tanggal`,
+   * from the LINES (never from `jurnal.total_*`). Credit-normal accounts, which
+   * is what a contra-asset like Penyisihan is, come back POSITIVE when they
+   * carry a normal balance, so a caller can compare them with an amount
+   * without remembering which way round the account is.
+   *
+   * POSTED **and REVERSED** are both counted: a reversed journal's lines are
+   * still in the ledger and are offset by its reversal, which is itself
+   * POSTED. Counting only POSTED would subtract the reversal without adding
+   * back the original.
+   */
+  saldoNormalAkun(tx: JurnalTx, bumnId: string, akunId: string, tanggal: string): Promise<Uang>;
   jurnal(tx: JurnalTx, id: string): Promise<JurnalBaris | null>;
   jurnalTerkunci(tx: JurnalTx, id: string): Promise<JurnalBaris | null>;
   baris(tx: JurnalTx, jurnalId: string): Promise<BarisJurnalBaris[]>;
@@ -312,6 +325,26 @@ export function createJurnalRepo(): JurnalRepo {
         [grup, kunci, bumnId],
       );
       return r[0]?.nilai ?? null;
+    },
+
+    async saldoNormalAkun(tx, bumnId, akunId, tanggal) {
+      const r = await tx.query<{ saldo: string }>(
+        `select coalesce(sum(
+                  case when a.saldo_normal = 'K' then b.kredit - b.debit
+                       else b.debit - b.kredit end
+                ), 0)::numeric(20,2)::text as saldo
+           from jurnal_baris b
+           join jurnal j on j.id = b.jurnal_id
+           join akun a on a.id = b.akun_id
+          where b.akun_id = $2::uuid
+            and j.bumn_id = $1::uuid
+            and j.status in ('POSTED', 'REVERSED')
+            and j.tanggal_transaksi <= $3::date
+            and j.deleted_at is null
+            and b.deleted_at is null`,
+        [bumnId, akunId, tanggal],
+      );
+      return (r[0]?.saldo ?? "0.00") as Uang;
     },
 
     async jurnal(tx, id) {

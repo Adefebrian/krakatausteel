@@ -63,6 +63,8 @@ const PESAN: Record<KodeJurnal, string> = {
     "Pemetaan jurnal untuk event ini tidak ada atau tidak aktif. Lengkapi dulu pemetaan akunnya.",
   EVENT_PAYLOAD_TIDAK_LENGKAP:
     "Event ini menuntut akun yang ditentukan saat transaksi, dan akun itu tidak disertakan.",
+  PENYISIHAN_TIDAK_CUKUP:
+    "Saldo penyisihan penurunan nilai piutang lebih kecil dari outstanding yang dihapus buku, dan kebijakan yang berlaku menolak pembebanan kekurangannya ke periode berjalan. Bentuk penyisihannya lebih dulu.",
 
   KAS_BANK_TANPA_AKUN_KAS: "Jurnal Kas Bank harus memakai akun kas atau bank di salah satu sisinya.",
   PINBUK_AKUN_SALAH: "Jurnal Pinbuk harus memakai akun beban pembinaan kemitraan sesuai pemetaan.",
