@@ -63,13 +63,18 @@ export type { Uang };
  * authorisation bug stays hidden, so the tests assert the FAIL-CLOSED
  * behaviour instead of inventing the code.
  *
- * FINDING (reported, not worked around): spec 4.5 gives `nonpumk_lpj` a
- * `status = DIVERIFIKASI` with `verified_by` / `verified_at`, and
- * docs/BUILD-PLAN.md's Fase 4 exit criterion is "satu proposal jalan sampai
- * LPJ DIVERIFIKASI". The shipped catalogue has no code for that act.
- * `nonpumk.lpj.verifikasi` below is therefore deliberately NOT in PERMISSIONS,
- * and both `verifikasiLpj` and `tolakLpj` must fail closed until the catalogue
- * owner adds it. Do not silently reuse one of the three that do exist:
+ * FINDING, NOW CLOSED: spec 4.5 gives `nonpumk_lpj` a `status = DIVERIFIKASI`
+ * with `verified_by` / `verified_at`, and docs/BUILD-PLAN.md's Fase 4 exit
+ * criterion is "satu proposal jalan sampai LPJ DIVERIFIKASI", but the shipped
+ * catalogue had no code for that act. It was FILED rather than worked around,
+ * and `nonpumk.lpj.verifikasi` has since been ADDED to the catalogue and
+ * GRANTED TO THE CHECKER (Admin Cabang inherits it, Admin Pusat holds every
+ * code). `verifikasiLpj` and `tolakLpj` therefore now refuse a role that does
+ * not hold it with TIDAK_BERWENANG, which is policy, rather than with
+ * IZIN_BELUM_TERDAFTAR, which was a configuration gap.
+ *
+ * WHY IT IS ITS OWN CODE AND NOT ONE OF THE THREE THAT ALREADY EXISTED, which
+ * is the part that still matters when someone is tempted to simplify:
  *   - `nonpumk.lpj` is granted to MAKER and means "input the LPJ", so reusing
  *     it lets the very person who wrote the accountability report sign it off,
  *     which is spec 2 rule 1 with the serial numbers filed off;
@@ -79,8 +84,12 @@ export type { Uang };
  *   - `nonpumk.approve` is the decision to GIVE the money, taken months
  *     earlier by a different person on different evidence; merging the two
  *     means one grant of authority covers both ends of the same transaction.
- * This is the same shape of finding as `pumk.cluster`, which was filed rather
- * than worked around and then fixed in the catalogue.
+ * Same shape of finding as `pumk.cluster`, and the same ending.
+ *
+ * `IZIN_BELUM_TERDAFTAR` stays in the error catalogue and stays checked. It is
+ * the fail-closed path for the NEXT code that goes missing, and the engine
+ * still resolves every string here through `canonicalPermission` rather than
+ * trusting this constant.
  */
 export const PERMISSION_NONPUMK = {
   VIEW: "nonpumk.view",
@@ -91,7 +100,7 @@ export const PERMISSION_NONPUMK = {
   PENYALURAN: "nonpumk.penyaluran",
   /** Submitting (and resubmitting) the LPJ. Held by MAKER. */
   LPJ: "nonpumk.lpj",
-  /** NOT in the auth catalogue. See the note above; must fail closed. */
+  /** Verifying or rejecting the LPJ. Held by CHECKER. See the note above. */
   LPJ_VERIFIKASI: "nonpumk.lpj.verifikasi",
 } as const;
 
@@ -106,12 +115,23 @@ export const PERMISSION_NONPUMK = {
  * and the tests assert the MECHANIC (change the row, the behaviour changes)
  * and NEVER the value.
  *
- * NONE OF THESE KEYS IS SHIPPED IN migrations/0004. That is itself a finding
- * (reported): spec 5.5 "Batasan Program" lists only PUMK limits. Until the
- * rows exist the engine must refuse with `KONFIGURASI_TIDAK_ADA` rather than
- * fall back to a literal, which is what ./nonpumk-fixture.test.ts pins and
- * what ./test-support.ts seeds per world so the other tests have something to
- * read.
+ * ALL FOUR KEYS ARE NOW SHIPPED, by migrations/0022_parameter_non_pumk.sql.
+ * They were absent from migrations/0004, which lists only the PUMK limits spec
+ * 5.5 names, so the whole Non PUMK path was unreachable on a fresh install;
+ * that was FILED and then fixed with a new migration rather than with a
+ * literal in TypeScript. The four rows are GLOBAL (bumn_id NULL) and ship with
+ * `perlu_konfirmasi = true`, because every value in them is ours to propose
+ * and the client's to confirm (ASSUMPTIONS.md A-41 to A-44); an entity that
+ * decides differently writes an override.
+ *
+ * THE FAIL-CLOSED BEHAVIOUR IS UNCHANGED AND STILL PINNED. A missing or
+ * unparseable row is `KONFIGURASI_TIDAK_ADA` / `KONFIGURASI_TIDAK_VALID` and
+ * never a fallback value, which ./nonpumk-proposal.test.ts and
+ * ./nonpumk-monitoring.test.ts assert by taking the rows away for the duration
+ * of one call. ./test-support.ts writes a per-world override so the other
+ * tests read a value they chose rather than the shipped one, and every test
+ * still asserts the MECHANIC (change the row, the behaviour changes) and never
+ * the number.
  */
 export const KUNCI_KONFIGURASI_NONPUMK = {
   /** Below this assessment score a proposal cannot be recommended. */
@@ -832,15 +852,17 @@ export interface NonPumkEngine {
    * balanced pair of zero lines would be refused by validation 6.2.3 anyway,
    * and an empty journal in the buku besar is noise an auditor has to explain.
    *
-   * REQUIRES `nonpumk.lpj.verifikasi`, WHICH THE SHIPPED CATALOGUE DOES NOT
-   * HAVE. Must fail closed with `IZIN_BELUM_TERDAFTAR` for every role,
-   * including Admin Pusat, until it is added. See PERMISSION_NONPUMK.
+   * REQUIRES `nonpumk.lpj.verifikasi`, which the catalogue now HAS and grants
+   * to the CHECKER: the Maker files the LPJ, someone else accepts it. A role
+   * without the code is refused with `TIDAK_BERWENANG`. See PERMISSION_NONPUMK
+   * for why it is not one of the three neighbouring codes.
    */
   verifikasiLpj(input: VerifikasiLpjInput, ctx: NonPumkContext): Promise<Lpj>;
 
   /**
-   * LPJ_DIAJUKAN -> LPJ_DITOLAK, with a mandatory note. Same missing
-   * permission as `verifikasiLpj`, same fail-closed requirement.
+   * LPJ_DIAJUKAN -> LPJ_DITOLAK, with a mandatory note. Same permission as
+   * `verifikasiLpj`, and deliberately so: accepting and refusing an
+   * accountability report are the same control, held by the same person.
    */
   tolakLpj(input: TolakLpjInput, ctx: NonPumkContext): Promise<ProposalNonPumk>;
 

@@ -122,8 +122,8 @@ export function mapDatabaseError(err: unknown): AppError | null {
  * modules/auth -> core/http), so this matches on the shape the class
  * guarantees: `name` plus a string `kode`.
  *
- * `AngsuranError` and `PumkError` follow the same convention deliberately
- * (both say so in their own files), and they are LISTED here rather than
+ * `AngsuranError`, `PumkError` and `NonPumkError` follow the same convention
+ * deliberately (each says so in its own file), and they are LISTED here rather than
  * matched by duck typing alone: an allowlist of names is what keeps an
  * unrelated library error that happens to carry a `kode` field from being
  * reported to a caller as a business refusal. Adding an engine is one line,
@@ -137,7 +137,12 @@ interface ErrorBerkode extends Error {
   penyebabDb?: string;
 }
 
-const NAMA_ERROR_BERKODE = new Set(["JurnalError", "AngsuranError", "PumkError"]);
+const NAMA_ERROR_BERKODE = new Set([
+  "JurnalError",
+  "AngsuranError",
+  "PumkError",
+  "NonPumkError",
+]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
   if (!(err instanceof Error) || !NAMA_ERROR_BERKODE.has(err.name)) return null;
@@ -191,6 +196,27 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   JADWAL_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
   RESCHEDULE_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
   PRESET_ALOKASI_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+
+  // --- modules/nonpumk (spec 9.2) -----------------------------------------
+  //
+  // Same rule as above: everything absent is a 400, and only the codes where
+  // 400 would be a LIE are listed. A lookup that found nothing is not a
+  // malformed request, and a grant whose staging is already closed will refuse
+  // the identical body again however it is rewritten.
+  BIDANG_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  SDG_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  PENYALURAN_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  LPJ_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  // The proposal has no approved amount yet, so there is no ceiling to
+  // disburse against: a state problem, not a body problem.
+  BELUM_DISETUJUI: "KONFLIK",
+  TERMIN_SUDAH_ADA: "KONFLIK",
+  LPJ_SUDAH_DIAJUKAN: "KONFLIK",
+  LPJ_BELUM_DIAJUKAN: "KONFLIK",
+  // Refused AHEAD of the deferred TJSL-NPK-002 and BEFORE the ledger is
+  // called. A 409 rather than a 400 because whether the same termin is
+  // acceptable depends on what has already gone out, not on how it was typed.
+  PLAFON_PENYALURAN_TERLAMPAUI: "KONFLIK",
 
   // Spec 2 rules 1 and 2, ahead of TJSL-SOD-001 / TJSL-SOD-002.
   KONFLIK_MAKER_CHECKER: "SEGREGASI_TUGAS",

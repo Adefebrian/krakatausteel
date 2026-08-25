@@ -158,11 +158,18 @@ describe("the payload is stored as queryable jsonb, not as a string scalar", () 
   test("konfigurasi.pilihan_json is written as a real jsonb array", async () => {
     // The seed writes it with the same cast; an ENUM whose options are a string
     // scalar cannot be rendered as a select box by the config UI.
+    // Scoped to the GLOBAL row (bumn_id IS NULL), which is the one the seed
+    // ships and the one this test is about. Without that predicate the query
+    // was `LIMIT 1` over every row carrying this key in any order, so as soon
+    // as another suite created an entity-scoped override the assertion could
+    // read a different row and fail for reasons unrelated to the seed. A test
+    // whose result depends on which other tests have run is worse than no
+    // test, because the failure looks like a flake and gets ignored.
     const rows = await db.query<{ tipe: string; n: number }>(
       `SELECT jsonb_typeof(pilihan_json) AS tipe, jsonb_array_length(pilihan_json) AS n
          FROM konfigurasi
-        WHERE grup = 'akuntansi' AND kunci = 'mode_penyisihan' AND deleted_at IS NULL
-        LIMIT 1`,
+        WHERE grup = 'akuntansi' AND kunci = 'mode_penyisihan'
+          AND bumn_id IS NULL AND deleted_at IS NULL`,
     );
     expect(rows[0]).toMatchObject({ tipe: "array", n: 2 });
   });
