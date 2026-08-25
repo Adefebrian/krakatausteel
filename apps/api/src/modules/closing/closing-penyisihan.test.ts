@@ -293,63 +293,158 @@ describe("spec 8.2: satu jurnal per cabang, lewat postingEvent", () => {
     expect(jurnal[0].id).not.toBe(jurnal[1].id);
   });
 
-  test("TEMUAN: penyisihan_periode.jurnal_id hanya bisa menunjuk SATU dari beberapa jurnal periode itu", async () => {
-    // A RECORD-KEEPING GAP, NOT AN ACCOUNTING ONE. The ledger above is exactly
-    // right; what cannot be expressed is WHICH entries produced it.
+  test("TEMUAN DITUTUP: pergerakan penyisihan tertaut ke SEMUA jurnal yang membawanya, dan totalnya dijaga skema", async () => {
+    // WHAT THIS TEST USED TO ASSERT, AND WHY IT WAS RETARGETED.
     //
-    // `penyisihan_periode` (migrations/0011) carries a single `jurnal_id`. When
-    // a re-run posts a delta, the period's provision lives in TWO journals and
-    // the row can name only one of them, so it ends up pointing at the delta
-    // while its own `beban_penyisihan_periode` states the full amount. The row
-    // then says "the provision expense this period was 11.400.000" next to a
-    // link to an entry worth 1.200.000.
+    // It was written as an open finding. `penyisihan_periode` (migrations/0011)
+    // carried a single `jurnal_id`, and because a correction is posted as a
+    // DELTA rather than as a reversal, a re-run at a corrected rate left the
+    // period's provision spread over two journals with the column naming only
+    // the last. The row then stated an expense of 11.400.000 beside a link to
+    // an entry worth 1.200.000. The test pinned that mismatch and said, in as
+    // many words, that it existed so the day the behaviour changed it would
+    // change on purpose. migrations/0026 is that day.
     //
-    // Why it matters beyond tidiness: spec 16 scenario 17 asks an operator to
-    // open Laporan Perhitungan Penyisihan and confirm its total reconstructs
-    // the period's provision journal. A report that follows `jurnal_id` gets
-    // the delta and fails that check; a report that sums every PENYISIHAN
-    // journal of the period reconciles. The two readings are both defensible
-    // from the schema, which is the actual problem.
+    // Its FALLBACK assertion was "sum every journal of jenis = 'PENYISIHAN' in
+    // this period". That reconciled, but it is the weaker of the two claims now
+    // available and it is exactly the heuristic 0026 rejected: `jenis` is not
+    // ownership, a MANUAL journal may legitimately carry that type for the same
+    // period and branch, and it would be silently counted into the automated
+    // movement. Worse, a derived set cannot be CHECKED against the stated
+    // movement, so the one property spec 16 scenario 17 depends on would rest
+    // on a convention nothing enforces.
     //
-    // NOT FIXED HERE, and deliberately not asserted as a failure: the remedies
-    // are the owner's call (reverse-and-repost a single journal on re-run, or
-    // make the link a join table), and both are schema or engine decisions.
-    // This test pins the behaviour as it stands so the day it changes, it
-    // changes on purpose.
+    // The strong claim is now available: sum `penyisihan_periode_jurnal.nilai`
+    // for THIS row. That set is explicit, signed, one-journal-to-one-provision,
+    // and a deferred trigger refuses any transaction in which it disagrees with
+    // `beban_penyisihan_periode`. So the assertions below are about ownership
+    // rather than about resemblance, and the last two prove the guarantee is
+    // ENFORCED rather than merely true today.
     const p = d.periode(2027, 6);
     d.setelJam(p.tanggalAkhir);
     const akad = await d.buatAkad({ hariTunggakan: 300, padaTanggal: p.tanggalAkhir });
 
     await d.setelRate("MACET", "0.850000");
     await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
-    await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    const [awal] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    const kebutuhanAwal = kaliRate(akad.pokok, "0.850000");
+    expect(awal.jurnal).toHaveLength(1);
+
     await d.setelRate("MACET", "0.950000");
     await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
     const [baris] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    const kebutuhanBaru = kaliRate(akad.pokok, "0.950000");
+    const selisih = kurangUang(kebutuhanBaru, kebutuhanAwal);
 
-    const jurnal = await d.db.query<{ id: string; total_debit: string }>(
-      `select id::text as id, total_debit::text as total_debit
-         from jurnal
-        where periode_id = $1 and jenis = 'PENYISIHAN' and deleted_at is null
-        order by no_jurnal`,
-      [p.id],
-    );
-
-    // THE AMBIGUITY, stated as an assertion rather than as a comment.
-    const ditunjuk = jurnal.find((j) => j.id === baris.jurnalId);
-    expect(ditunjuk).toBeDefined();
-    expect(ditunjuk?.total_debit).not.toBe(baris.bebanPenyisihanPeriode);
-
-    // What DOES reconcile, and therefore what a report has to do: sum every
-    // provision journal of the period rather than follow the link.
-    expect(jumlahUang(...jurnal.map((j) => j.total_debit))).toBe(
+    // TWO entries carried one period's movement, and the record says so.
+    expect(baris.bebanPenyisihanPeriode).toBe(kebutuhanBaru);
+    expect(baris.jurnal).toHaveLength(2);
+    expect(baris.jurnal.map((j) => j.nilai)).toEqual([kebutuhanAwal, selisih]);
+    // Signed on purpose: both events post under `jenis = 'PENYISIHAN'` and only
+    // the accounts differ, so a formation and a recovery cannot be told apart
+    // from the journal itself. Here both are formations.
+    expect(jumlahUang(...baris.jurnal.map((j) => j.nilai))).toBe(
       baris.bebanPenyisihanPeriode,
     );
-    // And the snapshot still reconstructs the requirement, which is the other
-    // half of spec 16 scenario 17.
+
+    // The same set, read from the DATABASE rather than from the engine's return
+    // value, because a report reads the table.
+    const [tersimpan] = await d.bacaPenyisihan(p.id);
+    expect(tersimpan.jurnal.map((j) => j.jurnal_id)).toEqual(
+      baris.jurnal.map((j) => j.jurnalId),
+    );
+    expect(jumlahUang(...tersimpan.jurnal.map((j) => j.nilai))).toBe(
+      tersimpan.beban_penyisihan_periode,
+    );
+
+    // `jurnalId` SURVIVES AND STILL DOES NOT RECONCILE, which is now a
+    // documented property rather than a defect: it names the entry the MOST
+    // RECENT movement was posted to, because an operator correcting a run needs
+    // to reach the one journal that run produced, and that is a question a set
+    // cannot answer.
+    expect(baris.jurnalId).toBe(baris.jurnal.at(-1)?.jurnalId ?? null);
+    expect(selisih).not.toBe(baris.bebanPenyisihanPeriode);
+
+    // spec 16 scenario 17, the other half: the snapshot still reconstructs the
+    // requirement the movement was derived from.
     expect(
       jumlahUang(...(await d.bacaSnapshot(p.id)).map((s) => s.nilai_penyisihan)),
-    ).toBe(kaliRate(akad.pokok, "0.950000"));
+    ).toBe(kebutuhanBaru);
+  });
+
+  test("tautan yang hilang membuat transaksinya gagal, bukan totalnya diam diam salah", async () => {
+    // ENFORCEMENT, FROM THE LINKS SIDE. Soft-deleting one link drops it out of
+    // the sum without touching any `nilai`, so it slips past the row-level
+    // guard and is caught only by the deferred aggregate at COMMIT. That is the
+    // shape a real drift would take: nothing looks wrong at any single
+    // statement.
+    const p = d.periode(2027, 6);
+    d.setelJam(p.tanggalAkhir);
+    await d.buatAkad({ hariTunggakan: 300, padaTanggal: p.tanggalAkhir });
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const [baris] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    expect(baris.jurnal.length).toBeGreaterThan(0);
+
+    let ditolak = false;
+    try {
+      await d.db.transaction(async (tx) => {
+        await tx.query(
+          `update penyisihan_periode_jurnal
+              set deleted_at = now(), deleted_by = $2
+            where penyisihan_periode_id = $1 and deleted_at is null`,
+          [baris.id, d.userId.adminPusat],
+        );
+      });
+    } catch {
+      ditolak = true;
+    }
+    expect(ditolak).toBe(true);
+
+    // Nothing was left behind: the whole transaction rolled back, so the set
+    // and the stated movement still agree.
+    const [sesudah] = await d.bacaPenyisihan(p.id);
+    expect(jumlahUang(...sesudah.jurnal.map((j) => j.nilai))).toBe(
+      sesudah.beban_penyisihan_periode,
+    );
+  });
+
+  test("pergerakan yang dinyatakan ulang tanpa menyentuh tautannya juga gagal", async () => {
+    // ENFORCEMENT, FROM THE PARENT SIDE. The guard is on both tables, and this
+    // is why: restating the movement while leaving the links alone produces the
+    // same disagreement from the opposite direction, and a trigger on the child
+    // table alone would never fire.
+    //
+    // Both columns move together because `penyisihan_periode_beban_ck` already
+    // ties the movement to the requirement minus the opening balance; the point
+    // is to reach the LINK invariant, not to trip that one first.
+    const p = d.periode(2027, 6);
+    d.setelJam(p.tanggalAkhir);
+    await d.buatAkad({ hariTunggakan: 300, padaTanggal: p.tanggalAkhir });
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
+    const [baris] = await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+
+    let ditolak = false;
+    try {
+      await d.db.transaction(async (tx) => {
+        await tx.query(
+          `update penyisihan_periode
+              set penyisihan_dibutuhkan = penyisihan_dibutuhkan + 1,
+                  beban_penyisihan_periode = beban_penyisihan_periode + 1,
+                  updated_by = $2
+            where id = $1`,
+          [baris.id, d.userId.adminPusat],
+        );
+      });
+    } catch {
+      ditolak = true;
+    }
+    expect(ditolak).toBe(true);
+
+    const [sesudah] = await d.bacaPenyisihan(p.id);
+    expect(sesudah.beban_penyisihan_periode).toBe(baris.bebanPenyisihanPeriode);
+    expect(jumlahUang(...sesudah.jurnal.map((j) => j.nilai))).toBe(
+      sesudah.beban_penyisihan_periode,
+    );
   });
 
   test("menjalankan penyisihan dua kali tidak menggandakan jurnal maupun baris", async () => {

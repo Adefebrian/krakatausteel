@@ -26,7 +26,7 @@
 // operator's evidence that the guard held, and would silently drop the check if
 // a future migration ever relaxed the constraint.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { KODE_CLOSING, PRASYARAT_CLOSING, type KodePrasyarat } from "./contract";
+import { ClosingError, KODE_CLOSING, PRASYARAT_CLOSING, type KodePrasyarat } from "./contract";
 import {
   alasanTerbaca,
   buatDunia,
@@ -446,6 +446,74 @@ describe("spec 8.4: eksekusi", () => {
     expect(await d.bacaSaldoAkunPeriode(p.id)).toEqual(saldoPertama);
   });
 
+  test("dua closing bersamaan atas satu periode: satu berhasil, satu ditolak, satu audit SUKSES", async () => {
+    // THE ONE FAILURE MODE THAT IS BOTH UNLIKELY AND CATASTROPHIC.
+    //
+    // A month-end close is not going to be double-clicked often. When it is,
+    // the pre-fix behaviour was as bad as it gets, and worse than "an ugly
+    // error": the loser received
+    //
+    //   PostgresError: duplicate key value violates unique constraint
+    //   "saldo_akun_periode_uq"
+    //
+    // i.e. raw driver text, naming a constraint, straight out to the caller.
+    // That is precisely what `POLA_KEBOCORAN_DB` exists to catch and what every
+    // rejection in this module is required not to do.
+    //
+    // The deeper problem was that the protection was INCIDENTAL. That unique
+    // index guards the frozen-balance write, not the close itself, so it only
+    // fired on an interleaving where one transaction had already committed its
+    // balances. Interleave it the other way, with both transactions freezing
+    // before either commits, and there was no error at all: two SUKSES audit
+    // records for one period, and a trial balance frozen twice.
+    //
+    // The fix locks the period row FOR UPDATE in both close and reopen, and
+    // both writes carry a status predicate so the loser detects its own no-op
+    // rather than trusting that it must have worked. This test is what stops
+    // that being quietly undone; it fails against the pre-fix engine.
+    const p = await siapkan();
+    d.audit.reset();
+
+    // TWO ENGINES, not one called twice. `db.transaction` takes a pooled
+    // connection per call, so these genuinely contend inside Postgres instead
+    // of serialising in JavaScript.
+    const satu = d.buatEngine();
+    const dua = d.buatEngine();
+
+    const hasil = await Promise.allSettled([
+      satu.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      dua.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+    ]);
+
+    const berhasil = hasil.filter((h) => h.status === "fulfilled");
+    const gagal = hasil.filter((h) => h.status === "rejected");
+    expect(berhasil).toHaveLength(1);
+    expect(gagal).toHaveLength(1);
+
+    // A DOMAIN refusal, with a message an accountant can read. The assertion
+    // that carries the weight is the leak check inside `alasanTerbaca`: the
+    // whole defect was a constraint name reaching the caller.
+    const alasan = (gagal[0] as PromiseRejectedResult).reason;
+    expect(alasan).toBeInstanceOf(ClosingError);
+    expect((alasan as ClosingError).kode).toBe(KODE_CLOSING.PERIODE_SUDAH_CLOSED);
+    alasanTerbaca((alasan as ClosingError).message);
+
+    // EXACTLY ONE SUCCESS IN THE RECORD. This is the assertion that catches the
+    // silent interleaving, where nothing threw and the log claimed the period
+    // had been closed twice.
+    const sukses = d.audit.panggilan.filter(
+      (a) => a.hasil === "SUKSES" && a.entitas === "periode" && a.entitasId === p.id,
+    );
+    expect(sukses).toHaveLength(1);
+
+    // And the period was frozen once, not twice: one row per (cabang, akun).
+    expect((await d.bacaPeriode(p.id)).status).toBe("CLOSED");
+    const saldo = await d.bacaSaldoAkunPeriode(p.id);
+    expect(saldo.length).toBeGreaterThan(0);
+    const kunci = saldo.map((x) => `${x.cabang_id}/${x.akun_id}`);
+    expect(new Set(kunci).size).toBe(kunci.length);
+  });
+
   test("periode yang tidak ada ditolak dengan kode domain, bukan crash", async () => {
     await tolakDengan(
       () =>
@@ -570,6 +638,47 @@ describe("spec 8.4: reopen", () => {
         ),
       KODE_CLOSING.PERIODE_BELUM_CLOSED,
     );
+  });
+
+  test("dua reopen bersamaan atas satu periode: satu berhasil, satu ditolak, satu audit SUKSES", async () => {
+    // The other half of the same fix. Reopen takes the period row FOR UPDATE
+    // for the same reason close does, and it is the heavier of the two
+    // privileges: it reopens a period that has already been reported on, and
+    // it DELETES that period's frozen balances. Two winners would mean two
+    // audit records claiming authorship of one reopening, which is exactly the
+    // evidence spec 8.4 requires the log to be able to settle.
+    const [, , mar] = await tutupTiga();
+    d.audit.reset();
+
+    const satu = d.buatEngine();
+    const dua = d.buatEngine();
+    const alasan = "Permintaan KAP: reklasifikasi beban pembinaan (fixture)";
+
+    const hasil = await Promise.allSettled([
+      satu.bukaKembaliPeriode({ periodeId: mar.id, alasan }, d.ctx.adminPusat),
+      dua.bukaKembaliPeriode({ periodeId: mar.id, alasan }, d.ctx.adminPusat),
+    ]);
+
+    expect(hasil.filter((h) => h.status === "fulfilled")).toHaveLength(1);
+    const gagal = hasil.filter((h) => h.status === "rejected");
+    expect(gagal).toHaveLength(1);
+
+    const err = (gagal[0] as PromiseRejectedResult).reason;
+    expect(err).toBeInstanceOf(ClosingError);
+    // The loser sees the state the winner left, not a driver error about the
+    // frozen balances it tried to delete a second time.
+    expect((err as ClosingError).kode).toBe(KODE_CLOSING.PERIODE_BELUM_CLOSED);
+    alasanTerbaca((err as ClosingError).message);
+
+    const sukses = d.audit.panggilan.filter(
+      (a) => a.hasil === "SUKSES" && a.entitas === "periode" && a.entitasId === mar.id,
+    );
+    expect(sukses).toHaveLength(1);
+
+    const row = await d.bacaPeriode(mar.id);
+    expect(row.status).toBe("OPEN");
+    expect(row.alasan_reopen).toBe(alasan);
+    expect(await d.bacaSaldoAkunPeriode(mar.id)).toHaveLength(0);
   });
 
   test("setelah reopen, periode itu bisa menerima jurnal lagi lalu ditutup ulang", async () => {
