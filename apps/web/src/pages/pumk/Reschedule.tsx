@@ -44,10 +44,10 @@ import {
   BarisAksi,
   CatatanOtorisasi,
   FieldGrid,
+  HalamanModul,
   hariIni,
-  PumkPage,
   usePilihan,
-} from "./parts";
+} from "../shared/parts";
 
 const JENIS: Array<{ value: JenisReschedule; label: string; catatan: string }> = [
   {
@@ -136,7 +136,7 @@ export function Reschedule({ route }: { route: PageRoute }) {
 
   if (akadId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <AkadPicker
           title="Pilih akad yang akan dijadwalkan ulang"
           description="Reschedule hanya berlaku untuk akad yang masih berjalan."
@@ -149,14 +149,14 @@ export function Reschedule({ route }: { route: PageRoute }) {
           }}
         />
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   const hasil = pratinjauSegar ? pratinjau.hasil : null;
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={akad ? `Reschedule akad ${akad.noAkad}` : route.title}
       sub={akad ? `${akad.mitraNama} . ${akad.cabangNama}` : route.summary}
@@ -423,6 +423,6 @@ export function Reschedule({ route }: { route: PageRoute }) {
       </ConfirmDialog>
 
       <CatatanOtorisasi tambahan="Persetujuan reschedule dilakukan oleh pemegang hak persetujuan, bukan oleh pengaju." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

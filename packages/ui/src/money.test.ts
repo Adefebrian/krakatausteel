@@ -8,7 +8,9 @@ import {
   formatRate,
   formatRupiah,
   formatTotal,
+  bandingUang,
   jumlahkanUang,
+  kurangkanUang,
   parseRate,
   parseUang,
   uangKeInput,
@@ -200,5 +202,78 @@ describe("jumlahkanUang and formatTotal", () => {
   test("an empty list totals to a real zero, which still prints 0,00", () => {
     expect(jumlahkanUang([])).toBe("0.00");
     expect(formatTotal([])).toBe("0,00");
+  });
+});
+
+describe("bandingUang and kurangkanUang", () => {
+  test("compares in integer sen, so a boundary is a boundary", () => {
+    // The Non PUMK ceiling check. A termin landing exactly on the remaining
+    // pagu is allowed, one sen over it is refused, and these three lines are
+    // the whole difference between the two.
+    expect(bandingUang("10000000.00", "10000000.00")).toBe(0);
+    expect(bandingUang("10000000.01", "10000000.00")).toBe(1);
+    expect(bandingUang("9999999.99", "10000000.00")).toBe(-1);
+  });
+
+  test("keeps the sen a float would have thrown away", () => {
+    // Number("9007199254740993.01") loses the sen entirely. BigInt does not.
+    expect(bandingUang("9007199254740993.01", "9007199254740993.00")).toBe(1);
+    expect(bandingUang("0.10", "0.20")).toBe(-1);
+  });
+
+  test("an unreadable side answers null, and null is not equal", () => {
+    // A caller that read null as "the same" would open a submit button over a
+    // figure nobody checked. That is why it is null and not 0, and why no
+    // caller may write `?? 0`: at a ceiling check that reads as "within the
+    // limit" and posts a termin that should have been refused.
+    expect(bandingUang("tidak sah", "10.00")).toBeNull();
+    expect(bandingUang("10.00", "rusak")).toBeNull();
+    expect(bandingUang(null, "10.00")).toBeNull();
+    expect(bandingUang(Number.NaN, "10.00")).toBeNull();
+  });
+
+  test("subtracts exactly, and does not round for display", () => {
+    expect(kurangkanUang("10000000.00", "9999999.99")).toBe("0.01");
+    expect(kurangkanUang("0.30", "0.10")).toBe("0.20");
+    expect(kurangkanUang("1000000000000000.00", "0.01")).toBe("999999999999999.99");
+  });
+
+  test("a negative difference is returned as one, not clamped to zero", () => {
+    // The approval screen has to be able to say BY HOW MUCH a figure is over.
+    expect(kurangkanUang("15000000.00", "25000000.00")).toBe("-10000000.00");
+    expect(formatMoney(kurangkanUang("15000000.00", "25000000.00"))).toBe("-10.000.000,00");
+  });
+
+  test("an unreadable side answers null rather than a plausible number", () => {
+    expect(kurangkanUang("10.00", "tidak sah")).toBeNull();
+    expect(kurangkanUang(undefined, "10.00")).toBeNull();
+  });
+
+  test("a genuine zero difference is a real zero and still prints 0,00", () => {
+    expect(kurangkanUang("10.00", "10.00")).toBe("0.00");
+    expect(formatMoney(kurangkanUang("10.00", "10.00"))).toBe("0,00");
+  });
+});
+
+describe("null is never a zero, at either helper", () => {
+  test("no reading of a null answer coincides with a safe one", () => {
+    // Pinned because "simplify this to a default" is the tempting change. All
+    // three plausible defaults are wrong in a different direction, so there is
+    // no safe one and the caller has to branch.
+    const jawaban = bandingUang("rusak", "10.00");
+    expect(jawaban).toBeNull();
+    expect(jawaban).not.toBe(0); // "sama dengan plafon", membuka tombol
+    expect(jawaban).not.toBe(-1); // "di bawah plafon", juga membuka tombol
+    expect(jawaban).not.toBe(1); // "di atas plafon", menutup nilai yang mungkin sah
+  });
+
+  test("an uncomputable remainder is not a remainder of nothing", () => {
+    // "0,00" here would tell someone filing an LPJ that no money has to come
+    // back. That is a statement about money, made from a figure nobody read.
+    const sisa = kurangkanUang("40000000.00", "rusak");
+    expect(sisa).toBeNull();
+    expect(sisa).not.toBe("0.00");
+    // And the screens print the absence, not a figure.
+    expect(sisa === null ? "Belum dapat dihitung" : formatMoney(sisa)).toBe("Belum dapat dihitung");
   });
 });

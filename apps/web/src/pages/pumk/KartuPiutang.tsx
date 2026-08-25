@@ -35,7 +35,13 @@ import { Link, useRouter } from "../../router";
 import { useActiveSession } from "../../session";
 import { AkadPicker } from "./AkadPicker";
 import { JadwalTabel } from "./JadwalTabel";
-import { CatatanOtorisasi, Kolektibilitas, Muat, PumkPage, RingkasDokumen } from "./parts";
+import {
+  CatatanOtorisasi,
+  HalamanModul,
+  Kolektibilitas,
+  Muat,
+  RingkasDokumen,
+} from "../shared/parts";
 
 type Setoran = KartuPiutangData["setoran"][number];
 type Kelebihan = KartuPiutangData["kelebihan"][number];
@@ -87,7 +93,7 @@ const KOLEKTIBILITAS_COLUMNS: readonly Column<RiwayatKol>[] = [
 export function KartuPiutangPicker({ route }: { route: PageRoute }) {
   const { navigate } = useRouter();
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title="Kartu Piutang Mitra Binaan"
       sub="Cari akad untuk membuka kartu piutangnya: data mitra, jadwal, seluruh setoran, riwayat kolektibilitas, dan outstanding terkini pada satu halaman."
@@ -100,7 +106,7 @@ export function KartuPiutangPicker({ route }: { route: PageRoute }) {
         onPilih={(baris: BarisAkad) => navigate(`/pumk/kartu-piutang/${baris.id}`)}
       />
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }
 
@@ -110,7 +116,7 @@ export function KartuPiutangPage({ route, akadId }: { route: PageRoute; akadId: 
   const kartu = useApi(() => kartuPiutang(akadId), [akadId]);
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={
         kartu.data ? `Kartu Piutang ${kartu.data.mitra.namaLengkap}` : "Kartu Piutang Mitra Binaan"
@@ -443,6 +449,6 @@ export function KartuPiutangPage({ route, akadId }: { route: PageRoute; akadId: 
         }}
       </Muat>
       <CatatanOtorisasi tambahan="Kartu piutang cabang lain tidak dapat dibuka meskipun alamatnya diketik langsung." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

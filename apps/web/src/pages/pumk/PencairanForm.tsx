@@ -32,11 +32,11 @@ import {
   CatatanPencatatan,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   KembaliKeAntrean,
-  PumkPage,
   usePilihan,
-} from "./parts";
+} from "../shared/parts";
 
 export function PencairanForm({ route }: { route: PageRoute }) {
   const { navigate } = useRouter();
@@ -86,7 +86,7 @@ export function PencairanForm({ route }: { route: PageRoute }) {
 
   if (akadId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <AkadPicker
           title="Pilih akad yang akan dicairkan"
           description="Hanya akad yang jadwal angsurannya sudah siap yang dapat dicairkan."
@@ -99,12 +99,12 @@ export function PencairanForm({ route }: { route: PageRoute }) {
         />
         <CatatanPencatatan />
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={akad ? `Pencairan akad ${akad.noAkad}` : route.title}
       sub={akad ? `${akad.mitraNama} . ${akad.cabangNama}` : route.summary}
@@ -270,6 +270,6 @@ export function PencairanForm({ route }: { route: PageRoute }) {
       </ConfirmDialog>
       <CatatanPencatatan />
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }

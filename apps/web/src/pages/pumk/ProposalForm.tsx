@@ -32,6 +32,7 @@ import {
   formatCount,
   formatMoney,
   formatRupiah,
+  bandingUang,
 } from "@krakatausteel/ui";
 import {
   batasanPumk,
@@ -45,27 +46,25 @@ import type { PageRoute } from "../../nav";
 import { useRouter } from "../../router";
 import { useActiveSession } from "../../session";
 import {
-  BarisAksi,
   Bagian,
+  BarisAksi,
   CatatanOtorisasi,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   Muat,
-  PumkPage,
-} from "./parts";
+} from "../shared/parts";
 
-/** Compare two `Uang` strings without going through a float. */
-function bandingUang(kiri: string, kanan: string): number {
-  const sen = (value: string): bigint => {
-    const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
-    if (!match) return 0n;
-    const sign = match[1] === "-" ? -1n : 1n;
-    return sign * (BigInt(match[2] ?? "0") * 100n + BigInt((match[3] ?? "").padEnd(2, "0") || "0"));
-  };
-  const a = sen(kiri);
-  const b = sen(kanan);
-  return a === b ? 0 : a < b ? -1 : 1;
+/**
+ * `bandingUang` answers null when a side cannot be read, and here that answer
+ * means the check did not run. Treating it as "within the limit" would open
+ * the submit button over a bound nobody verified, so it becomes a problem of
+ * its own instead.
+ */
+function melewati(kiri: string, kanan: string, arah: -1 | 1): boolean | null {
+  const hasil = bandingUang(kiri, kanan);
+  return hasil === null ? null : arah === 1 ? hasil > 0 : hasil < 0;
 }
 
 export function ProposalForm({ route }: { route: PageRoute }) {
@@ -99,10 +98,17 @@ export function ProposalForm({ route }: { route: PageRoute }) {
         `${mitra.namaLengkap} masih memiliki ${formatCount(mitra.jumlahPinjamanAktif)} pinjaman aktif, sedangkan batas maksimal adalah ${formatCount(batasan.maksPinjamanAktifPerMitra)} per Mitra Binaan. Selesaikan akad berjalan terlebih dahulu.`,
       );
     }
-    if (jumlah && bandingUang(jumlah, batasan.plafonMin) < 0) {
+    const dibawahMin = jumlah ? melewati(jumlah, batasan.plafonMin, -1) : false;
+    const diatasMax = jumlah ? melewati(jumlah, batasan.plafonMax, 1) : false;
+    if (dibawahMin === null || diatasMax === null) {
+      masalah.push(
+        "Plafon minimum atau maksimum tidak terbaca sebagai angka rupiah, jadi nilai yang diajukan tidak dapat diperiksa terhadap batas program.",
+      );
+    }
+    if (dibawahMin === true) {
       masalah.push(`Nilai yang diajukan di bawah plafon minimum ${formatRupiah(batasan.plafonMin)}.`);
     }
-    if (jumlah && bandingUang(jumlah, batasan.plafonMax) > 0) {
+    if (diatasMax === true) {
       masalah.push(`Nilai yang diajukan melewati plafon maksimum ${formatRupiah(batasan.plafonMax)}.`);
     }
     if (tenor && (tenorAngka < batasan.tenorMin || tenorAngka > batasan.tenorMax)) {
@@ -110,7 +116,7 @@ export function ProposalForm({ route }: { route: PageRoute }) {
         `Tenor harus antara ${formatCount(batasan.tenorMin)} dan ${formatCount(batasan.tenorMax)} bulan.`,
       );
     }
-    if (jumlah && bandingUang(jumlah, batasan.wajibJaminanDiAtasPlafon) > 0) {
+    if (jumlah && melewati(jumlah, batasan.wajibJaminanDiAtasPlafon, 1) === true) {
       masalah.push(
         `Nilai di atas ${formatRupiah(batasan.wajibJaminanDiAtasPlafon)} wajib disertai jaminan. Isi Profil Jaminan setelah proposal tersimpan sebagai draft.`,
       );
@@ -118,7 +124,7 @@ export function ProposalForm({ route }: { route: PageRoute }) {
   }
 
   const wajibJaminan =
-    batasan && jumlah ? bandingUang(jumlah, batasan.wajibJaminanDiAtasPlafon) > 0 : false;
+    batasan && jumlah ? melewati(jumlah, batasan.wajibJaminanDiAtasPlafon, 1) === true : false;
   const pemblokir = masalah.filter((pesan) => !pesan.startsWith("Nilai di atas"));
 
   const lengkap =
@@ -141,7 +147,7 @@ export function ProposalForm({ route }: { route: PageRoute }) {
   }
 
   return (
-    <PumkPage route={route} back={{ to: "/pumk/proposal", label: "Daftar Proposal" }}>
+    <HalamanModul route={route} back={{ to: "/pumk/proposal", label: "Daftar Proposal" }}>
       <FormLayout
         form={
           <form className="form-main" onSubmit={submit}>
@@ -452,6 +458,6 @@ export function ProposalForm({ route }: { route: PageRoute }) {
         }
       />
       <CatatanOtorisasi tambahan="Batas pinjaman aktif per mitra juga ditegakkan ulang oleh engine dan oleh basis data." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

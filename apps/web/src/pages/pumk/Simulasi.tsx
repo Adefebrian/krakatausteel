@@ -25,7 +25,7 @@ import { batasanPumk, simulasiJadwal, type MetodePerhitungan } from "../../api/p
 import { useAction, useApi } from "../../api/useApi";
 import type { PageRoute } from "../../nav";
 import { JadwalTabel, ParameterPanel, RingkasanJadwalPanel } from "./JadwalTabel";
-import { Bagian, BarisAksi, FieldGrid, FormLayout, hariIni, PumkPage } from "./parts";
+import { Bagian, BarisAksi, FieldGrid, FormLayout, HalamanModul, hariIni } from "../shared/parts";
 
 const METODE: Array<{ value: MetodePerhitungan; label: string }> = [
   { value: "FLAT", label: "Flat" },
@@ -64,7 +64,7 @@ export function Simulasi({ route }: { route: PageRoute }) {
   const hasil = hitung.hasil;
 
   return (
-    <PumkPage route={route}>
+    <HalamanModul route={route}>
       <FormLayout
         form={
           <form className="form-main" onSubmit={jalankan}>
@@ -263,6 +263,6 @@ export function Simulasi({ route }: { route: PageRoute }) {
           </Panel>
         </>
       ) : null}
-    </PumkPage>
+    </HalamanModul>
   );
 }

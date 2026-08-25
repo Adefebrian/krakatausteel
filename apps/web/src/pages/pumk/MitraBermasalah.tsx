@@ -46,16 +46,16 @@ import {
   Bagian,
   BarisAksi,
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
   FieldGrid,
+  HalamanModul,
   hariIni,
   Kolektibilitas,
   Muat,
-  PumkPage,
   RingkasDokumen,
   usePilihan,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 const JENIS: Array<{ value: JenisTindakLanjut; label: string }> = [
   { value: "KUNJUNGAN", label: "Kunjungan" },
@@ -138,7 +138,7 @@ export function MitraBermasalah({ route }: { route: PageRoute }) {
   if (akadId === null) {
     const rows = daftar.data?.data ?? [];
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <Tabs
           label="Klasifikasi kolektibilitas"
           active={kelas}
@@ -195,14 +195,14 @@ export function MitraBermasalah({ route }: { route: PageRoute }) {
           </Muat>
         </TabPanel>
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   const akad = (daftar.data?.data ?? []).find((row) => row.id === akadId) ?? null;
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={akad ? `Tindak lanjut akad ${akad.noAkad}` : "Tindak lanjut penagihan"}
       sub={
@@ -361,6 +361,6 @@ export function MitraBermasalah({ route }: { route: PageRoute }) {
       </form>
 
       <CatatanOtorisasi tambahan="Pencatatan tindak lanjut memerlukan hak akses penagihan." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

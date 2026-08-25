@@ -46,15 +46,15 @@ import {
   Bagian,
   BarisAksi,
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
   FieldGrid,
+  HalamanModul,
   hariIni,
   Kolektibilitas,
   Muat,
-  PumkPage,
   RingkasDokumen,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 const CLUSTER_COLUMNS: readonly ColumnSpec<BarisCluster>[] = [
   { key: "kode", header: "Kode", sortable: true, width: "120px" },
@@ -94,7 +94,7 @@ export function ClusterList({ route }: { route: PageRoute }) {
   );
 
   return (
-    <PumkPage route={route}>
+    <HalamanModul route={route}>
       <Panel
         as="h2"
         title="Daftar cluster"
@@ -144,7 +144,7 @@ export function ClusterList({ route }: { route: PageRoute }) {
         </Muat>
       </Panel>
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }
 
@@ -197,7 +197,7 @@ export function ClusterDetail({ route, clusterId }: { route: PageRoute; clusterI
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={cluster.data ? `Cluster ${cluster.data.nama}` : route.title}
       sub={cluster.data ? `${cluster.data.kode} . ${cluster.data.cabangNama}` : route.summary}
@@ -418,6 +418,6 @@ export function ClusterDetail({ route, clusterId }: { route: PageRoute; clusterI
       </ConfirmDialog>
 
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }

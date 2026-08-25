@@ -77,6 +77,25 @@ export async function typeInto(input: HTMLInputElement, value: string): Promise<
   });
 }
 
+/**
+ * Choose an option the way a user would. Same reason `typeInto` goes through
+ * the native setter: React tracks the value itself, and a bare
+ * `dispatchEvent` outside `act` leaves the resulting render for the scheduler,
+ * which is exactly the "not wrapped in act" warning and, worse, a assertion
+ * that reads the DOM before the update lands.
+ */
+export async function selectOption(select: HTMLSelectElement, value: string): Promise<void> {
+  await act(async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      globalThis.HTMLSelectElement.prototype,
+      "value",
+    );
+    descriptor?.set?.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await flushAll();
+}
+
 export async function submitForm(form: HTMLFormElement): Promise<void> {
   await act(async () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));

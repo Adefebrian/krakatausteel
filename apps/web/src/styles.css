@@ -754,9 +754,9 @@ h3 {
    measure that keeps a placeholder page readable would leave a card row and a
    panel ending at different right edges. Scoped, not removed: the placeholder
    pages still want it. */
-.pumk-page > .panel,
-.pumk-page > form > .panel,
-.pumk-page > .errorstate {
+.modul-page > .panel,
+.modul-page > form > .panel,
+.modul-page > .errorstate {
   max-width: none;
 }
 
@@ -1441,7 +1441,17 @@ h3 {
 }
 
 /* A list cell that carries a name over an identifier stays exactly two lines,
-   so every row in the table is the same height however long the name is. */
+   so every row in the table is the same height however long the name is.
+
+   The px cap is load bearing, not decoration: without it an auto layout table
+   sizes this column to the widest untruncated name, and the two columns on the
+   far right of a nine column list end up off screen behind a sideways scroll
+   nobody uses. Measured at 1280: the cap is what brings the table back inside
+   its shell. The ellipsis then has something to clip against. */
+.sel-utama {
+  max-width: 180px;
+}
+
 .sel-utama-judul,
 .sel-utama-sub {
   display: block;
@@ -1449,6 +1459,190 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ============================================================== Non PUMK */
+
+/* A cell whose content varies in length and must not reshape the row. One
+   line, clipped, so a program mapped to five SDG is exactly as tall as one
+   mapped to a single goal. */
+.sel-ringkas {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A figure that legitimately has no value yet. Not a zero, and visibly not a
+   figure, so "belum disetujui" can never be mistaken for an approval at nil. */
+.sel-kosong {
+  color: var(--color-text-muted);
+}
+
+.sel-angka {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+}
+
+/* The SDG mapping, read only. Three parts per row on one baseline. */
+.sdg-list,
+.sdg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sdg-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--space-6);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.sdg-nomor {
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.sdg-nama {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sdg-bobot {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* The editable version. Same shape as the read only row, plus a weight field
+   and a remove control, both at the 44px touch floor. */
+.sdg-edit-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.sdg-edit-teks {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sdg-edit-bobot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sdg-edit-bobot .control {
+  width: 96px;
+  text-align: right;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+}
+
+.sdg-edit-label {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* The derived score and the pass mark it is read against, kept together. */
+.skor-ringkas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/* A card in a list that is a record rather than a destination. Same shape as
+   .kartu-btn so a read only list and a clickable one line up. */
+.kartu-btn.is-statis {
+  cursor: default;
+}
+
+/* ========================================================== parameter sistem */
+
+.param-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.param-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.param-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.param-kunci {
+  font-weight: var(--weight-medium);
+}
+
+.param-tanda {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.param-nilai {
+  margin: 0;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-subhead);
+  line-height: var(--leading-subhead);
+  overflow-wrap: anywhere;
+}
+
+.param-meta,
+.param-catatan {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.param-catatan {
+  padding-top: var(--space-2);
+  border-top: var(--border-weight) solid var(--color-border);
 }
 
 /* ========================================================== breakpoints */
@@ -1572,6 +1766,28 @@ h3 {
   }
   .page-actions .btn {
     width: 100%;
+  }
+  .sdg-item,
+  .sdg-edit-item {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+  .sdg-edit-bobot {
+    justify-content: space-between;
+  }
+  .sdg-edit-bobot .control {
+    width: 120px;
+  }
+  .sdg-edit-item .btn {
+    width: 100%;
+  }
+  .param-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .param-tanda {
+    justify-content: flex-start;
   }
   .ringkas {
     flex-direction: column;

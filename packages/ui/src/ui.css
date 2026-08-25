@@ -503,6 +503,23 @@
 }
 
 @media (max-width: 640px) {
+  /* The small button is a DESK size. On a phone every control is a finger
+     target, so `btn-sm` grows to the 44px floor rather than staying at the 40px
+     that suits a dense toolbar on a monitor. Measured at 320, 375 and 414: the
+     "kembali ke antrean" control on the disbursement and LPJ screens was the
+     one that came up short. */
+  .btn-sm {
+    min-height: var(--touch-target);
+  }
+
+  /* A card title and its aside share a row on a desk and stack on a phone.
+     Side by side at 375 the aside squeezes the title into a ragged two lines
+     while sitting on one, which reads as two competing headings. */
+  .panel-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
   .filterbar {
     flex-direction: column;
     align-items: stretch;
@@ -1053,8 +1070,12 @@
   border-bottom: var(--border-weight) solid var(--color-border);
 }
 
+/* The tab strip scrolls sideways on a phone; the note beside it wraps instead
+   of pushing past the panel edge, which is what a fixed width aside did. */
 .tabs-list {
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   gap: var(--space-1);
   overflow-x: auto;
   scrollbar-width: none;
@@ -1123,7 +1144,10 @@
 
 .tabs-aside {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
   padding-bottom: var(--space-2);
 }
@@ -1272,17 +1296,27 @@
   min-width: 0;
 }
 
+/* The badge is optional and never overlaps the label: the label is allowed to
+   shrink and wrap, and the badge keeps its own width. Observed on the
+   Parameter Sistem cards, where a long provenance badge slid over the word it
+   was sitting next to. */
 .stat-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .stat-label {
+  min-width: 0;
   font-size: var(--text-caption);
   line-height: var(--leading-caption);
   color: var(--color-text-muted);
+}
+
+.stat-aside {
+  flex: 0 0 auto;
 }
 
 .stat-value {

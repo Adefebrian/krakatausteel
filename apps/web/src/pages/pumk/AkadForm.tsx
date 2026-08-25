@@ -44,16 +44,16 @@ import {
   BarisAksi,
   CatatanOtorisasi,
   CatatanPencatatan,
+  type ColumnSpec,
   DaftarDokumen,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   KembaliKeAntrean,
   Muat,
-  PumkPage,
   usePilihan,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 const METODE: Array<{ value: MetodePerhitungan; label: string }> = [
   { value: "FLAT", label: "Flat" },
@@ -136,7 +136,7 @@ export function AkadForm({ route }: { route: PageRoute }) {
 
   if (proposalId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <Muat
           hasil={antrean}
           judul="antrean akad"
@@ -177,12 +177,12 @@ export function AkadForm({ route }: { route: PageRoute }) {
           }
         </Muat>
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       back={{ to: "/pumk/akad", label: "Antrean akad" }}
     >
@@ -389,6 +389,6 @@ export function AkadForm({ route }: { route: PageRoute }) {
       </Muat>
       <CatatanPencatatan />
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }

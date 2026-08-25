@@ -28,12 +28,12 @@ import { useRouter } from "../../router";
 import { useActiveSession } from "../../session";
 import {
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
+  HalamanModul,
   Muat,
   Penyaring,
-  PumkPage,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 const STATUS_OPTIONS = [
   { value: "", label: "Semua status" },
@@ -131,7 +131,7 @@ export function ProposalList({ route }: { route: PageRoute }) {
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       actions={
         hasPermission(session.permissions, "pumk.create") ? (
@@ -274,6 +274,6 @@ export function ProposalList({ route }: { route: PageRoute }) {
       </Panel>
 
       <CatatanOtorisasi tambahan="Daftar ini hanya memuat cabang yang boleh Anda lihat." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

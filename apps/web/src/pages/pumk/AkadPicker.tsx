@@ -15,7 +15,13 @@ import {
 import { daftarAkad, type BarisAkad } from "../../api/pumk";
 import { useApi } from "../../api/useApi";
 import { useActiveSession } from "../../session";
-import { AntreanKosong, DaftarDokumen, Kolektibilitas, Muat, type ColumnSpec } from "./parts";
+import {
+  AntreanKosong,
+  type ColumnSpec,
+  DaftarDokumen,
+  Kolektibilitas,
+  Muat,
+} from "../shared/parts";
 
 const COLUMNS: readonly ColumnSpec<BarisAkad>[] = [
   { key: "noAkad", header: "No Akad", sortable: true, width: "150px" },

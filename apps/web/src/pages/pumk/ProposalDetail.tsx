@@ -33,7 +33,7 @@ import type { PageRoute } from "../../nav";
 import { hasPermission, namaRole } from "../../permissions";
 import { useRouter } from "../../router";
 import { useActiveSession } from "../../session";
-import { CatatanOtorisasi, Muat, PumkPage, RingkasDokumen } from "./parts";
+import { CatatanOtorisasi, HalamanModul, Muat, RingkasDokumen } from "../shared/parts";
 
 const AKSI_LABEL: Record<string, string> = {
   SUBMIT_SURVEY: "Diajukan untuk survey",
@@ -91,7 +91,7 @@ export function ProposalDetail({ route, proposalId }: { route: PageRoute; propos
   const entries = useMemo(() => keTimeline(detail.data?.timeline ?? []), [detail.data]);
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={detail.data ? `Proposal ${detail.data.proposal.noProposal}` : route.title}
       sub={
@@ -422,6 +422,6 @@ export function ProposalDetail({ route, proposalId }: { route: PageRoute; propos
         }}
       </Muat>
       <CatatanOtorisasi tambahan="Pemisahan Maker, Checker, dan Approver ditegakkan di server dan oleh trigger basis data." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

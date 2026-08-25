@@ -42,11 +42,11 @@ import {
   CatatanPencatatan,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   KembaliKeAntrean,
-  PumkPage,
   usePilihan,
-} from "./parts";
+} from "../shared/parts";
 
 type Rincian = HasilAlokasi["rincian"][number];
 
@@ -100,7 +100,7 @@ export function AngsuranForm({ route }: { route: PageRoute }) {
 
   if (akadId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <AkadPicker
           title="Pilih akad penerima setoran"
           description="Setoran selalu dicatat pada satu akad. Setoran tanpa identitas pemilik dicatat sebagai Angsuran Belum Teridentifikasi melalui jurnal, bukan di halaman ini."
@@ -114,14 +114,14 @@ export function AngsuranForm({ route }: { route: PageRoute }) {
         />
         <CatatanPencatatan />
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   const hasil = kirim.hasil;
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={akad ? `Penerimaan angsuran ${akad.noAkad}` : route.title}
       sub={akad ? `${akad.mitraNama} . ${akad.cabangNama}` : route.summary}
@@ -331,6 +331,6 @@ export function AngsuranForm({ route }: { route: PageRoute }) {
       </ConfirmDialog>
       <CatatanPencatatan />
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }

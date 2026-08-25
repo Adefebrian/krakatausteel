@@ -44,16 +44,16 @@ import {
   Bagian,
   BarisAksi,
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   KembaliKeAntrean,
   Muat,
-  PumkPage,
   usePilihan,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 /** Spec 4.4 `hasil_json`: the five aspects, verbatim. */
 const ASPEK = [
@@ -151,7 +151,7 @@ export function SurveyForm({ route }: { route: PageRoute }) {
 
   if (proposalId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <Muat
           hasil={antrean}
           judul="antrean survey"
@@ -192,12 +192,12 @@ export function SurveyForm({ route }: { route: PageRoute }) {
           }
         </Muat>
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title="Input Hasil Survey"
       back={{ to: "/pumk/survey", label: "Antrean survey" }}
@@ -406,6 +406,6 @@ export function SurveyForm({ route }: { route: PageRoute }) {
         )}
       </Muat>
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }

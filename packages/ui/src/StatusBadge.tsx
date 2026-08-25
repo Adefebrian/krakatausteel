@@ -70,6 +70,23 @@ export const STATUS_PERIODE: Record<string, { label: string; tone: BadgeTone }> 
   CLOSED: { label: "Tertutup", tone: "neutral" },
 };
 
+/**
+ * Where a shipped configuration default came from, spec 9.4's Parameter
+ * Sistem. NOT a state and NOT a warning: it is a fact about the number's
+ * provenance that stays true whatever the current value is.
+ *
+ * ASUMSI is the one that matters. It means nothing in the specification or in
+ * the client's decisions proposes this figure and we invented it, which an
+ * accountant reading a maximum grant value has no other way to find out. It is
+ * toned as a quiet note rather than an alarm, because an assumption is not an
+ * error: it is a number still waiting for the client's written confirmation.
+ */
+export const ASAL_NILAI: Record<string, { label: string; tone: BadgeTone }> = {
+  SPEC: { label: "Dari spesifikasi", tone: "neutral" },
+  KEPUTUSAN: { label: "Keputusan tercatat", tone: "info" },
+  ASUMSI: { label: "Asumsi kami", tone: "warning" },
+};
+
 /** RKA states, spec 4.8. */
 export const STATUS_RKA: Record<string, { label: string; tone: BadgeTone }> = {
   DRAFT: { label: "Draft", tone: "neutral" },
@@ -79,6 +96,7 @@ export const STATUS_RKA: Record<string, { label: string; tone: BadgeTone }> = {
 
 const REGISTRY = [
   KOLEKTIBILITAS,
+  ASAL_NILAI,
   STATUS_PROPOSAL_PUMK,
   STATUS_PROPOSAL_NON_PUMK,
   STATUS_JURNAL,

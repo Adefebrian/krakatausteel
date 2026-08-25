@@ -1,11 +1,17 @@
-// Pieces shared by every Pendanaan UMK screen, so seventeen pages cannot
-// drift into seventeen slightly different headers, loading states and failure
-// panels.
+// Pieces shared by every operational screen in the product, so the seventeen
+// Pendanaan UMK pages and the ten Non PUMK pages cannot drift into twenty
+// seven slightly different headers, loading states and failure panels.
 //
-// The one that matters is `Muat`. Every read on every PUMK page goes through
-// it, which is why a screen in this module cannot accidentally render an empty
-// table when the request actually failed: there are four states, they are
-// exhaustive, and the failure state is a panel that names the endpoint.
+// It started life as pumk/parts.tsx. It moved here unchanged when Non PUMK
+// landed, because a second copy is how two modules stop looking like one
+// product, and importing `PumkPage` inside a grant screen would have been a
+// lie about what the frame is for. `PumkPage` is now `HalamanModul`; nothing
+// else about it changed.
+//
+// The one that matters is `Muat`. Every read on every page goes through it,
+// which is why a screen cannot accidentally render an empty table when the
+// request actually failed: there are four states, they are exhaustive, and the
+// failure state is a panel that names the endpoint.
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Button,
@@ -26,7 +32,7 @@ import { Link, useRouter } from "../../router";
 export type ColumnSpec<Row> = Column<Row>;
 
 /** The page frame: crumb, title, one paragraph, and an optional action row. */
-export function PumkPage({
+export function HalamanModul({
   route,
   title,
   sub,
@@ -44,7 +50,7 @@ export function PumkPage({
 }) {
   const group = route ? groupOfPath(route.path) : undefined;
   return (
-    <div className="page pumk-page">
+    <div className="page modul-page">
       <header className="page-head">
         {back ? (
           <Link className="page-back" to={back.to}>
@@ -111,7 +117,7 @@ export function Muat<T>({
   return <>{children(hasil.data)}</>;
 }
 
-/** The note every PUMK page carries: the UI is not the control. */
+/** The note every operational page carries: the UI is not the control. */
 export function CatatanOtorisasi({ tambahan }: { tambahan?: string }) {
   return (
     <p className="page-note">

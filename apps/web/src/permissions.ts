@@ -31,6 +31,12 @@ export const PERMISSIONS = [
   "nonpumk.approve",
   "nonpumk.penyaluran",
   "nonpumk.lpj",
+  // Verifying (accepting or rejecting) an LPJ. Deliberately its own code: the
+  // Maker files the LPJ under `nonpumk.lpj`, and accepting one releases the
+  // returned money into a journal, which is a different act by a different
+  // person. Held by the CHECKER on the server, and inherited from there by
+  // Admin Cabang and Admin Pusat.
+  "nonpumk.lpj.verifikasi",
 
   "jurnal.view",
   "jurnal.create",
@@ -111,6 +117,10 @@ const CHECKER: Permission[] = [
   ...READ_ONLY.filter((permission) => permission !== "audit.view"),
   "pumk.review",
   "nonpumk.review",
+  // Verifying an LPJ is a decision ON SOMEONE ELSE'S FILING, so it sits with
+  // the Checker for the same reason `jurnal.verify` does. Mirrors the server's
+  // own grant in modules/auth/permissions.ts.
+  "nonpumk.lpj.verifikasi",
   "jurnal.verify",
   "tools.rekonsiliasi",
 ];

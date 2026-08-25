@@ -46,6 +46,7 @@ export { MoneyInput } from "./MoneyInput";
 export type { MoneyInputProps } from "./MoneyInput";
 
 export {
+  bandingUang,
   formatCount,
   formatDate,
   formatMoney,
@@ -55,6 +56,7 @@ export {
   formatRupiah,
   formatTotal,
   jumlahkanUang,
+  kurangkanUang,
   NAMA_BULAN,
   parseRate,
   parseUang,
@@ -67,6 +69,7 @@ export { Panel } from "./Panel";
 export type { PanelProps } from "./Panel";
 
 export {
+  ASAL_NILAI,
   KOLEKTIBILITAS,
   resolveStatus,
   StatusBadge,

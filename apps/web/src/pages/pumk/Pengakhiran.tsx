@@ -49,10 +49,10 @@ import {
   CatatanOtorisasi,
   CatatanPencatatan,
   FieldGrid,
+  HalamanModul,
   hariIni,
-  PumkPage,
   usePilihan,
-} from "./parts";
+} from "../shared/parts";
 
 type Jenis = PengakhiranHasil["jenis"];
 
@@ -125,7 +125,7 @@ export function Pengakhiran({ route }: { route: PageRoute }) {
 
   if (akadId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <AkadPicker
           title="Pilih akad yang akan diakhiri"
           description="Pengakhiran berlaku untuk akad yang sudah lunas maupun untuk piutang macet yang akan dihapusbukukan."
@@ -138,12 +138,12 @@ export function Pengakhiran({ route }: { route: PageRoute }) {
         />
         <CatatanPencatatan />
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={akad ? `Pengakhiran akad ${akad.noAkad}` : route.title}
       sub={akad ? `${akad.mitraNama} . ${akad.cabangNama}` : route.summary}
@@ -414,6 +414,6 @@ export function Pengakhiran({ route }: { route: PageRoute }) {
 
       <CatatanPencatatan />
       <CatatanOtorisasi tambahan="Satu akad hanya dapat memiliki satu pengakhiran, dan hapus buku memerlukan hak akses tersendiri." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

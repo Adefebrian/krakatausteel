@@ -7,7 +7,17 @@ import { Dashboard } from "./pages/Dashboard";
 import { Forbidden, NotFound, SessionLoading, SessionUnreachable } from "./pages/Fallbacks";
 import { Login } from "./pages/Login";
 import { Placeholder } from "./pages/Placeholder";
+import { Parameter } from "./pages/konfigurasi/Parameter";
 import { ReportCatalog } from "./pages/ReportCatalog";
+import { Lpj } from "./pages/nonpumk/Lpj";
+import { MonitoringLpj } from "./pages/nonpumk/MonitoringLpj";
+import { Penilaian } from "./pages/nonpumk/Penilaian";
+import { Penyaluran } from "./pages/nonpumk/Penyaluran";
+import { Persetujuan as PersetujuanNonPumk } from "./pages/nonpumk/Persetujuan";
+import { ProposalDetail as ProposalDetailNonPumk } from "./pages/nonpumk/ProposalDetail";
+import { ProposalForm as ProposalFormNonPumk } from "./pages/nonpumk/ProposalForm";
+import { ProposalList as ProposalListNonPumk } from "./pages/nonpumk/ProposalList";
+import { ReviewChecker as ReviewCheckerNonPumk } from "./pages/nonpumk/ReviewChecker";
 import { AkadForm } from "./pages/pumk/AkadForm";
 import { AngsuranForm } from "./pages/pumk/AngsuranForm";
 import { ClusterDetail, ClusterList } from "./pages/pumk/Cluster";
@@ -58,7 +68,7 @@ function Root() {
 }
 
 /**
- * The pages Fase 3 built, keyed by the route path in ./nav.ts. A path missing
+ * The pages that exist, keyed by the route path in ./nav.ts. A path missing
  * from this table falls through to the Placeholder, which is what keeps the
  * "not built yet" pages honest instead of rendering a blank area.
  *
@@ -95,6 +105,20 @@ const HALAMAN: Record<
   "/pumk/reschedule": (route) => <Reschedule route={route} />,
   "/pumk/pengakhiran": (route) => <Pengakhiran route={route} />,
   "/pumk/mitra-bermasalah": (route) => <MitraBermasalah route={route} />,
+
+  "/nonpumk/proposal": (route) => <ProposalListNonPumk route={route} />,
+  "/nonpumk/proposal/baru": (route) => <ProposalFormNonPumk route={route} />,
+  "/nonpumk/proposal/:proposalId": (route, params) => (
+    <ProposalDetailNonPumk route={route} proposalId={params.proposalId ?? ""} />
+  ),
+  "/nonpumk/penilaian": (route) => <Penilaian route={route} />,
+  "/nonpumk/review": (route) => <ReviewCheckerNonPumk route={route} />,
+  "/nonpumk/persetujuan": (route) => <PersetujuanNonPumk route={route} />,
+  "/nonpumk/penyaluran": (route) => <Penyaluran route={route} />,
+  "/nonpumk/lpj": (route) => <Lpj route={route} />,
+  "/nonpumk/monitoring-lpj": (route) => <MonitoringLpj route={route} />,
+
+  "/konfigurasi/parameter": (route) => <Parameter route={route} />,
 };
 
 function PageOutlet() {

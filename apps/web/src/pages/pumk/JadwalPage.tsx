@@ -23,11 +23,11 @@ import { AkadPicker } from "./AkadPicker";
 import { JadwalTabel, ParameterPanel, RingkasanJadwalPanel } from "./JadwalTabel";
 import {
   CatatanOtorisasi,
+  HalamanModul,
   Muat,
-  PumkPage,
   RingkasDokumen,
   usePilihan,
-} from "./parts";
+} from "../shared/parts";
 
 export function JadwalPage({ route }: { route: PageRoute }) {
   const [akadId, setAkadId] = usePilihan("akad");
@@ -45,7 +45,7 @@ export function JadwalPage({ route }: { route: PageRoute }) {
 
   if (akadId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <AkadPicker
           title="Pilih akad"
           description="Jadwal angsuran selalu milik satu akad. Cari akad berdasarkan nomor, nama Mitra Binaan, atau NIK."
@@ -54,12 +54,12 @@ export function JadwalPage({ route }: { route: PageRoute }) {
           onPilih={pilih}
         />
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       title={akad ? `Jadwal Angsuran ${akad.noAkad}` : route.title}
       sub={akad ? `${akad.mitraNama} . ${akad.cabangNama}` : route.summary}
@@ -206,6 +206,6 @@ export function JadwalPage({ route }: { route: PageRoute }) {
         }}
       </Muat>
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }

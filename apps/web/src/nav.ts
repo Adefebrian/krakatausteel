@@ -399,6 +399,21 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         ],
       },
       {
+        path: "/nonpumk/proposal/:proposalId",
+        label: "Detail Proposal",
+        title: "Detail Proposal Non PUMK",
+        permission: "nonpumk.view",
+        summary:
+          "Satu program dengan seluruh datanya: pemetaan bidang dan SDG, penilaian, termin penyaluran, LPJ, dan timeline persetujuannya.",
+        willContain: [
+          "Timeline persetujuan: siapa memindahkan dokumen ke status apa, kapan, dengan catatan apa",
+          "Pagu disetujui, total disalurkan, dan sisa pagu sebagai tiga angka terpisah",
+          "Isi LPJ beserta sisa yang wajib dikembalikan dan jurnal pengembaliannya",
+          "Kecocokan beban dan kas pada Buku Besar terhadap baris penyaluran dan realisasi LPJ",
+        ],
+        hideFromNav: true,
+      },
+      {
         path: "/nonpumk/penilaian",
         label: "Penilaian Proposal",
         title: "Penilaian Proposal Non PUMK",

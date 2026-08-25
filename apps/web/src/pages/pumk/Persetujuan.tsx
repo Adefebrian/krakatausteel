@@ -45,16 +45,16 @@ import {
   AntreanKosong,
   BarisAksi,
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   KembaliKeAntrean,
   Muat,
-  PumkPage,
   usePilihan,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 type Keputusan = "SETUJU" | "TOLAK" | "KEMBALIKAN";
 
@@ -147,7 +147,7 @@ export function Persetujuan({ route }: { route: PageRoute }) {
 
   if (proposalId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <Muat
           hasil={antrean}
           judul="antrean persetujuan"
@@ -188,12 +188,12 @@ export function Persetujuan({ route }: { route: PageRoute }) {
           }
         </Muat>
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       back={{ to: "/pumk/persetujuan", label: "Antrean persetujuan" }}
     >
@@ -535,6 +535,6 @@ export function Persetujuan({ route }: { route: PageRoute }) {
         }}
       </Muat>
       <CatatanOtorisasi tambahan="Pemisahan Checker dan Approver ditegakkan oleh engine dan oleh trigger basis data." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

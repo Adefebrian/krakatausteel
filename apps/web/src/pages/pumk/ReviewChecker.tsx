@@ -36,14 +36,14 @@ import {
   AntreanKosong,
   BarisAksi,
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
+  HalamanModul,
   hariIni,
   KembaliKeAntrean,
   Muat,
-  PumkPage,
   usePilihan,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 const ANTREAN_COLUMNS: readonly ColumnSpec<BarisProposal>[] = [
   { key: "noProposal", header: "No Proposal", sortable: true, width: "150px" },
@@ -97,7 +97,7 @@ export function ReviewChecker({ route }: { route: PageRoute }) {
 
   if (proposalId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <Muat
           hasil={antrean}
           judul="antrean review"
@@ -138,12 +138,12 @@ export function ReviewChecker({ route }: { route: PageRoute }) {
           }
         </Muat>
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       back={{ to: "/pumk/review", label: "Antrean review" }}
     >
@@ -368,6 +368,6 @@ export function ReviewChecker({ route }: { route: PageRoute }) {
         }}
       </Muat>
       <CatatanOtorisasi tambahan="Pemisahan Maker dan Checker ditegakkan oleh engine dan oleh trigger basis data." />
-    </PumkPage>
+    </HalamanModul>
   );
 }

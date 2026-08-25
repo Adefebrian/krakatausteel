@@ -355,3 +355,79 @@ export function formatTotal(
   const total = jumlahkanUang(values);
   return total === null ? UNPARSEABLE : formatMoney(total, options);
 }
+
+/**
+ * Read a `Uang` string as integer cents. Returns null for anything that is not
+ * a figure, and null is not zero: the two helpers below both refuse rather
+ * than treat an unreadable value as nothing.
+ */
+function senDari(value: string | number | null | undefined): bigint | null {
+  if (value === null || value === undefined || value === "") return null;
+  const raw =
+    typeof value === "number" ? (Number.isFinite(value) ? value.toFixed(2) : "x") : value.trim();
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(raw);
+  if (!match) return null;
+  const sign = match[1] === "-" ? -1n : 1n;
+  return sign * (BigInt(match[2] ?? "0") * 100n + BigInt((match[3] ?? "").padEnd(2, "0") || "0"));
+}
+
+/**
+ * Compare two `Uang` values EXACTLY: -1, 0 or 1, and null when either side
+ * cannot be read.
+ *
+ * Comparison is in integer cents with BigInt, never through a float, because
+ * the questions this answers are boundary questions. "Does this termin land
+ * exactly on the approved ceiling, or one sen over it?" is the Non PUMK
+ * disbursement guard, and `Number("9007199254740993.01")` has already lost the
+ * sen that decides it.
+ *
+ * NULL PROPAGATES, AND MUST NOT BE "SIMPLIFIED" TO A ZERO DEFAULT. This is the
+ * same principle as UNPARSEABLE: an unreadable figure is reported as
+ * unreadable, never rendered or treated as nothing.
+ *
+ * `?? 0` here reads as "these two are equal", so every `<= 0` ceiling check in
+ * the product would pass on a value nobody could parse, and a termin that
+ * should have been refused would be posted to the ledger. There is no default
+ * that is safe: 0 opens the gate, -1 opens it, 1 closes it for a figure that
+ * might be fine. The only correct answer is "I could not compare these", which
+ * is what null means, and every caller must branch on it explicitly.
+ */
+export function bandingUang(
+  kiri: string | number | null | undefined,
+  kanan: string | number | null | undefined,
+): number | null {
+  const a = senDari(kiri);
+  const b = senDari(kanan);
+  if (a === null || b === null) return null;
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
+/**
+ * `kiri - kanan` as an exact `Uang` string, or null when either side cannot be
+ * read.
+ *
+ * This is how a remaining ceiling and a returnable remainder are computed on
+ * screen: subtracting in integer cents means the figure shown is the same
+ * figure the engine will compare against, down to the last sen, and it is
+ * never rounded for display. A negative result is returned as a negative
+ * value rather than clamped to zero, because a caller that is over the ceiling
+ * has to be able to say by how much.
+ *
+ * NULL IS NOT ZERO HERE EITHER, for the same reason as `bandingUang`. A
+ * remainder that defaulted to "0,00" when a side could not be read would tell
+ * an operator filing an LPJ that nothing has to come back, which is a
+ * statement about money that nobody checked. The screens print "Belum dapat
+ * dihitung" instead.
+ */
+export function kurangkanUang(
+  kiri: string | number | null | undefined,
+  kanan: string | number | null | undefined,
+): string | null {
+  const a = senDari(kiri);
+  const b = senDari(kanan);
+  if (a === null || b === null) return null;
+  const selisih = a - b;
+  const negative = selisih < 0n;
+  const absolute = negative ? -selisih : selisih;
+  return `${negative ? "-" : ""}${absolute / 100n}.${String(absolute % 100n).padStart(2, "0")}`;
+}

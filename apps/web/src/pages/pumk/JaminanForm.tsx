@@ -38,15 +38,15 @@ import {
   Bagian,
   BarisAksi,
   CatatanOtorisasi,
+  type ColumnSpec,
   DaftarDokumen,
   FieldGrid,
   FormLayout,
+  HalamanModul,
   hariIni,
   Muat,
-  PumkPage,
   usePilihan,
-  type ColumnSpec,
-} from "./parts";
+} from "../shared/parts";
 
 const JENIS = [
   { value: "BPKB", label: "BPKB kendaraan" },
@@ -135,7 +135,7 @@ export function JaminanForm({ route }: { route: PageRoute }) {
 
   if (proposalId === null) {
     return (
-      <PumkPage route={route}>
+      <HalamanModul route={route}>
         <Muat hasil={antrean} judul="daftar proposal" sumber="GET /api/pumk/proposal">
           {(data) =>
             data.data.length === 0 ? (
@@ -172,12 +172,12 @@ export function JaminanForm({ route }: { route: PageRoute }) {
           }
         </Muat>
         <CatatanOtorisasi />
-      </PumkPage>
+      </HalamanModul>
     );
   }
 
   return (
-    <PumkPage
+    <HalamanModul
       route={route}
       back={{ to: "/pumk/jaminan", label: "Pilih proposal lain" }}
     >
@@ -373,6 +373,6 @@ export function JaminanForm({ route }: { route: PageRoute }) {
         )}
       </Muat>
       <CatatanOtorisasi />
-    </PumkPage>
+    </HalamanModul>
   );
 }
