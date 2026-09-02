@@ -369,7 +369,8 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   //
   // Same rule as everywhere above: absent means 400, which is right for
   // `PEMERIKSAAN_TIDAK_DIKENAL` (a check code that is not in the catalogue is
-  // a malformed path) and for `METRIK_TIDAK_DIKENAL`. Listed here are only the
+  // a malformed path) and for `RINCIAN_TIDAK_DIKENAL` (a drill-down key the
+  // dashboard never emitted). Listed here are only the
   // codes where 400 would be a LIE: the SYSTEM is not ready, and no rewriting
   // of the request will help.
   //

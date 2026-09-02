@@ -52,6 +52,7 @@ import { createPumkHttpModule } from "../modules/pumk";
 import { createRkaHttpModule } from "../modules/rka";
 import { createLaporanHttpModule } from "../modules/laporan";
 import { createToolsHttpModule } from "../modules/tools";
+import { createDashboardHttpModule } from "../modules/dashboard";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -228,6 +229,32 @@ export function createApp(overrides: AppOverrides = {}) {
   // intact.
   const tools = createToolsHttpModule({ db, guards: auth.guards });
 
+  // Fase 7 (spec 11), the landing screen.
+  //
+  // NO JOURNAL PORT AND NO AUDIT PORT, and every route is a GET, for the same
+  // reason modules/laporan and modules/tools have none: this engine issues
+  // SELECTs and nothing else. It reads the two shipped artefacts spec 10 names,
+  // `v_ledger_baris` for an OPEN period (ADR 0010) and `saldo_akun_periode` for
+  // a CLOSED one, and says in the payload which of the two produced the
+  // figures; nothing in the request can override that choice.
+  //
+  // THE THREE ENGINE PORTS ARE THE POINT OF THE WIRING. Three figures on this
+  // page belong to somebody else, and each is obtained through a port the
+  // owning engine satisfies STRUCTURALLY, so there is no adapter in between and
+  // no second definition anywhere: `rka.engine` resolves WHICH budget version
+  // is the baseline (spec 9.3), `nonpumk.engine` decides which LPJ is late
+  // against the configured threshold (spec 9.2), and `closing.engine` owns spec
+  // 8.4's ten checks. A dashboard that re-derived any of the three would be a
+  // second opinion about the budget, the deadline, or whether a month may be
+  // closed.
+  const dashboard = createDashboardHttpModule({
+    db,
+    rka: rka.engine,
+    nonpumk: nonpumk.engine,
+    closing: closing.engine,
+    guards: auth.guards,
+  });
+
   // modules/example IS NOT MOUNTED, and must not be.
   //
   // It is the repo template's reference module and it is unauthenticated by
@@ -254,6 +281,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/closing", closing.routes)
     .route("/laporan", laporan.routes)
     .route("/tools", tools.routes)
+    .route("/dashboard", dashboard.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -279,6 +307,7 @@ export function createApp(overrides: AppOverrides = {}) {
     laporan: laporan.engine,
     laporanBaca: laporan.baca,
     tools: tools.engine,
+    dashboard: dashboard.engine,
   };
 }
 
@@ -297,4 +326,5 @@ export const closing = instance.closing;
 export const rka = instance.rka;
 export const laporan = instance.laporan;
 export const tools = instance.tools;
+export const dashboard = instance.dashboard;
 export type AppType = typeof app;
