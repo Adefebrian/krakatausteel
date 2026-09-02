@@ -142,6 +142,14 @@ const NAMA_ERROR_BERKODE = new Set([
   "AngsuranError",
   "PumkError",
   "NonPumkError",
+  // Fase 6. Both were absent when their routers landed, which is the exact
+  // failure this list's comment above describes: every RKA scope refusal and
+  // every report refusal left the handler as an anonymous 500 with no
+  // `kodeDomain` and, worse, with no DITOLAK row in `audit_log`, because
+  // `catatPenolakan` only runs for an error the handler can classify. Spec 16
+  // scenario 24 was therefore passing on the engine and unenforced over HTTP.
+  "RkaError",
+  "LaporanError",
 ]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
@@ -217,6 +225,50 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   // called. A 409 rather than a 400 because whether the same termin is
   // acceptable depends on what has already gone out, not on how it was typed.
   PLAFON_PENYALURAN_TERLAMPAUI: "KONFLIK",
+
+  // --- modules/rka (spec 9.3, spec 10.3 report 24) -------------------------
+  //
+  // Same rule again: absent means 400, and only the codes where 400 would be a
+  // LIE are listed. An approved baseline that cannot be edited will refuse the
+  // identical body however it is rewritten, and a scope with no approved
+  // version is a missing DOCUMENT rather than a malformed request.
+  RKA_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  VERSI_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  BASELINE_TIDAK_ADA: "TIDAK_DITEMUKAN",
+  PERIODE_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  AKUN_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  RKA_SUDAH_DISETUJUI: "KONFLIK",
+  RKA_BUKAN_DRAFT: "KONFLIK",
+  REVISI_HARUS_DARI_DISETUJUI: "KONFLIK",
+  REVISI_MASIH_TERBUKA: "KONFLIK",
+  VERSI_GANDA: "KONFLIK",
+  BASELINE_GANDA: "KONFLIK",
+  // Fail-closed refusals about the SYSTEM's readiness, never about the body:
+  // a closed period with no frozen figure to read the realisation from, and a
+  // dimension the frozen table does not carry at all.
+  SKEMA_BELUM_LENGKAP: "KONFLIK",
+  SALDO_PERIODE_TIDAK_ADA: "KONFLIK",
+  // Spec 2's segregation, applied to the budget through the configurable
+  // `rka.pemisahan_tugas_persetujuan`.
+  KONFLIK_MAKER_APPROVER: "SEGREGASI_TUGAS",
+
+  // --- modules/laporan (spec 10.3 reports 16 to 20, 22, 23) ----------------
+  //
+  // Every one of these is the report REFUSING TO PRINT rather than the caller
+  // mistyping a filter, so 400 would put the blame in the wrong place and send
+  // an accountant looking for a field to correct. They are the fail-closed
+  // refusals the module exists to make: a template nobody configured, an
+  // account that maps onto no line, a cash movement with no classification, a
+  // closed period whose balances were never frozen, and a statement that does
+  // not add up.
+  CABANG_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  TEMPLATE_LAPORAN_KOSONG: "KONFLIK",
+  TEMPLATE_LAPORAN_TIDAK_VALID: "KONFLIK",
+  AKUN_TIDAK_TERPETAKAN: "KONFLIK",
+  KLASIFIKASI_ARUS_KAS_TIDAK_LENGKAP: "KONFLIK",
+  SEKSI_ASET_NETO_TIDAK_DIKENAL: "KONFLIK",
+  SALDO_PERIODE_BELUM_DIBEKUKAN: "KONFLIK",
+  LAPORAN_TIDAK_BALANCE: "KONFLIK",
 
   // Spec 2 rules 1 and 2, ahead of TJSL-SOD-001 / TJSL-SOD-002.
   KONFLIK_MAKER_CHECKER: "SEGREGASI_TUGAS",

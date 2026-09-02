@@ -1,20 +1,24 @@
 // The ONLY file another module or the app entrypoint may import from this
-// module. ./service.ts, ./kesalahan.ts and this folder's ./test-support.ts
-// stay private.
+// module. ./service.ts, ./repo.ts, ./baca.ts, ./kesalahan.ts and this folder's
+// ./test-support.ts stay private.
 //
-// NO HTTP SURFACE YET, deliberately. This is the tests-first contract that
-// opens Fase 6 (spec 9.3's three budget types with their versions and status,
-// and spec 10.3 report 24): the versioning rules, the authorisation rules and
-// above all the SOURCE of every realisation figure are specified and pinned by
-// failing tests before a line of behaviour is written. ./routes.ts arrives with
-// the implementation, wired with the guard set from modules/auth.
+// THE HTTP SURFACE IS HERE NOW (./routes.ts), wired with the guard set from
+// modules/auth exactly as every other module's router is. The module was built
+// tests-first: the versioning rules, the authorisation rules and above all the
+// SOURCE of every realisation figure were specified and pinned by failing tests
+// before a line of behaviour existed, and the routes were added last, over an
+// engine that already refused everything it had to refuse.
 //
 // THIS MODULE NEVER WRITES TO THE LEDGER and takes no journal port, unlike
 // every other engine here. An RKA is a target, not a transaction. It only
 // reads, and it reads the two shipped artefacts: `v_ledger_baris` for an OPEN
 // period and `saldo_akun_periode` for a CLOSED one. See ./contract.ts's header
-// for why that distinction is the whole point of the module.
+// for why that distinction is the whole point of the module. No route added
+// here may hand it a way to post.
+import { buatRkaBaca, type RkaBaca } from "./baca";
 import { createRkaEngine, type RkaEngine, type RkaEngineDeps } from "./contract";
+import { createRkaRoutes } from "./routes";
+import type { Guards } from "../../core/principal";
 
 export {
   createRkaEngine,
@@ -71,4 +75,32 @@ export type {
  */
 export function createRkaModule(deps: RkaEngineDeps): { engine: RkaEngine } {
   return { engine: createRkaEngine(deps) };
+}
+
+export type { RkaBaca };
+export type {
+  OpsiCabangRka,
+  OpsiDimensiRka,
+  OpsiPeriodeRka,
+  ReferensiRka,
+} from "./baca";
+
+export interface RkaModuleDeps extends RkaEngineDeps {
+  guards: Guards;
+}
+
+/**
+ * The module WITH its HTTP surface, for the composition root. Kept separate
+ * from `createRkaModule` above so a caller that only needs the engine (a seed,
+ * a later batch job, this folder's own fixtures) does not have to invent a
+ * guard set to get one.
+ */
+export function createRkaHttpModule(deps: RkaModuleDeps): {
+  engine: RkaEngine;
+  baca: RkaBaca;
+  routes: ReturnType<typeof createRkaRoutes>;
+} {
+  const engine = createRkaEngine(deps);
+  const baca = buatRkaBaca({ db: deps.db });
+  return { engine, baca, routes: createRkaRoutes({ engine, baca, guards: deps.guards }) };
 }

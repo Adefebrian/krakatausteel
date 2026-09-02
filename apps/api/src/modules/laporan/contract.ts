@@ -169,6 +169,38 @@ export type StatusPeriode = "OPEN" | "CLOSING_IN_PROGRESS" | "CLOSED";
  */
 export type SumberData = "LEDGER_LIVE" | "SNAPSHOT_PERIODE";
 
+/**
+ * WHICH TEMPLATE THE PRINTED LAYOUT CAME FROM, and how it was chosen.
+ *
+ * migrations/0028 made `template_laporan` EFFECTIVE DATED over the period being
+ * reported on, so "which layout is in force for March 2026" has exactly one
+ * answer and that answer can CHANGE. `periode.template_laporan_id`, written by
+ * the closing engine at close, is what stops adopting a new template from
+ * silently restating every statement already issued (ADR 0017, the failure it
+ * names as having the widest blast radius).
+ *
+ *   TEMPLATE_PERIODE   the period carries a stamp and the report used it. The
+ *                      reprint is the statement that was issued.
+ *   TEMPLATE_BERLAKU   resolved by effective date. Correct and expected for an
+ *                      OPEN period, which has no stamp by definition and must
+ *                      not read one; it is a FALLBACK for a CLOSED period, one
+ *                      closed before the column existed or closed when no
+ *                      template was in force.
+ *   TANPA_TEMPLATE     the report has no layout template at all. Buku Besar and
+ *                      Neraca Lajur are per ACCOUNT, so no `baris_laporan` row
+ *                      is involved and there is nothing to be reproducible
+ *                      about; saying so is more honest than naming a template
+ *                      the page did not use.
+ *
+ * CARRIED IN THE HEADER FOR THE SAME REASON `sumberData` IS. A NULL stamp is a
+ * legitimate value rather than a refusal, so the fallback is a state a reader
+ * will genuinely meet, and a fallback nobody can see is indistinguishable from
+ * a reader that ignores the column. The two fields answer different questions
+ * and are deliberately separate: `sumberData` is where the FIGURES came from,
+ * this is where the LAYOUT came from.
+ */
+export type SumberTemplate = "TEMPLATE_PERIODE" | "TEMPLATE_BERLAKU" | "TANPA_TEMPLATE";
+
 // ---------------------------------------------------------------------------
 // The formatting contract (spec 10)
 // ---------------------------------------------------------------------------
@@ -420,6 +452,10 @@ export interface HeaderLaporan {
   /** `app_user.nama` of `ctx.userId`, not the id: an accountant reads this. */
   dicetakOleh: string;
   sumberData: SumberData;
+  /** The `template_laporan` the lines were read from. Null for a report that
+   *  has no layout template (see `SumberTemplate.TANPA_TEMPLATE`). */
+  templateLaporanId: string | null;
+  sumberTemplate: SumberTemplate;
 }
 
 // ---------------------------------------------------------------------------

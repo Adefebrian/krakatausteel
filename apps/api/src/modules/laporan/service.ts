@@ -70,6 +70,7 @@ import {
   type SeksiArusKas,
   type StatusPeriode,
   type SumberData,
+  type SumberTemplate,
   type TanggalIso,
   type TipeAkun,
   type TipeBaris,
@@ -382,6 +383,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       cabangId: string | null;
       namaCabang: string;
       sumberData: SumberData;
+      templat: Templat | null;
     },
   ): Promise<HeaderLaporan> {
     const bumn = await repo.bumn(tx(), ctx.bumnId);
@@ -399,6 +401,11 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       tanggalCetak: jam().toISOString().slice(0, 10),
       dicetakOleh: pengguna?.nama ?? "",
       sumberData: opsi.sumberData,
+      // A report with no layout template says so rather than naming one it did
+      // not print from: Buku Besar and Neraca Lajur are per ACCOUNT, so no
+      // `baris_laporan` row is involved in what they show.
+      templateLaporanId: opsi.templat?.templateId ?? null,
+      sumberTemplate: opsi.templat?.sumberTemplate ?? "TANPA_TEMPLATE",
     };
   }
 
@@ -411,14 +418,58 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
 
   interface Templat {
     templateId: string;
+    sumberTemplate: SumberTemplate;
     akun: AkunRow[];
     akunPostable: AkunRow[];
     /** account id -> the ACTIVE line of one statement it prints on. */
     barisUntukAkun: Map<string, Map<string, string>>;
   }
 
-  async function muatTemplat(bumnId: string, tanggal: string): Promise<Templat> {
-    const templateId = await repo.templateBerlaku(tx(), bumnId, tanggal);
+  /**
+   * WHICH LAYOUT THIS PAGE IS PRINTED FROM, and it is not always the one in
+   * force today.
+   *
+   * A CLOSED period reprints under the template it was CLOSED under
+   * (`periode.template_laporan_id`, written by modules/closing inside the same
+   * transaction that freezes the balances). Resolving by effective date instead
+   * would mean that adopting ISAK 335 in 2027 silently restates every 2026
+   * statement already issued, which is the failure migrations/0028 added the
+   * column to prevent and ADR 0017 names as having the widest blast radius.
+   *
+   * AN OPEN PERIOD NEVER READS THE COLUMN, and not merely because it is empty:
+   * reopening CLEARS the stamp, so a reopened period must go back to the
+   * effective-dated lookup rather than to a stale one. Gating on the STATUS
+   * rather than on the column being non-null is what makes that true by
+   * construction instead of by the writer's good manners.
+   *
+   * THE FALLBACK IS VISIBLE. A null stamp is legitimate (a period closed before
+   * the column existed, or closed when no template was in force), so the result
+   * SAYS which path it took. A fallback nobody can see is indistinguishable
+   * from a reader that ignores the column.
+   */
+  async function muatTemplat(
+    bumnId: string,
+    tanggal: string,
+    periode: PeriodeRow | null,
+  ): Promise<Templat> {
+    const dicap =
+      periode && periode.status === "CLOSED" ? periode.template_laporan_id : null;
+    let sumberTemplate: SumberTemplate = "TEMPLATE_BERLAKU";
+    let templateId: string | null = null;
+    if (dicap) {
+      if (!(await repo.templateMilikBumn(tx(), dicap, bumnId))) {
+        gagal(
+          KODE_LAPORAN.TEMPLATE_LAPORAN_KOSONG,
+          "Template yang dipakai saat periode ini ditutup sudah tidak ada, sehingga laporan " +
+            "periode ini tidak bisa dicetak ulang dalam bentuk aslinya.",
+          { periodeId: periode?.id, templateLaporanId: dicap },
+        );
+      }
+      templateId = dicap;
+      sumberTemplate = "TEMPLATE_PERIODE";
+    } else {
+      templateId = await repo.templateBerlaku(tx(), bumnId, tanggal);
+    }
     if (!templateId) {
       gagal(
         KODE_LAPORAN.TEMPLATE_LAPORAN_KOSONG,
@@ -438,6 +489,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     }
     return {
       templateId,
+      sumberTemplate,
       akun,
       akunPostable: akun.filter((a) => a.is_postable),
       barisUntukAkun,
@@ -647,7 +699,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     // always Semua Cabang and therefore needs the same scope that option needs.
     const { cabangId, namaCabang } = await pastikanCabang(ctx, null);
     const hariIni = jam().toISOString().slice(0, 10);
-    const templat = await muatTemplat(ctx.bumnId, hariIni);
+    const templat = await muatTemplat(ctx.bumnId, hariIni, null);
 
     const kodeBaris = new Map<string, string>();
     for (const laporan of ["POSISI_KEUANGAN", "AKTIVITAS", "PERUBAHAN_ASET_NETO", "ARUS_KAS"]) {
@@ -696,6 +748,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: "LEDGER_LIVE",
+        templat,
       }),
       baris,
     };
@@ -731,7 +784,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       sampaiTahunLalu: sampaiLalu,
     };
 
-    const templat = await muatTemplat(ctx.bumnId, sampaiIni);
+    const templat = await muatTemplat(ctx.bumnId, sampaiIni, p);
     const barisAktivitas = await muatBaris(ctx.bumnId, templat, "AKTIVITAS");
     const tanggal = [tambahHari(dariIni, -1), sampaiIni, tambahHari(dariLalu, -1), sampaiLalu];
     const saldo = await saldoPada(ctx.bumnId, cabangId, sumber, tanggal);
@@ -811,6 +864,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: sumber,
+        templat,
       }),
       kolom,
       seksi,
@@ -852,7 +906,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       sampaiTahunLalu: sampaiLalu,
     };
 
-    const templat = await muatTemplat(ctx.bumnId, sampaiIni);
+    const templat = await muatTemplat(ctx.bumnId, sampaiIni, p);
     const barisPosisi = await muatBaris(ctx.bumnId, templat, "POSISI_KEUANGAN");
     const barisAktivitas = await muatBaris(ctx.bumnId, templat, "AKTIVITAS");
     // Three cut-offs: this column, the comparative column, and the start of the
@@ -940,6 +994,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: sumber,
+        templat,
       }),
       kolom,
       baris: semuaBaris,
@@ -988,7 +1043,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       sampaiTahunLalu: sampaiLalu,
     };
 
-    const templat = await muatTemplat(ctx.bumnId, sampaiIni);
+    const templat = await muatTemplat(ctx.bumnId, sampaiIni, p);
     const barisPosisi = await muatBaris(ctx.bumnId, templat, "POSISI_KEUANGAN");
     const barisAktivitas = await muatBaris(ctx.bumnId, templat, "AKTIVITAS");
 
@@ -1043,6 +1098,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: sumber,
+        templat,
       }),
       kolom,
       baris,
@@ -1082,7 +1138,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       sampaiTahunLalu: sampaiLalu,
     };
 
-    const templat = await muatTemplat(ctx.bumnId, sampaiIni);
+    const templat = await muatTemplat(ctx.bumnId, sampaiIni, p);
     const akunKasSemua = templat.akunPostable.filter((a) => a.is_kas);
 
     // KAS AWAL AND KAS AKHIR COME FROM THE `is_kas` ACCOUNT BALANCES, never
@@ -1205,6 +1261,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: sumber,
+        templat,
       }),
       kolom,
       seksi,
@@ -1336,6 +1393,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: sumber,
+        templat: null,
       }),
       baris,
       total: {
@@ -1415,6 +1473,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
         cabangId,
         namaCabang,
         sumberData: sumber,
+        templat: null,
       }),
       akunId: akun.id,
       akunKode: akun.kode,

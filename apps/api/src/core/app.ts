@@ -49,8 +49,8 @@ import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
 import { createNonPumkHttpModule } from "../modules/nonpumk";
 import { createPumkHttpModule } from "../modules/pumk";
-import { createRkaModule } from "../modules/rka";
-import { createLaporanModule } from "../modules/laporan";
+import { createRkaHttpModule } from "../modules/rka";
+import { createLaporanHttpModule } from "../modules/laporan";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -177,9 +177,8 @@ export function createApp(overrides: AppOverrides = {}) {
   // closing and the login that led to it land in one audit_log stream.
   const closing = createClosingModule({ db, jurnal: jurnal.engine, audit });
 
-  // Fase 6 (spec 9.3 and spec 10.3 report 24), the RKA engine. NO HTTP SURFACE
-  // YET, deliberately: the budget entry screens and the report arrive with
-  // their own routes and the guard set from modules/auth.
+  // Fase 6 (spec 9.3 and spec 10.3 report 24), the RKA module, ENGINE AND
+  // ROUTES.
   //
   // NO JOURNAL PORT, and that is the point rather than an omission: an RKA is a
   // target, not a transaction, so this is the one business engine in the
@@ -188,21 +187,21 @@ export function createApp(overrides: AppOverrides = {}) {
   // `saldo_akun_periode` for a closed one). `audit` is the same instance every
   // other module uses, so a refused budget approval and the login that led to
   // it land in one audit_log stream.
-  const rka = createRkaModule({ db, audit });
+  const rka = createRkaHttpModule({ db, audit, guards: auth.guards });
 
   // Fase 6 (spec 10.3 reports 16 to 20, 22 and 23), the core accounting
-  // reports. NO HTTP SURFACE YET, deliberately: spec 10's report screens and
-  // its Excel and PDF exports arrive with their own routes and the guard set
-  // from modules/auth.
+  // reports, ENGINE AND ROUTES.
   //
-  // NO JOURNAL PORT AND NO AUDIT PORT, and both are the point rather than an
-  // omission. Spec 16 scenario 23 requires an Auditor to open every report and
-  // change nothing, so this engine issues SELECTs and nothing else: invariant
-  // 11 is not merely respected here, it is unreachable. It reads the two
-  // shipped artefacts spec 10 names, `v_ledger_baris` for an OPEN period
-  // (ADR 0010) and `saldo_akun_periode` for a CLOSED one, and says in every
-  // report header which of the two produced the figures.
-  const laporan = createLaporanModule({ db });
+  // STILL NO JOURNAL PORT AND NO AUDIT PORT, and both are the point rather than
+  // an omission. Spec 16 scenario 23 requires an Auditor to open every report
+  // and change nothing, so this engine issues SELECTs and nothing else:
+  // invariant 11 is not merely respected here, it is unreachable, and mounting
+  // the routes does not change that because every one of them is a GET. It
+  // reads the two shipped artefacts spec 10 names, `v_ledger_baris` for an OPEN
+  // period (ADR 0010) and `saldo_akun_periode` for a CLOSED one, and says in
+  // every report header which of the two produced the figures. Nothing in the
+  // request can override that choice.
+  const laporan = createLaporanHttpModule({ db, guards: auth.guards });
 
   // modules/example IS NOT MOUNTED, and must not be.
   //
@@ -226,6 +225,8 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/konfigurasi", konfigurasi.routes)
     .route("/pumk", pumk.routes)
     .route("/nonpumk", nonpumk.routes)
+    .route("/rka", rka.routes)
+    .route("/laporan", laporan.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -246,7 +247,9 @@ export function createApp(overrides: AppOverrides = {}) {
     nonpumkBaca: nonpumk.baca,
     closing: closing.engine,
     rka: rka.engine,
+    rkaBaca: rka.baca,
     laporan: laporan.engine,
+    laporanBaca: laporan.baca,
   };
 }
 

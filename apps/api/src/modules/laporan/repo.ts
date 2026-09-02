@@ -49,6 +49,10 @@ export interface PeriodeRow {
   tanggal_mulai: string;
   tanggal_akhir: string;
   status: string;
+  /** The template this period was CLOSED under (migrations/0028, written by
+   *  modules/closing). Null on an OPEN period, on a period closed before the
+   *  column existed, and on one closed with no template in force. */
+  template_laporan_id: string | null;
 }
 
 export interface AkunRow {
@@ -151,6 +155,7 @@ export interface LaporanRepo {
   adaLedgerSampai(tx: QueryRunner, bumnId: string, tanggal: string): Promise<boolean>;
   akun(tx: QueryRunner, bumnId: string): Promise<AkunRow[]>;
   templateBerlaku(tx: QueryRunner, bumnId: string, tanggal: string): Promise<string | null>;
+  templateMilikBumn(tx: QueryRunner, templateId: string, bumnId: string): Promise<boolean>;
   barisLaporan(
     tx: QueryRunner,
     bumnId: string,
@@ -230,7 +235,8 @@ export function buatRepoLaporan(): LaporanRepo {
       return satu<PeriodeRow>(
         tx,
         `select id::text as id, bumn_id::text as bumn_id, tahun, bulan,
-                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, status
+                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir,
+                status, template_laporan_id::text as template_laporan_id
            from periode where id = $1::uuid and deleted_at is null`,
         [periodeId],
       );
@@ -246,7 +252,8 @@ export function buatRepoLaporan(): LaporanRepo {
       return satu<PeriodeRow>(
         tx,
         `select id::text as id, bumn_id::text as bumn_id, tahun, bulan,
-                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, status
+                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir,
+                status, template_laporan_id::text as template_laporan_id
            from periode
           where bumn_id = $1::uuid and deleted_at is null and tanggal_akhir <= $2::date
           order by tanggal_akhir desc
@@ -285,6 +292,23 @@ export function buatRepoLaporan(): LaporanRepo {
           order by kode`,
         [bumnId],
       );
+    },
+
+    /**
+     * Does this template still exist and belong to this entity? Asked before a
+     * period's stamped template is used, so a stamp pointing at a soft-deleted
+     * or foreign template is a refusal rather than a silent slide back onto the
+     * effective-dated lookup, which would reprint a closed period in today's
+     * shape: the one thing the stamp exists to prevent.
+     */
+    async templateMilikBumn(tx, templateId, bumnId) {
+      const row = await satu<{ ada: boolean }>(
+        tx,
+        `select true as ada from template_laporan
+          where id = $1::uuid and bumn_id = $2::uuid and deleted_at is null`,
+        [templateId, bumnId],
+      );
+      return row !== null;
     },
 
     /**

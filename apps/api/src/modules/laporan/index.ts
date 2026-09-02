@@ -1,7 +1,8 @@
 // The ONLY file another module or the app entrypoint may import from this
-// module. ./service.ts and this folder's ./test-support.ts stay private.
+// module. ./service.ts, ./repo.ts, ./baca.ts and this folder's
+// ./test-support.ts stay private.
 //
-// NO HTTP SURFACE YET, deliberately, and no ./kesalahan.ts either.
+// THE HTTP SURFACE IS HERE NOW (./routes.ts), and still no ./kesalahan.ts.
 //
 // Every sibling module has a `kesalahan.ts` because every sibling module
 // WRITES, and a write means a constraint, a trigger and a raw Postgres refusal
@@ -11,11 +12,16 @@
 // materialised cache or an export artefact row, it arrives with the refusal
 // mapping it needs.
 //
-// ./routes.ts arrives with the implementation, wired with the guard set from
-// modules/auth. Spec 16 scenario 23 is a standing constraint on those routes:
-// every one of them is a GET, so an Auditor holding `laporan.view` can open
-// all seven and change nothing.
+// Spec 16 scenario 23 is a standing constraint on those routes and it holds:
+// every one of them is a GET, so an Auditor holding `laporan.view` opens all
+// seven and changes nothing. That is not a promise about the router either --
+// the engine below is constructed with a database and a clock and NOTHING
+// ELSE, so there is no port in this module through which a route could write
+// even if one were added carelessly.
+import { buatLaporanBaca, type LaporanBaca } from "./baca";
 import { createLaporanEngine, type LaporanEngine, type LaporanEngineDeps } from "./contract";
+import { createLaporanRoutes } from "./routes";
+import type { Guards } from "../../core/principal";
 
 export {
   createLaporanEngine,
@@ -86,4 +92,36 @@ export type {
  */
 export function createLaporanModule(deps: LaporanEngineDeps): { engine: LaporanEngine } {
   return { engine: createLaporanEngine(deps) };
+}
+
+export type { LaporanBaca };
+export type {
+  EntriKatalogLaporan,
+  FilterCabangLaporan,
+  OpsiCabangLaporan,
+  OpsiPeriode,
+} from "./baca";
+
+export interface LaporanModuleDeps extends LaporanEngineDeps {
+  guards: Guards;
+}
+
+/**
+ * The module WITH its HTTP surface, for the composition root. Kept separate
+ * from `createLaporanModule` above so a caller that only needs the engine (a
+ * later export job, this folder's own fixtures) does not have to invent a guard
+ * set to get one.
+ *
+ * STILL NO LEDGER PORT AND NO AUDIT PORT. Adding `guards` adds an
+ * authorisation decision, not a capability: nothing reachable from here can
+ * insert, update or delete.
+ */
+export function createLaporanHttpModule(deps: LaporanModuleDeps): {
+  engine: LaporanEngine;
+  baca: LaporanBaca;
+  routes: ReturnType<typeof createLaporanRoutes>;
+} {
+  const engine = createLaporanEngine(deps);
+  const baca = buatLaporanBaca({ db: deps.db });
+  return { engine, baca, routes: createLaporanRoutes({ engine, baca, guards: deps.guards }) };
 }

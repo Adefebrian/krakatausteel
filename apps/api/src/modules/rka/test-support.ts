@@ -1745,7 +1745,42 @@ export async function buatDunia(): Promise<DuniaRka> {
       return Number.parseInt(baris[0]?.n ?? "0", 10) > 0;
     },
 
-    tutup: () => db.tutup(),
+    /**
+     * Teardown: soft-deletes THIS WORLD'S OWN bumn, then closes the pool.
+     *
+     * WHY THE SOFT DELETE IS PART OF TEARDOWN. `seedFase0` sweeps every bumn
+     * `WHERE deleted_at IS NULL` and re-seeds its COA, event mappings and
+     * programme master, because a deploy must leave EVERY reporting entity
+     * postable. That property is asserted by apps/api/src/seed/*.test.ts and is
+     * not negotiable. But a fixture bumn that is never removed stays in that
+     * sweep forever, so the cost of the seed grows with the number of test runs
+     * ever executed against the shared `tjsl_test`, and those tests eventually
+     * time out on a database nobody reset.
+     *
+     * Soft-deleting the world's bumn here makes the sweep track LIVE entities
+     * instead of every world ever built. Nothing else changes: the rows stay
+     * for post-mortem, no assertion is weakened, no production code moves, and
+     * every other world is untouched because the statement is keyed by this
+     * world's own id.
+     *
+     * `deleted_by` comes from a user of this world, because `bumn_soft_delete_ck`
+     * requires deleted_at and deleted_by to move together. The FROM clause
+     * makes the statement a no-op rather than a constraint violation if a world
+     * ever has no user, so teardown can never fail louder than the test it
+     * follows.
+     */
+    async tutup() {
+      await db.query(
+        `update bumn b
+            set deleted_at = now(), deleted_by = u.id
+           from (select au.id from app_user au
+                   join cabang c on c.id = au.cabang_id
+                  where c.bumn_id = $1) u
+          where b.id = $1 and b.deleted_at is null`,
+        [bumn.id],
+      );
+      await db.tutup();
+    },
   };
 }
 
