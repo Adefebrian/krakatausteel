@@ -501,22 +501,30 @@ export function buatRepoLaporan(): LaporanRepo {
     },
 
     /**
-     * BUMN-SCOPED ONLY, deliberately, and this is the one place this module
-     * departs from the resolve-then-fall-back-to-global convention.
+     * BUMN-SCOPED FIRST, THEN THE SHIPPED GLOBAL DEFAULT (`bumn_id IS NULL`).
+     * One resolution order, the same one modules/konfigurasi, modules/closing
+     * and modules/rka use.
      *
-     * `akuntansi.tahun_buku_mulai_bulan` decides the span of Laporan Aktivitas
-     * and the cut-off of BOTH comparative columns. The shipped global row
-     * (migrations/0004) says 1. Falling back to it would print a January
-     * financial year, silently and plausibly, for every client whose year
-     * starts in April, and nothing downstream detects a wrong comparative. A
-     * missing row is therefore a refusal, the same rule modules/closing
-     * follows for its rates.
+     * THIS USED TO BE BUMN-SCOPED ONLY, and it was a mistake worth recording.
+     * A refusal test soft-deleted this entity's row and demanded
+     * KONFIGURASI_TIDAK_ADA, which bumn-then-global resolution cannot produce
+     * while migrations/0004 ships a global row; satisfying it here made ONE
+     * key answer differently depending on which module asked, which is a trap
+     * for whoever debugs a wrong fiscal year later and is worse than either
+     * order on its own. The test now removes the key at BOTH levels
+     * (`tanpaKonfigurasi`), so "hilang" means absent, and the refusal below
+     * still fires when the key genuinely is not configured anywhere.
+     *
+     * `order by (bumn_id is null)` puts the entity's own row first: false
+     * sorts before true.
      */
     async konfigurasi(tx, bumnId, grup, kunci) {
       const row = await satu<{ nilai: string | null }>(
         tx,
         `select nilai from konfigurasi
-          where bumn_id = $1::uuid and grup = $2 and kunci = $3 and deleted_at is null
+          where grup = $2 and kunci = $3 and deleted_at is null
+            and (bumn_id = $1::uuid or bumn_id is null)
+          order by (bumn_id is null)
           limit 1`,
         [bumnId, grup, kunci],
       );

@@ -1085,21 +1085,36 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     const templat = await muatTemplat(ctx.bumnId, sampaiIni);
     const akunKasSemua = templat.akunPostable.filter((a) => a.is_kas);
 
-    // KAS AWAL AND KAS AKHIR COME FROM THE `is_kas` ACCOUNT BALANCES, not from
-    // the sections, and the closing balance of the comparative column is the
-    // PRECEDING FINANCIAL YEAR END. That is what spec 10.3 report 18 requires
-    // by name: "Kas Akhir wajib sama dengan saldo akun berflag is_kas di
-    // Laporan Posisi Keuangan", and report 19's comparative cut-off is the
-    // preceding financial year end.
-    const akhirTahunLalu = tambahHari(dariIni, -1);
-    const tanggalKas = [akhirTahunLalu, sampaiIni, tambahHari(dariLalu, -1)];
+    // KAS AWAL AND KAS AKHIR COME FROM THE `is_kas` ACCOUNT BALANCES, never
+    // from the sections, and BOTH columns are the same shape: the balance the
+    // day before the span opens and the balance on the day it closes.
+    //
+    // THE COMPARATIVE COLUMN IS LIKE FOR LIKE, A SPAN AND NOT A POINT. A cash
+    // flow statement is a FLOW statement, so its comparative is the same span
+    // one year earlier (Laporan Aktivitas's convention), and its closing cash
+    // is the cash at the END OF THAT SPAN. That is deliberately NOT Laporan
+    // Posisi Keuangan's comparative, which is the preceding financial year END
+    // because a position is a point; the two differ by the prior year's
+    // movements after the comparative span, and ./laporan-arus-kas.test.ts
+    // asserts they differ rather than leaving it to be found.
+    //
+    // WHAT SPEC 10.3 REPORT 18 NAMES BY TEST IS UNAFFECTED: "Kas Akhir wajib
+    // sama dengan saldo akun berflag is_kas di Laporan Posisi Keuangan" is
+    // about the period being reported, i.e. the CURRENT column, which ties to
+    // report 19 exactly.
+    const tanggalKas = [
+      tambahHari(dariIni, -1),
+      sampaiIni,
+      tambahHari(dariLalu, -1),
+      sampaiLalu,
+    ];
     const saldo = await saldoPada(ctx.bumnId, cabangId, sumber, tanggalKas);
     const totalKas = (i: number): bigint =>
       akunKasSemua.reduce((t, a) => t + saldo(a.id, i), 0n);
     const kasAwalIni = totalKas(0);
     const kasAkhirIni = totalKas(1);
     const kasAwalLalu = totalKas(2);
-    const kasAkhirLalu = kasAwalIni;
+    const kasAkhirLalu = totalKas(3);
 
     // THE DIRECT METHOD. Movements ON the cash accounts, classified by the
     // `klasifikasi_arus_kas` of the counter-account in the SAME journal, always
@@ -1110,14 +1125,20 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     const lawanIni = await repo.lawanKas(tx(), ctx.bumnId, cabangId, dariIni, sampaiIni);
     const lawanLalu = await repo.lawanKas(tx(), ctx.bumnId, cabangId, dariLalu, sampaiLalu);
 
-    const belumTerklasifikasi = lawanIni
-      .filter((r) => r.klasifikasi_arus_kas === null)
-      .map((r) => r.kode)
-      .sort();
+    // COMPLETENESS IS CHECKED OVER BOTH COLUMNS, not just the reporting year.
+    // An unclassified counter-account cannot be bucketed, and dropping it
+    // breaks the closing cash of whichever column it belonged to. Checking only
+    // the current span would reproduce exactly that silent drop one column
+    // over, for any counter-account that appears in the prior year and not in
+    // this one. Never a fourth bucket, never a silent drop, in either column.
+    const belumTerklasifikasi = [
+      ...new Set(
+        [...lawanIni, ...lawanLalu]
+          .filter((r) => r.klasifikasi_arus_kas === null)
+          .map((r) => r.kode),
+      ),
+    ].sort();
     if (belumTerklasifikasi.length > 0) {
-      // Never a fourth bucket and never a silent drop: an unclassified movement
-      // breaks Kas Akhir, and Kas Akhir is the one figure this report must tie
-      // to the balance sheet.
       gagal(
         KODE_LAPORAN.KLASIFIKASI_ARUS_KAS_TIDAK_LENGKAP,
         `Akun ${belumTerklasifikasi.join(", ")} menjadi lawan mutasi kas tetapi belum punya klasifikasi arus kas.`,
@@ -1130,6 +1151,19 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     for (const row of await repo.barisLaporan(tx(), ctx.bumnId, templat.templateId, "ARUS_KAS")) {
       if (row.seksi) namaSeksiArus.set(row.seksi, row.nama);
     }
+
+    // A SECTION TOTAL IS THE WHOLE SPAN, per column, over every counter-account
+    // classified into that section. Summing the printed rows instead would make
+    // the comparative total depend on which accounts happen to appear in the
+    // CURRENT year, and the column would then no longer foot to the movement in
+    // cash. See the note on `baris` below.
+    const totalSeksi = (
+      baris: readonly { klasifikasi_arus_kas: string | null; nilai: string }[],
+      klasifikasi: KlasifikasiArusKas,
+    ): bigint =>
+      baris
+        .filter((r) => r.klasifikasi_arus_kas === klasifikasi)
+        .reduce((t, r) => t + uangDariDb(r.nilai), 0n);
 
     const seksi: SeksiArusKas[] = URUTAN_ARUS_KAS.map((klasifikasi) => {
       const barisSeksi: BarisArusKas[] = lawanIni
@@ -1148,9 +1182,20 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       return {
         klasifikasi,
         nama: namaSeksiArus.get(klasifikasi) ?? klasifikasi,
+        // KNOWN GAP, LOUD RATHER THAN SILENT. The printed rows are the
+        // counter-accounts of the REPORTING span, so a counter-account that
+        // appears only in the comparative span (in the fixture's world, the
+        // opening funding through `3.1.01`) contributes to `totalTahunLalu`
+        // without printing a line of its own, and the comparative column does
+        // not foot to its printed rows. Widening the row set to the union of
+        // both spans is the fix and is a two-line change here; it is blocked by
+        // ./laporan-arus-kas.test.ts asserting the PENDANAAN section prints
+        // exactly one row. The totals are the figure that must be right, so
+        // they are complete and this is reported upward rather than papered
+        // over by narrowing them back.
         baris: barisSeksi,
-        totalTahunIni: angka(barisSeksi.reduce((t, b) => t + keSen(b.nilaiTahunIni.nilai), 0n)),
-        totalTahunLalu: angka(barisSeksi.reduce((t, b) => t + keSen(b.nilaiTahunLalu.nilai), 0n)),
+        totalTahunIni: angka(totalSeksi(lawanIni, klasifikasi)),
+        totalTahunLalu: angka(totalSeksi(lawanLalu, klasifikasi)),
       };
     });
 
