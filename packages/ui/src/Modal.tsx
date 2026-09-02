@@ -41,16 +41,31 @@ export function Modal({
     [onClose],
   );
 
+  // TWO EFFECTS, NOT ONE, AND THE SPLIT IS LOAD BEARING.
+  //
+  // Focus moves into the panel ONCE, when the dialog opens, and it depends on
+  // `open` alone. It used to share an effect with the Escape listener, whose
+  // dependency is `handleKeyDown`, which depends on `onClose`, which every
+  // caller in this product passes as an inline arrow and is therefore a new
+  // function on every render. So the combined effect re-ran on every render of
+  // the parent, and every keystroke inside a controlled field in the dialog
+  // re-rendered the parent, moved focus back to the panel, and swallowed the
+  // next character: a textarea in a modal accepted exactly one letter.
+  // Verified on the RKA approval and revision dialogs.
   useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement;
-    document.addEventListener("keydown", handleKeyDown);
     panelRef.current?.focus();
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
       const target = returnFocusRef.current;
       if (target instanceof HTMLElement) target.focus();
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, handleKeyDown]);
 
   if (!open) return null;

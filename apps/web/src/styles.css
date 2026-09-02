@@ -1807,3 +1807,916 @@ h3 {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* =============================================== Fase 6: RKA dan laporan */
+/*
+ * Anggaran (spec 9.3) and the seven accounting statements (spec 10.3).
+ *
+ * One rhythm with the rest of the product: the same spacing tokens, the same
+ * radius, the same one pixel border, the same white ground. Nothing here
+ * introduces a second scale, a gradient, a glow, or a colour that is not on
+ * the token table. Rules between rows are table chrome, in the sense the
+ * accounting convention already uses them (a subtotal is ruled off), never a
+ * decorative stripe.
+ */
+
+/* ------------------------------------------------------------- figures */
+
+.angka {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  white-space: nowrap;
+}
+
+/* A figure that legitimately does not exist, e.g. a percentage of achievement
+   against a dimension that carries no budget. Deliberately WORDS and not
+   "0,00": zero is a measurement and this is the absence of one. */
+.angka-kosong {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* ---------------------------------------------- filter row above a report */
+
+.filter-laporan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.filter-laporan-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  /* Wide enough that a native select does not clip a period label or an
+     account name. A truncated option ("Agustus 2026 (OPE") is a worse answer
+     than a wider control. */
+  flex: 1 1 260px;
+  max-width: 340px;
+}
+
+.filter-laporan-group.is-grow {
+  flex: 1 1 240px;
+}
+
+.filter-laporan-label {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.filter-laporan-catatan {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.filter-laporan-aksi {
+  margin-left: auto;
+  flex: none;
+}
+
+.filter-laporan-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  font-size: var(--text-body);
+}
+
+.filter-laporan-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-accent);
+}
+
+/* ------------------------------------------------------- report header */
+
+.kop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.kop-fakta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.kop-label {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.kop-nilai {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  font-weight: var(--weight-medium);
+}
+
+.kop-klaim {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kop-jelas {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-regular);
+  color: var(--color-text-muted);
+}
+
+/* ----------------------------------------------------- statement body */
+
+.statement {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.statement-head,
+.statement-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px 170px;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+}
+
+.statement-head {
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-weight) solid var(--color-border-strong);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.statement-head .statement-angka {
+  justify-content: flex-end;
+}
+
+.statement-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.statement-row + .statement-row {
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.statement-row.is-garis {
+  border-top: var(--border-weight) solid var(--color-border-strong);
+}
+
+.statement-row.is-tebal {
+  font-weight: var(--weight-semibold);
+}
+
+.statement-row.is-level-1 .statement-nama {
+  padding-left: var(--space-4);
+}
+.statement-row.is-level-2 .statement-nama {
+  padding-left: var(--space-6);
+}
+.statement-row.is-level-3 .statement-nama {
+  padding-left: var(--space-7);
+}
+
+.statement-uraian {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+}
+
+.statement-nama {
+  overflow-wrap: anywhere;
+}
+
+.statement-akun {
+  font-size: var(--text-caption);
+  color: var(--color-text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statement-angka {
+  display: flex;
+  justify-content: flex-end;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+}
+
+.statement-angka-label {
+  display: none;
+}
+
+/* --------------------------------------------------- headline figures */
+
+.ringkas-angka {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ringkas-angka-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.ringkas-angka-label {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.ringkas-angka-baris {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-weight: var(--weight-medium);
+}
+
+.ringkas-angka-key {
+  font-size: var(--text-caption);
+  font-weight: var(--weight-regular);
+  color: var(--color-text-subtle);
+}
+
+/* ------------------------------------------------------ detail listing */
+
+.rincian-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rincian-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  min-height: var(--touch-target);
+}
+
+.rincian-item + .rincian-item {
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.rincian-utama {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.rincian-kode {
+  font-weight: var(--weight-medium);
+}
+
+.rincian-nama {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.rincian-nilai {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  text-align: right;
+}
+
+.rincian-nilai-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-subtle);
+}
+
+/* -------------------------------------------------- chart of accounts */
+
+.coa {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.coa-head,
+.coa-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 260px) 110px;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 0;
+  min-height: var(--touch-target);
+}
+
+.coa-head {
+  border-bottom: var(--border-weight) solid var(--color-border-strong);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.coa-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coa-row + .coa-row {
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.coa-utama {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.coa-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  flex: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.coa-toggle:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.coa-toggle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.coa-toggle.is-kosong {
+  cursor: default;
+}
+
+.coa-row.is-level-1 .coa-utama {
+  padding-left: var(--space-4);
+}
+.coa-row.is-level-2 .coa-utama {
+  padding-left: var(--space-6);
+}
+.coa-row.is-level-3 .coa-utama {
+  padding-left: var(--space-7);
+}
+.coa-row.is-level-4 .coa-utama {
+  padding-left: var(--space-8);
+}
+
+.coa-kode {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-medium);
+  flex: none;
+}
+
+/* An account name WRAPS rather than truncating. "Penyisihan Penurunan Nilai
+   Piu..." is an account nobody can identify from the page, and a second line
+   costs less than a name a reader has to guess at. The meta column beside it
+   is three lines tall anyway, so most names cost no extra height at all. */
+.coa-nama {
+  overflow-wrap: anywhere;
+}
+
+.coa-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.coa-tanda {
+  color: var(--color-text-subtle);
+  overflow-wrap: anywhere;
+}
+
+.coa-status {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* --------------------------------------------- changes in net assets */
+
+.trio-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trio-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.trio-item.is-total {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+}
+
+.trio-nama {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+
+.trio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.trio-kolom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.trio-kolom-judul {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.trio-angka {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.trio-baris {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--text-caption);
+}
+
+.trio-baris + .trio-baris {
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.trio-baris.is-akhir {
+  font-weight: var(--weight-semibold);
+  border-top: var(--border-weight) solid var(--color-border-strong);
+}
+
+.trio-baris dt {
+  color: var(--color-text-muted);
+}
+
+.trio-baris dd {
+  margin: 0;
+  text-align: right;
+}
+
+/* ------------------------------------------------- ledger phone cards */
+
+.mutasi-kartu,
+.varian-kartu,
+.lajur-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.mutasi-angka,
+.varian-grid,
+.lajur-grid {
+  display: grid;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+
+.mutasi-angka {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mutasi-angka-sel,
+.varian-sel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-caption);
+}
+
+.mutasi-angka-key,
+.varian-sel dt {
+  color: var(--color-text-subtle);
+}
+
+.varian-sel dd {
+  margin: 0;
+}
+
+.varian-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lajur-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lajur-pasang {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.lajur-label {
+  grid-column: 1 / -1;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.lajur-nilai {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-caption);
+}
+
+.lajur-key {
+  color: var(--color-text-subtle);
+}
+
+.kartu-item.is-statis {
+  display: flex;
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.kartu-item.is-statis.is-total {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+}
+
+.kartu-item > .tautan-dokumen {
+  display: flex;
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: inherit;
+  text-decoration: none;
+}
+
+.kartu-item > .tautan-dokumen:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.kartu-item > .tautan-dokumen:hover {
+  background: var(--color-surface);
+}
+
+/* ---------------------------------------------------------- disclosure */
+
+.catatan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.catatan-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.catatan-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.catatan-isi {
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+/* ================================================================== RKA */
+
+.panel-foot-note {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.tanda-baseline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-success);
+}
+
+.versi-tanda {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.baseline-kosong {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.baseline-judul {
+  margin: 0;
+  font-weight: var(--weight-medium);
+}
+
+.baseline-teks {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.baseline-fakta,
+.versi-fakta {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.versi-fakta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-4);
+}
+
+.baseline-baris,
+.versi-baris {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--text-caption);
+}
+
+.baseline-baris + .baseline-baris {
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.baseline-baris dt,
+.versi-baris dt {
+  color: var(--color-text-muted);
+}
+
+.baseline-baris dd,
+.versi-baris dd {
+  margin: 0;
+  text-align: right;
+  font-weight: var(--weight-medium);
+}
+
+.baseline-id {
+  font-size: var(--text-caption);
+  font-weight: var(--weight-regular);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.grid-kontrol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-weight) solid var(--color-border);
+}
+
+.grid-total {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-left: auto;
+  text-align: right;
+}
+
+.grid-total-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.grid-total-val {
+  font-weight: var(--weight-semibold);
+}
+
+/* The entry grid holds inputs, so its rows are taller than a report row and
+   the sticky header is off: a sticky header over a form scrolls oddly on a
+   laptop and gains nothing on a grid of twelve to forty rows. */
+.grid-rka .table td {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  vertical-align: middle;
+}
+
+.grid-rka .control {
+  font-size: var(--text-caption);
+}
+
+.kartu-btn.is-aktif {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-weak);
+}
+
+/* ========================================================== breakpoints */
+
+@media (max-width: 1024px) {
+  .kop-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .statement-head,
+  .statement-row {
+    grid-template-columns: minmax(0, 1fr) 140px 140px;
+  }
+  .coa-head,
+  .coa-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 220px) 104px;
+  }
+}
+
+@media (max-width: 640px) {
+  .kop-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .filter-laporan {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter-laporan-group,
+  .filter-laporan-group.is-grow {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .filter-laporan-aksi {
+    margin-left: 0;
+  }
+  .filter-laporan-aksi .btn {
+    width: 100%;
+  }
+
+  /* The two figure columns become two labelled rows under the name, so a
+     statement reads top to bottom instead of scrolling sideways. */
+  .statement-head {
+    display: none;
+  }
+  .statement-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+    padding: var(--space-3) 0;
+  }
+  .statement-angka {
+    justify-content: space-between;
+  }
+  .statement-angka-label {
+    display: inline;
+    color: var(--color-text-subtle);
+  }
+
+  .coa-head {
+    display: none;
+  }
+  .coa-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+    padding: var(--space-3) 0;
+  }
+  .coa-meta {
+    grid-column: 1 / -1;
+  }
+  .coa-row.is-level-1 .coa-utama,
+  .coa-row.is-level-2 .coa-utama,
+  .coa-row.is-level-3 .coa-utama,
+  .coa-row.is-level-4 .coa-utama {
+    padding-left: 0;
+  }
+  .coa-row.is-level-1 .coa-kode {
+    padding-left: var(--space-3);
+  }
+  .coa-row.is-level-2 .coa-kode {
+    padding-left: var(--space-5);
+  }
+  .coa-row.is-level-3 .coa-kode,
+  .coa-row.is-level-4 .coa-kode {
+    padding-left: var(--space-6);
+  }
+
+  .trio-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mutasi-angka {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .versi-fakta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .grid-kontrol {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .grid-total {
+    margin-left: 0;
+    text-align: left;
+  }
+  .rincian-item {
+    align-items: flex-start;
+  }
+}
+
+/* The budget grid's phone shape: one card per dimension, fields stacked. */
+.anggaran-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.anggaran-kartu .kartu-judul {
+  margin: 0;
+}

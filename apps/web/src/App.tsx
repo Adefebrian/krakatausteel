@@ -9,6 +9,15 @@ import { Login } from "./pages/Login";
 import { Placeholder } from "./pages/Placeholder";
 import { Parameter } from "./pages/konfigurasi/Parameter";
 import { ReportCatalog } from "./pages/ReportCatalog";
+import { AktivitasPage } from "./pages/laporan/Aktivitas";
+import { ArusKasPage } from "./pages/laporan/ArusKas";
+import { BaganAkunPage } from "./pages/laporan/BaganAkun";
+import { BukuBesarPage } from "./pages/laporan/BukuBesar";
+import { NeracaLajurPage } from "./pages/laporan/NeracaLajur";
+import { PerubahanAsetNetoPage } from "./pages/laporan/PerubahanAsetNeto";
+import { PosisiKeuanganPage } from "./pages/laporan/PosisiKeuangan";
+import { RkaVsRealisasiPage } from "./pages/laporan/RkaVsRealisasi";
+import { RkaPage } from "./pages/rka/RkaPage";
 import { Lpj } from "./pages/nonpumk/Lpj";
 import { MonitoringLpj } from "./pages/nonpumk/MonitoringLpj";
 import { Penilaian } from "./pages/nonpumk/Penilaian";
@@ -119,6 +128,25 @@ const HALAMAN: Record<
   "/nonpumk/monitoring-lpj": (route) => <MonitoringLpj route={route} />,
 
   "/konfigurasi/parameter": (route) => <Parameter route={route} />,
+
+  // Spec 9.3. One page per budget type, all three sharing one implementation:
+  // the dimension a line is filed against is the only thing that differs, and
+  // the server tells the page which one it is.
+  "/admin/rka-pumk": (route) => <RkaPage route={route} jenis="PUMK" />,
+  "/admin/rka-nonpumk": (route) => <RkaPage route={route} jenis="NON_PUMK" />,
+  "/admin/rka-keuangan": (route) => <RkaPage route={route} jenis="KEUANGAN" />,
+
+  // Spec 10.3 reports 16 to 20, 22, 23 and 24. Every other entry in the
+  // catalogue still falls through to Placeholder, which is what keeps the
+  // unbuilt reports honest instead of rendering an empty table.
+  "/laporan/bagan-akun": (route) => <BaganAkunPage route={route} />,
+  "/laporan/laporan-aktivitas": (route) => <AktivitasPage route={route} />,
+  "/laporan/laporan-arus-kas": (route) => <ArusKasPage route={route} />,
+  "/laporan/laporan-posisi-keuangan": (route) => <PosisiKeuanganPage route={route} />,
+  "/laporan/perubahan-aset-neto": (route) => <PerubahanAsetNetoPage route={route} />,
+  "/laporan/buku-besar": (route) => <BukuBesarPage route={route} />,
+  "/laporan/neraca-lajur": (route) => <NeracaLajurPage route={route} />,
+  "/laporan/rka-vs-realisasi": (route) => <RkaVsRealisasiPage route={route} />,
 };
 
 function PageOutlet() {

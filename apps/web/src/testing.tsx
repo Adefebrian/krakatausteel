@@ -78,6 +78,27 @@ export async function typeInto(input: HTMLInputElement, value: string): Promise<
 }
 
 /**
+ * The same, for a textarea. Its own function rather than a widened `typeInto`
+ * because the native value setter lives on a DIFFERENT prototype, and calling
+ * HTMLInputElement's setter on a textarea throws inside happy-dom rather than
+ * failing an assertion, which reads like a broken test instead of a broken
+ * call.
+ */
+export async function typeIntoTextarea(
+  area: HTMLTextAreaElement,
+  value: string,
+): Promise<void> {
+  await act(async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      globalThis.HTMLTextAreaElement.prototype,
+      "value",
+    );
+    descriptor?.set?.call(area, value);
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+/**
  * Choose an option the way a user would. Same reason `typeInto` goes through
  * the native setter: React tracks the value itself, and a bare
  * `dispatchEvent` outside `act` leaves the resulting render for the scheduler,
