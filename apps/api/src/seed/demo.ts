@@ -34,11 +34,38 @@ export interface DemoUserSpec {
   catatan: string;
 }
 
+// ONE PUSAT PLUS THREE BRANCHES, which is what spec 13 asks for and what
+// ASSUMPTIONS.md A-01 records the branch hierarchy decision against. Fase 0
+// shipped two branches because two is all a cross-branch authorisation test
+// needs; the transaction generator of spec 13 needs three, so the demographic
+// and per-branch breakdowns of the spec 10 reports have more than an A/B split
+// to show.
 export const DEMO_CABANG = [
   { kode: "00", nama: "Kantor Pusat", isPusat: true },
   { kode: "01", nama: "Cabang Cilegon", isPusat: false },
   { kode: "02", nama: "Cabang Serang", isPusat: false },
+  { kode: "03", nama: "Cabang Anyer", isPusat: false },
 ] as const;
+
+/**
+ * The maker / checker / approver trio of each operational branch, by branch
+ * code.
+ *
+ * EVERY BRANCH NEEDS ITS OWN THREE, and that is a control, not convenience.
+ * `pumk_review` and `pumk_approval` carry segregation triggers (TJSL-SOD-001 /
+ * TJSL-SOD-002, migration 0008), and the engine refuses a checker who is the
+ * maker (`KONFLIK_MAKER_CHECKER`) or an approver who reviewed
+ * (`KONFLIK_CHECKER_APPROVER`) ahead of them. A branch with one operational
+ * account therefore cannot carry a single proposal from DRAFT to DICAIRKAN,
+ * so a demo world for that branch would be empty. Borrowing another branch's
+ * checker is not an option either: spec 2 rule 3 binds every operational role
+ * to its own branch, and the engine enforces it (`CABANG_DILUAR_SCOPE`).
+ */
+export const DEMO_PETUGAS_CABANG: Readonly<Record<string, { maker: string; checker: string; approver: string }>> = {
+  "01": { maker: "maker", checker: "checker", approver: "approver" },
+  "02": { maker: "maker.serang", checker: "checker.serang", approver: "approver.serang" },
+  "03": { maker: "maker.anyer", checker: "checker.anyer", approver: "approver.anyer" },
+};
 
 export const DEMO_USERS: readonly DemoUserSpec[] = [
   {
@@ -85,6 +112,51 @@ export const DEMO_USERS: readonly DemoUserSpec[] = [
     role: "MAKER",
     cabangKode: "02",
     catatan: "Ada supaya skenario lintas cabang (spec 16 #24) punya data di kedua sisi",
+  },
+  {
+    username: "checker.serang",
+    nama: "Demo Checker Serang",
+    email: "checker.serang@demo.tjsl.local",
+    nip: "D-0009",
+    role: "CHECKER",
+    cabangKode: "02",
+    catatan: "Pasangan empat mata Cabang Serang; tanpa dia cabang ini tidak bisa punya proposal jalan",
+  },
+  {
+    username: "approver.serang",
+    nama: "Demo Approver Serang",
+    email: "approver.serang@demo.tjsl.local",
+    nip: "D-0010",
+    role: "APPROVER",
+    cabangKode: "02",
+    catatan: "Menyetujui proposal dan menutup periode untuk Cabang Serang",
+  },
+  {
+    username: "maker.anyer",
+    nama: "Demo Maker Anyer",
+    email: "maker.anyer@demo.tjsl.local",
+    nip: "D-0011",
+    role: "MAKER",
+    cabangKode: "03",
+    catatan: "Input proposal, survey, akad, pencairan, angsuran di Cabang Anyer",
+  },
+  {
+    username: "checker.anyer",
+    nama: "Demo Checker Anyer",
+    email: "checker.anyer@demo.tjsl.local",
+    nip: "D-0012",
+    role: "CHECKER",
+    cabangKode: "03",
+    catatan: "Review dan rekomendasi Cabang Anyer",
+  },
+  {
+    username: "approver.anyer",
+    nama: "Demo Approver Anyer",
+    email: "approver.anyer@demo.tjsl.local",
+    nip: "D-0013",
+    role: "APPROVER",
+    cabangKode: "03",
+    catatan: "Setujui proposal dan eksekusi closing Cabang Anyer",
   },
   {
     username: "adminpusat",

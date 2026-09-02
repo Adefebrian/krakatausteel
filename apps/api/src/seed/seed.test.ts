@@ -160,7 +160,25 @@ describe("demo accounts (spec 14: bisa login dengan semua role)", () => {
 
   test("every demo account can actually log in with the documented password", async () => {
     await seedAll();
-    const { app } = createApp({ keyPrefix: `seedtest:${crypto.randomUUID().slice(0, 8)}` });
+    // THE PER-IP LOGIN CEILING IS RAISED FOR THIS TEST, AND ONLY THE CEILING.
+    // `LOGIN_LIMIT_PER_IP` is 10 in a five minute window, and the demo cast is
+    // thirteen accounts now: three branches each need their own maker, checker
+    // and approver, because the segregation triggers refuse a proposal whose
+    // reviewer is its maker (see DEMO_PETUGAS_CABANG). Every request here comes
+    // from the same address because `app.fetch` has no socket peer, and
+    // core/client-ip.ts deliberately IGNORES X-Forwarded-For from an untrusted
+    // peer, so the thirteenth login would be a 429 no matter what header the
+    // test sends. That is the guard working.
+    //
+    // The limiter itself is proved by core/hardening.test.ts and the auth
+    // suite, which is where it belongs. What THIS test proves is that every
+    // credential SEED.md prints actually logs in and lands on the documented
+    // role and branch, and a throttle in the way would silently turn that into
+    // "the first ten do".
+    const { app } = createApp({
+      keyPrefix: `seedtest:${crypto.randomUUID().slice(0, 8)}`,
+      loginLimits: { perIp: DEMO_USERS.length + 5 },
+    });
     const { Request: NativeRequest } = nativeFetchApi();
 
     for (const spec of DEMO_USERS) {

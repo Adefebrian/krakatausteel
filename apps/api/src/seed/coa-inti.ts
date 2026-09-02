@@ -592,6 +592,32 @@ export async function seedCoaInti(
         [bumnId, def.kode],
       );
       id = existing[0]?.id;
+
+      // BACKFILL A MISSING CASH FLOW CLASSIFICATION, and nothing else.
+      //
+      // The insert above is DO NOTHING, deliberately: an account an accountant
+      // has edited must never be reset by a seed. But `klasifikasi_arus_kas`
+      // arrived after the first databases were seeded, so those rows still
+      // carry NULL, and report 18 refuses OUTRIGHT with
+      // KLASIFIKASI_ARUS_KAS_TIDAK_LENGKAP as soon as such an account becomes
+      // the counterpart of a cash movement. The whole statement of cash flows
+      // is unavailable until somebody notices.
+      //
+      // A NULL is an ABSENCE, not a decision, so filling one is a repair rather
+      // than an overwrite: the predicate below only touches rows where the
+      // column is still NULL and where this seed's own definition has a value.
+      // The two accounts whose definition deliberately has none (the allowance
+      // and Aset Neto, see their notes above) are excluded by `$3 IS NOT NULL`
+      // and stay NULL.
+      if (id && def.klasifikasiArusKas) {
+        await runner.query(
+          `UPDATE akun SET klasifikasi_arus_kas = $3, updated_by = $4
+            WHERE id = $1::uuid AND deleted_at IS NULL
+              AND klasifikasi_arus_kas IS NULL AND $3::text IS NOT NULL
+              AND kode = $2`,
+          [id, def.kode, def.klasifikasiArusKas, userId],
+        );
+      }
     }
     if (!id) throw new Error(`seedCoaInti: akun ${def.kode} gagal dibuat`);
     byKode.set(def.kode, id);

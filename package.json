@@ -23,6 +23,8 @@
     "db:reset": "bun tools/db.ts reset",
     "db:seed": "bun tools/db.ts seed",
     "db:seed:dev": "bun tools/db.ts seed:dev",
+    "db:seed:demo": "bun apps/api/src/seed/cli-demo.ts",
+    "db:seed:demo:dev": "bun apps/api/src/seed/cli-demo.ts --dev",
     "db:status": "bun tools/db.ts status"
   },
   "dependencies": {
