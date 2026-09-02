@@ -433,8 +433,9 @@ Login `maker` (Cilegon), buka akad milik Cabang Anyer lewat id-nya langsung:
 
 ## Cacat yang diketahui dan terlihat di data demo
 
-**Piutang Jasa Administrasi bersaldo negatif (sekitar Rp 87 juta), dan
-Pendapatan Jasa Administrasi jauh lebih kecil dari yang seharusnya.**
+**SUDAH DIPERBAIKI (migrasi 0030, ADR 0018). Piutang Jasa Administrasi dulu
+bersaldo negatif sekitar Rp 87 juta dan Pendapatan Jasa Administrasi jauh lebih
+kecil dari seharusnya.**
 
 Ini **bukan** cacat generator; generator justru yang memunculkannya. Sebabnya
 interaksi dua modul yang masing-masing benar sendiri-sendiri:
@@ -450,15 +451,31 @@ interaksi dua modul yang masing-masing benar sendiri-sendiri:
 
 Hasilnya: untuk setiap angsuran yang dibayar tepat waktu, ada kredit ke piutang
 jasa tanpa debit pasangannya, dan pendapatan jasa administrasi tidak pernah
-diakui. Neraca **tetap** balance (karena bebannya juga tidak muncul), sehingga
-tidak ada satu pun pemeriksaan integritas yang menangkapnya; yang salah adalah
-klasifikasinya.
+diakui. Neraca **tetap** balance (karena pendapatannya juga tidak muncul),
+sehingga tidak ada satu pun pemeriksaan integritas yang menangkapnya; yang
+salah adalah klasifikasinya.
 
-Perbaikannya ada di modul, bukan di seed, dan ada dua kandidat: setoran memilih
-event berdasarkan **ada atau tidaknya akrual untuk baris jadwal itu** (bukan
-berdasarkan kunci konfigurasi saja), atau akrual berhenti mengurangkan
-`jasa_diterima_periode`. Keputusannya milik tim yang memiliki
-`modules/angsuran` dan `modules/closing`.
+**Yang dikerjakan.** Bukan "akrual berhenti mengurangkan
+`jasa_diterima_periode`" (netting itu benar: setoran yang mengakui pendapatan
+langsung tidak boleh diakrual kedua kalinya), melainkan separuh yang lain.
+Migrasi 0030 menambah `pumk_jadwal_angsuran.jasa_akrual_belum_tertagih`, ditulis
+oleh mesin akrual closing per baris jadwal, sehingga setoran memilih eventnya
+**per rupiah** berdasarkan apakah jasa itu memang pernah diakrual, bukan
+berdasarkan satu sel konfigurasi. Satu setoran boleh punya dua kaki jasa
+sekaligus. Rinciannya di `docs/adr/0018`.
+
+**Angka dunia demo sesudah perbaikan** (jendela 24 bulan berakhir 2026-09):
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| Piutang Jasa Administrasi (1.1.04) | -86.693.337,67 | **+2.057.620,67** |
+| Pendapatan Jasa Administrasi (4.1.02) | 12.612.959,43 | **101.363.917,77** |
+
+Sesudah perbaikan, saldo 1.1.04 sama persis dengan
+`SUM(jasa_akrual_belum_tertagih)` seluruh baris jadwal aktif, dan pendapatan
+sama persis dengan jasa yang tertagih (99.306.297,10) ditambah jasa yang sudah
+diakrual tapi belum tertagih (2.057.620,67). Saldo 1.1.04 tidak pernah negatif
+di akhir bulan mana pun dari 24 bulan itu.
 
 **Laporan 24 untuk jenis PUMK dan NON_PUMK menolak begitu jendelanya menyentuh
 periode CLOSED** (`SKEMA_BELUM_LENGKAP`). Migrasi 0027 sudah menyiapkan

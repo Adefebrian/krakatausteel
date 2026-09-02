@@ -27,6 +27,7 @@ import { createLaporanModule, type LaporanEngine } from "../../modules/laporan";
 import { createNonPumkModule, type NonPumkEngine } from "../../modules/nonpumk";
 import { createPumkModule, type PumkEngine } from "../../modules/pumk";
 import { createRkaModule, type RkaEngine } from "../../modules/rka";
+import { createPortalModule, type PortalEngine } from "../../modules/portal";
 import { PERMISSIONS_BY_ROLE, type RoleCode } from "../../modules/auth";
 import { DEMO_BUMN_KODE, DEMO_PETUGAS_CABANG } from "../demo";
 import { bulanDariIso, bulanTambah, hariTerakhir, saatDari, type Bulan } from "./acak";
@@ -95,6 +96,7 @@ export interface Dunia {
   closing: ClosingEngine;
   rka: RkaEngine;
   laporan: LaporanEngine;
+  portal: PortalEngine;
 
   bumnId: string;
   pusat: CabangDemo;
@@ -165,6 +167,25 @@ function aktor(userId: string, role: RoleCode, cabangId: string, scope: readonly
   };
 }
 
+/**
+ * An always-allow rate limiter for the generator. See the note at the portal
+ * engine's construction below for why this is the one thing substituted, and
+ * why substituting it does not weaken anything the seed proves.
+ */
+function pembatasSeed(): {
+  consume: (key: string, limit: number, windowSeconds: number) => Promise<{
+    allowed: boolean;
+    remaining: number;
+    retryAfterSeconds: number;
+  }>;
+  reset: (key: string) => Promise<void>;
+} {
+  return {
+    consume: async (_key, limit) => ({ allowed: true, remaining: limit, retryAfterSeconds: 0 }),
+    reset: async () => undefined,
+  };
+}
+
 export async function bangunDunia(opsi: OpsiDunia): Promise<Dunia> {
   const db = opsi.db;
   const log = opsi.log ?? ((line: string) => console.log(line));
@@ -186,6 +207,23 @@ export async function bangunDunia(opsi: OpsiDunia): Promise<Dunia> {
   const closing = createClosingModule({ db, jurnal: jurnal.engine, audit, jam: jam.now });
   const rka = createRkaModule({ db, audit, jam: jam.now });
   const laporan = createLaporanModule({ db, jam: jam.now });
+  // The portal engine, so the demo's twenty five online applications go
+  // through the intake path a member of the public uses rather than being
+  // inserted as rows (spec 9.5, spec 13).
+  //
+  // WHAT IS SUBSTITUTED HERE, AND WHY IT IS ONLY THIS: the RATE LIMITER, and
+  // nothing else. The engine, its allowlist validation, its ticket generation
+  // and its verifier hashing are the shipped ones. The limiter is not: the
+  // anti-spam ceiling exists to stop the internet filing five applications an
+  // hour from one address, and a generator filing twenty five in a loop from
+  // no address at all is not the internet. Substituting the real limiter would
+  // also mean the seed depended on Redis, which it otherwise does not.
+  const portal = createPortalModule({
+    db,
+    audit,
+    pembatas: pembatasSeed(),
+    jam: jam.now,
+  });
 
   const bumn = await db.query<{ id: string }>(
     `SELECT id::text AS id FROM bumn WHERE kode = $1 AND deleted_at IS NULL`,
@@ -307,6 +345,7 @@ export async function bangunDunia(opsi: OpsiDunia): Promise<Dunia> {
     closing: closing.engine,
     rka: rka.engine,
     laporan: laporan.engine,
+    portal: portal.engine,
     bumnId,
     pusat,
     cabang,

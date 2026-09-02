@@ -159,6 +159,13 @@ export const NAMA_ERROR_BERKODE: ReadonlySet<string> = new Set([
   // Fase 7, listed WITH their routers rather than after them.
   "ToolsError",
   "DashboardError",
+  // Fase 7, the public surface. Listed WITH their routers, and it matters more
+  // here than anywhere else: an unregistered error class on an
+  // UNAUTHENTICATED route would answer the internet with a bare 500 and leave
+  // no DITOLAK row for the attempt that caused it.
+  "PortalError",
+  "MitraError",
+  "ImporError",
 ]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
@@ -380,6 +387,56 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   // compared", which is the one wrong answer an operator would act on.
   MAPPING_PIUTANG_TIDAK_ADA: "KONFLIK",
   PERIODE_TIDAK_ADA: "TIDAK_DITEMUKAN",
+
+  // --- modules/portal (spec 9.5), the PUBLIC surface -----------------------
+  //
+  // Same rule as everywhere above: absent means 400, which is right for
+  // `FORMULIR_TIDAK_VALID` and `PEMERIKSA_WAJIB` (both are problems with the
+  // body, fixed by rewriting the form).
+  //
+  // `TIKET_ATAU_PEMERIKSA_SALAH` IS A 404 ON PURPOSE, AND IT IS THE ONLY
+  // ANSWER A FAILED STATUS CHECK GETS. Unknown ticket, wrong NIK, wrong date
+  // of birth: one code, one message, one status. A 401 for "wrong verifier"
+  // and a 404 for "no such ticket" would turn the endpoint into an oracle for
+  // whether an application exists, which is exactly the question the check is
+  // supposed to protect.
+  TIKET_ATAU_PEMERIKSA_SALAH: "TIDAK_DITEMUKAN",
+  ENTITAS_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  TERLALU_BANYAK_PENGAJUAN: "TERLALU_BANYAK_PERMINTAAN",
+  TERLALU_BANYAK_PERCOBAAN: "TERLALU_BANYAK_PERMINTAAN",
+  STATUS_TIDAK_BISA_DIUBAH: "KONFLIK",
+
+  // --- modules/mitra (spec 4.9), the SECOND PRINCIPAL ----------------------
+  //
+  // `KREDENSIAL_MITRA_SALAH` and `SESI_MITRA_TIDAK_VALID` are 401s so the
+  // error handler writes the DITOLAK row spec 2 rule 5 requires for an
+  // authentication refusal; `WAJIB_GANTI_SANDI` is a 403 for the same reason,
+  // because a session that is being held back from the rest of the portal is
+  // an authorisation decision worth having in the trail.
+  //
+  // `AKAD_TIDAK_DITEMUKAN` is a 404 and is deliberately the ONLY answer for an
+  // akad that belongs to another mitra. A 403 there would confirm that the id
+  // names a real contract, which is the enumeration this module exists to
+  // prevent.
+  KREDENSIAL_MITRA_SALAH: "TIDAK_TERAUTENTIKASI",
+  SESI_MITRA_TIDAK_VALID: "TIDAK_TERAUTENTIKASI",
+  WAJIB_GANTI_SANDI: "TIDAK_BERWENANG",
+  TERLALU_BANYAK_PERCOBAAN_MASUK: "TERLALU_BANYAK_PERMINTAAN",
+  AKUN_MITRA_SUDAH_ADA: "KONFLIK",
+  AKUN_MITRA_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+
+  // --- modules/impor (spec 9.6) -------------------------------------------
+  //
+  // Absent means 400, which is right for every "fix the file" refusal:
+  // `BERKAS_KOSONG`, `BERKAS_TERLALU_BESAR`, `TERLALU_BANYAK_BARIS`,
+  // `HEADER_TIDAK_LENGKAP`, `JENIS_TIDAK_DIKENAL`, and `ADA_BARIS_DITOLAK`
+  // (whose `detail.ditolak` carries every rejection with its line number, and
+  // which is the whole product of the refusal).
+  //
+  // The one listed here is the one where 400 would be a LIE: the file is
+  // perfectly well formed and has simply already been imported, so an
+  // identical retry refuses identically.
+  BERKAS_SUDAH_DIIMPOR: "KONFLIK",
 };
 
 /**

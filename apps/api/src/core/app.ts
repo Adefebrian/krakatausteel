@@ -53,6 +53,9 @@ import { createRkaHttpModule } from "../modules/rka";
 import { createLaporanHttpModule } from "../modules/laporan";
 import { createToolsHttpModule } from "../modules/tools";
 import { createDashboardHttpModule } from "../modules/dashboard";
+import { createPortalHttpModule } from "../modules/portal";
+import { createMitraHttpModule } from "../modules/mitra";
+import { createImporHttpModule } from "../modules/impor";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -83,6 +86,23 @@ export interface AppOverrides {
   /** argon2id cost. Tests lower it; production never sets it. */
   passwordOptions?: { memoryCost?: number; timeCost?: number };
   loginLimits?: { perIp?: number; perUsername?: number; windowSeconds?: number };
+  /**
+   * Anti-spam ceilings for the PUBLIC portal. A cost knob for the harness in
+   * the same family as `loginLimits`: production never sets it, so
+   * modules/portal's own constants apply, and those constants are proved
+   * against a fixture that does not raise them
+   * (modules/portal/portal-batas.test.ts).
+   */
+  portalLimits?: {
+    pengajuanPerIp?: number;
+    pengajuanPerIpHarian?: number;
+    jendelaPengajuanDetik?: number;
+    cekPerIp?: number;
+    cekPerTiket?: number;
+    jendelaCekDetik?: number;
+    rutePengajuan?: number;
+    ruteCek?: number;
+  };
   /** Namespace for Redis keys, so a test run cannot collide with another. */
   keyPrefix?: string;
 }
@@ -255,6 +275,102 @@ export function createApp(overrides: AppOverrides = {}) {
     guards: auth.guards,
   });
 
+  // Fase 7 (spec 9.5), THE PUBLIC PORTAL: the first unauthenticated surface in
+  // this application.
+  //
+  // TWO THINGS ABOUT THIS WIRING ARE SECURITY DECISIONS, not defaults.
+  //
+  // NO JOURNAL PORT AND NO ANGSURAN PORT. This engine writes exactly one
+  // table, `portal_submission`, so there is no path from a public form to a
+  // `jurnal`, a `mitra`, a proposal or an akad at all: invariant 11 is
+  // unreachable from here rather than merely respected. Turning a submission
+  // into a proposal is `POST /pumk/portal/konversi` under `portal.konversi`, a
+  // staff act, and it stays one.
+  //
+  // A FAIL-CLOSED LIMITER, the same policy modules/auth's login uses and the
+  // opposite of the global one. The global limiter fails OPEN because Redis
+  // being down must not take the API down; for a public WRITE and for a
+  // credential check that stance is wrong, because it hands an attacker an
+  // unmetered window in exchange for knocking the cache over first.
+  const pembatasKetat = overrides.loginLimiter ?? createRateLimiterAdapter({ failOpen: false });
+  const portal = createPortalHttpModule({
+    db,
+    audit,
+    pembatas: pembatasKetat,
+    pembatasRute: pembatasKetat,
+    keyPrefix,
+    ...(overrides.passwordOptions ? { passwordOptions: overrides.passwordOptions } : {}),
+    ...(overrides.portalLimits ? { batas: overrides.portalLimits } : {}),
+    guards: auth.guards,
+  });
+
+  // Fase 7 (spec 4.9), THE SECOND KIND OF PRINCIPAL.
+  //
+  // Wired next to auth but sharing NOTHING with it: its own cookie name, its
+  // own Redis session namespace, its own guard, its own shorter lifetimes.
+  // modules/mitra/contract.ts's header is the argument for why a mitra is not
+  // an `app_user` with an empty role; the short version is that reusing
+  // `Principal` would mean filling every authorisation field on it with a lie,
+  // and `audit_log.user_id` is a foreign key to `app_user`.
+  //
+  // It gets the staff `guards` too, and only for the two provisioning routes
+  // (`POST /mitra/akun*`, `konfigurasi.user`): issuing a borrower's credential
+  // is an officer's act, and there is no self-registration.
+  //
+  // NO JOURNAL PORT, NO ANGSURAN PORT, NO PUMK PORT. Every mitra-facing route
+  // is a SELECT filtered by the session's own `mitra_id`.
+  const mitra = createMitraHttpModule({
+    db,
+    kv,
+    audit,
+    pembatas: pembatasKetat,
+    pembatasRute: pembatasKetat,
+    guards: auth.guards,
+    keyPrefix,
+    ...(overrides.passwordOptions ? { passwordOptions: overrides.passwordOptions } : {}),
+    ...(overrides.sessionOptions?.now ? { jam: overrides.sessionOptions.now } : {}),
+    // The harness's ONE cost knob for authentication ceilings, applied to both
+    // login surfaces. Production never sets it, so both keep their own
+    // constants; a test file that makes hundreds of login calls from one
+    // (absent) client address would otherwise be testing the rate limiter.
+    ...(overrides.loginLimits
+      ? {
+          batasMasuk: {
+            ...(overrides.loginLimits.perIp !== undefined ? { perIp: overrides.loginLimits.perIp } : {}),
+            ...(overrides.loginLimits.perUsername !== undefined
+              ? { perEmail: overrides.loginLimits.perUsername }
+              : {}),
+            ...(overrides.loginLimits.windowSeconds !== undefined
+              ? { windowSeconds: overrides.loginLimits.windowSeconds }
+              : {}),
+          },
+        }
+      : {}),
+  });
+
+  // Fase 7 (spec 9.6), THE BULK IMPORT: the writing half of the tools.
+  //
+  // STILL NO JOURNAL PORT, and that is the point of the `angsuran` factory
+  // instead. Spec 9.6 requires an import to be all-or-nothing per FILE, but
+  // `angsuran.alokasikanSetoran` opens its own transaction per receipt, which
+  // would make a 200-row file 200 independent commits. Rather than change that
+  // engine's boundary (correct for its own callers), the import builds a
+  // SECOND instalment engine over a db port bound to the import's ALREADY OPEN
+  // transaction, so the whole file becomes one commit and one rollback.
+  //
+  // The engine is unmodified and the ledger path is unchanged: that second
+  // instance still reaches `jurnal` only through `jurnal.engine`, i.e. through
+  // `postingEvent`, which is what invariant 11 rests on. This factory is
+  // exactly the kind of thing only the composition root may write, because it
+  // is the one place allowed to know two modules at once.
+  const impor = createImporHttpModule({
+    db,
+    audit,
+    angsuran: (terikat) =>
+      createAngsuranModule({ db: terikat, jurnal: jurnal.engine }).engine,
+    guards: auth.guards,
+  });
+
   // modules/example IS NOT MOUNTED, and must not be.
   //
   // It is the repo template's reference module and it is unauthenticated by
@@ -282,6 +398,9 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/laporan", laporan.routes)
     .route("/tools", tools.routes)
     .route("/dashboard", dashboard.routes)
+    .route("/portal", portal.routes)
+    .route("/mitra", mitra.routes)
+    .route("/impor", impor.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -308,6 +427,9 @@ export function createApp(overrides: AppOverrides = {}) {
     laporanBaca: laporan.baca,
     tools: tools.engine,
     dashboard: dashboard.engine,
+    portal: portal.engine,
+    mitra: mitra.engine,
+    impor: impor.engine,
   };
 }
 
@@ -327,4 +449,7 @@ export const rka = instance.rka;
 export const laporan = instance.laporan;
 export const tools = instance.tools;
 export const dashboard = instance.dashboard;
+export const portal = instance.portal;
+export const mitra = instance.mitra;
+export const impor = instance.impor;
 export type AppType = typeof app;
