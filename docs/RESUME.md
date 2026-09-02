@@ -1,5 +1,63 @@
 # Titik lanjut
 
+## DIJEDA 2026-09-02 atas permintaan pemilik repo, tiga agen dihentikan di tengah jalan
+
+**Working tree sedang di tengah perubahan yang sengaja merah. Jangan anggap kegagalan test
+sebagai kerusakan sampai membaca bagian ini.**
+
+Commit terakhir `6209557`, hijau saat di-commit. Yang belum di-commit adalah pekerjaan tiga agen
+yang dihentikan.
+
+| Gerbang | Keadaan saat dijeda |
+|---|---|
+| `bun test` | 2571 lulus, **10 gagal** |
+| `bun run typecheck` | **1 error**, `apps/web/src/pages/laporan/Matriks.tsx` |
+| `bun run check:boundaries` | PASS |
+
+### 1. Pembekuan saldo per dimensi, `modules/closing`, berhenti tepat sebelum implementasi
+
+Kesepuluh test yang merah **semuanya milik agen ini, dan merahnya benar**. Agen menulis test
+lebih dulu (memang begitu aturannya di repo ini), lalu dihentikan tepat saat mau menulis tiga
+query pembekuannya. Jadi ini keadaan merah yang diharapkan, bukan regresi.
+
+Sudah ada di disk: `migrations/0032_beku_dimensi_ditulis.sql`,
+`apps/api/src/modules/closing/closing-saldo-dimensi.test.ts`, plus perubahan di `repo.ts` dan
+`test-support.ts`.
+
+Yang dikerjakannya: mengisi `saldo_akun_dimensi_periode`, tabel yang dibuat migrasi 0027 dan
+**tidak pernah ditulis siapa pun**. Itu yang bikin Laporan 24 menolak jenis PUMK dan NON PUMK di
+periode tertutup, dan bikin dashboard tidak punya rincian per bidang untuk bulan tertutup.
+
+**Lanjutkan dengan membuat kesepuluh test itu hijau, jangan dengan mengubah test-nya.**
+
+### 2. Layar 23 laporan operasional dan portal, `apps/web`, berhenti di tengah berkas
+
+Satu error typecheck: `Matriks.tsx` mengimpor `Angka` yang belum diekspor
+`api/laporan-operasional.ts`. Berkas baru yang sudah ada: `generik.tsx`, `operasional.tsx`,
+`Rentang.tsx`, `Matriks.tsx`, `AgingPiutang.tsx`, `KartuPiutangLaporan.tsx`.
+
+Pendekatannya: satu layar generik yang digerakkan katalog untuk mayoritas laporan, plus layar
+sendiri untuk yang bentuknya memang beda (matriks aging, kartu piutang). **Portal publik dan area
+mitra belum tersentuh sama sekali** oleh agen ini.
+
+### 3. Ekspor Excel dan PDF, berhenti paling awal
+
+Cuma `apps/api/src/core/xlsx/` yang ada, dan isinya belum tentu utuh. Agen baru mulai menulis
+inti ZIP/OOXML berbatas. Belum ada dependensi yang ditambahkan, belum ada `laporan.export`.
+
+Pemilik repo **sudah menyetujui menambah library xlsx**. Syarat yang saya berikan ke agen dan
+masih berlaku: batas ukuran berkas, batas jumlah entri, batas ukuran terdekompresi (zip bomb),
+tidak ada resolusi entitas eksternal, dan setiap sel teks yang diekspor dinetralkan dari formula
+injection (`=`, `+`, `-`, `@`, tab, carriage return).
+
+### Yang harus dikerjakan lebih dulu saat lanjut
+
+OPEN-QUESTIONS 29, memisahkan `admin.closing.periode` dari perhitungan penyisihan dan akrual,
+**menunggu `modules/closing` bebas**. Sekarang modul itu sudah bebas karena agennya dihentikan,
+jadi ini bisa dikerjakan lebih dulu atau bersamaan.
+
+---
+
 Diperbarui setelah commit `7678e55`, "the other 23 reports, and the identities that make them believable".
 
 Dokumen ini menggambarkan keadaan repo pada saat penulisan, bukan rencana. Kalau isinya berbeda dengan yang di disk, yang di disk benar.
