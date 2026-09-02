@@ -226,9 +226,41 @@ export function setiapAngka(nilai: unknown, jalur = "$"): Array<[string, Angka]>
   return keluar;
 }
 
-/** Asserts every rendered cell in a whole report satisfies the spec 10 rule. */
-export function semuaAngkaSah(laporan: unknown, jalur = "$"): number {
+/**
+ * Asserts every rendered cell in a whole report satisfies the spec 10 rule,
+ * and returns how many it checked.
+ *
+ * THE PER-REPORT FLOOR EXISTS BECAUSE A WALKER THAT FOUND NOTHING WOULD PASS
+ * SILENTLY. But one of the seven genuinely has no money in it: spec 10.3
+ * report 16 (Bagan Akun) is a chart of accounts tree of code, name, type,
+ * normal balance and status, and ./contract.ts declares no monetary field on
+ * it. Widening that type to satisfy this helper would be the test dictating
+ * the shape of a report, which is the move the contract forbids by name.
+ *
+ * `tanpaUang` IS AN OPT-OUT THAT ASSERTS THE OPPOSITE RATHER THAN SKIPPING.
+ * A caller declaring a report figure-free must be right: if such a report ever
+ * grows an `Angka`, this fails, so the flag cannot rot into a blanket
+ * exemption that hides a real walker regression. That is why it is a flag here
+ * rather than a hardcoded list of "the six statements" in the caller, which
+ * would silently stop covering the seventh report somebody adds later.
+ *
+ * Non-vacuity for the suite as a whole is carried by the caller's aggregate
+ * floor over the returned counts, which this does not weaken: a figure-free
+ * report contributes 0 to it, as it should.
+ */
+export function semuaAngkaSah(
+  laporan: unknown,
+  jalur = "$",
+  opsi: { tanpaUang?: boolean } = {},
+): number {
   const semua = setiapAngka(laporan, jalur);
+  if (opsi.tanpaUang) {
+    expect(
+      semua.map(([j]) => j),
+      `${jalur}: dinyatakan tanpa kolom uang, tapi memuat Angka`,
+    ).toEqual([]);
+    return 0;
+  }
   expect(semua.length, `${jalur}: laporan tanpa satu pun angka`).toBeGreaterThan(0);
   for (const [j, a] of semua) angkaSah(a, j);
   return semua.length;
@@ -565,23 +597,43 @@ const AKUN_TAMBAHAN: ReadonlyArray<{
     // SHIPPED BY THE SEED under this exact code, as the single undivided
     // category "Aset Neto". This world splits the category in two, so the
     // seeded row is renamed and re-classified rather than duplicated.
+    //
+    // PENDANAAN, AND THE SEED'S REASON FOR LEAVING IT NULL DOES NOT APPLY HERE.
+    // apps/api/src/seed/coa-inti.ts says a movement in net assets is "a
+    // reclassification, not a cash movement, so claiming a section would put
+    // money in Arus Kas that never touched cash". That is true of a net-asset
+    // TO net-asset journal, and `klasifikasi_arus_kas` is never consulted for
+    // one: it is read only when this account is the COUNTER-SIDE of a movement
+    // on an `is_kas` account, i.e. only when cash did move. In this world that
+    // happens exactly once, the opening funding of the unit in
+    // ${TAHUN_LALU}-01, and money arriving from the parent BUMN as capital is a
+    // FINANCING inflow by any reading of the direct method.
+    //
+    // Leaving it null is what made the classification-completeness check
+    // unable to run over the comparative span at all, which is how a column of
+    // this statement came to omit counter-accounts silently. See
+    // ./laporan-arus-kas.test.ts.
     kode: KODE_AKUN.asetNetoTidakTerikat,
     nama: "Aset Neto Tidak Terikat",
     tipe: "ASET_NETO",
     saldoNormal: "K",
     parentKode: "3",
     klasifikasi: KODE_BARIS.asetNetoTidakTerikat,
-    arusKas: null,
+    arusKas: "PENDANAAN",
     aktif: true,
   },
   {
+    // Same reasoning as its unrestricted twin above. No journal in the
+    // standard book puts cash opposite this one, so it classifies nothing
+    // today; it carries the section so that a world which DOES fund the
+    // restricted category in cash is not a refusal waiting to happen.
     kode: KODE_AKUN.asetNetoTerikat,
     nama: "Aset Neto Terikat Temporer",
     tipe: "ASET_NETO",
     saldoNormal: "K",
     parentKode: "3",
     klasifikasi: KODE_BARIS.asetNetoTerikat,
-    arusKas: null,
+    arusKas: "PENDANAAN",
     aktif: true,
   },
   {
@@ -911,6 +963,23 @@ export const HARAPAN = {
   kenaikanKas: rp(105_000_000),
   kasAwal: rp(1_180_000_000),
 
+  // Arus Kas COMPARATIVE column, 2025-01-01..2025-03-31, main branch.
+  //
+  // LIKE FOR LIKE, THE SAME SPAN ONE YEAR EARLIER, which is Laporan
+  // Aktivitas's convention and not Laporan Posisi Keuangan's. A cash flow
+  // statement is a FLOW statement, so its comparative is a period, not a
+  // point. `kasAkhirQ1TahunLalu` is therefore cash at 2025-03-31 and is
+  // DELIBERATELY NOT `kasAkhirTahunLalu` (cash at 2025-12-31), which is the
+  // balance sheet's comparative cut-off. The two differ by the 2025 movements
+  // after March, and ./laporan-arus-kas.test.ts asserts that they differ
+  // rather than leaving it to be discovered.
+  kasAwalTahunLalu: rp(0),
+  arusOperasiTahunLalu: rp(400_000_000),
+  arusInvestasiTahunLalu: rp(0),
+  arusPendanaanTahunLalu: rp(1_000_000_000),
+  kenaikanKasTahunLalu: rp(1_400_000_000),
+  kasAkhirQ1TahunLalu: rp(1_400_000_000),
+
   // Perubahan Aset Neto, 2026 year to date, main branch.
   asetNetoTidakTerikatAwal: rp(1_363_000_000),
   asetNetoTidakTerikatAkhir: rp(1_643_000_000),
@@ -1090,7 +1159,37 @@ export interface DuniaLaporan {
 
   // --- configuration -------------------------------------------------------
   setelKonfigurasi(grup: string, kunciKonfig: string, nilai: string): Promise<void>;
+  /**
+   * Soft-deletes THIS WORLD'S OWN row only, so the SHIPPED GLOBAL DEFAULT
+   * still answers and the call SUCCEEDS. That is what it is for: "the client
+   * configured nothing, so the default applies". It is NOT a way to reach a
+   * missing-configuration refusal; use `tanpaKonfigurasi`.
+   */
   hapusKonfigurasi(grup: string, kunciKonfig: string): Promise<void>;
+  /**
+   * Runs `jalankan` with the key ABSENT AT BOTH LEVELS, this world's row and
+   * the SHIPPED GLOBAL one, then puts both back WHATEVER HAPPENS.
+   *
+   * WHY THIS EXISTS, AND WHAT IT COST TO LEARN. `hapusKonfigurasi` removes one
+   * level, and `akuntansi.tahun_buku_mulai_bulan` has a global row from
+   * migrations/0004, so the refusal test built on it could not fail closed by
+   * the module's own bumn-then-global resolution. Faced with that, this module
+   * was implemented to resolve THIS ONE KEY branch-only, while
+   * modules/closing and modules/rka resolve it branch-then-global. One key
+   * with two resolution orders in one system is a trap for whoever debugs a
+   * wrong fiscal year later, and it was a test defect that forced it, not a
+   * design disagreement. The convention is branch-then-global everywhere; this
+   * helper is what lets the test say "absent" and mean it.
+   *
+   * THE COST, STATED RATHER THAN HIDDEN. The global row is shared and
+   * `bun test` runs files in parallel, so during `jalankan` a concurrent world
+   * sees the key missing. The window is one engine call, the restore is in a
+   * `finally` so a throwing assertion still restores, and rows are
+   * soft-deleted and UN-deleted BY ID rather than deleted and re-inserted, so
+   * the original comes back with its own id and description. Same trade
+   * modules/nonpumk's `tanpaKonfigurasi` has carried since migrations/0022.
+   */
+  tanpaKonfigurasi<T>(grup: string, kunciKonfig: string, jalankan: () => Promise<T>): Promise<T>;
 
   tutup(): Promise<void>;
 }
@@ -1710,11 +1809,44 @@ export async function buatDunia(): Promise<DuniaLaporan> {
       );
     },
     async hapusKonfigurasi(grup, kunciKonfig) {
+      // THIS WORLD'S ROW ONLY, so the shipped global default still answers.
       await db.query(
         `update konfigurasi set deleted_at = now(), deleted_by = $4
           where bumn_id = $1 and grup = $2 and kunci = $3`,
         [bumn.id, grup, kunciKonfig, userId.adminPusat],
       );
+    },
+    async tanpaKonfigurasi(grup, kunciKonfig, jalankan) {
+      // BOTH ROWS. See the port's note: with bumn-then-global resolution,
+      // removing one level is not removing the configuration.
+      const hidup = await db.query<{ id: string; bumn_id: string | null }>(
+        `select id::text as id, bumn_id::text as bumn_id from konfigurasi
+          where grup = $2 and kunci = $3 and deleted_at is null
+            and (bumn_id = $1 or bumn_id is null)`,
+        [bumn.id, grup, kunciKonfig],
+      );
+      if (!hidup.some((r) => r.bumn_id === bumn.id)) {
+        throw new Error(
+          `fixture laporan: konfigurasi ${grup}.${kunciKonfig} tidak ada untuk bumn ini; ` +
+            "tambahkan ke KONFIGURASI_AWAL di test-support.ts",
+        );
+      }
+      for (const r of hidup) {
+        await db.query(
+          `update konfigurasi set deleted_at = now(), deleted_by = $2 where id = $1`,
+          [r.id, userId.adminPusat],
+        );
+      }
+      try {
+        return await jalankan();
+      } finally {
+        for (const r of hidup) {
+          await db.query(
+            `update konfigurasi set deleted_at = null, deleted_by = null where id = $1`,
+            [r.id],
+          );
+        }
+      }
     },
 
     async tutup() {

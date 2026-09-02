@@ -25,17 +25,20 @@
 // about that path, so every scope test below hands the engine a real id from
 // the other branch.
 //
-// TWO FINDINGS ARE FILED HERE AS FAIL-CLOSED REFUSALS. `admin.rka.approve` and
-// `admin.rka.view` are not in the shipped catalogue, so `setujuiRka` and the
-// read paths must refuse with IZIN_BELUM_TERDAFTAR rather than fall back to
-// `admin.rka`. See PERMISSION_RKA in ./contract.ts for why neither is a reuse,
-// and ./rka-fixture.test.ts for the catalogue evidence.
+// TWO FINDINGS WERE FILED HERE AS FAIL-CLOSED REFUSALS, AND BOTH ARE NOW
+// CLOSED. `admin.rka.approve` and `admin.rka.view` were absent from the shipped
+// catalogue, so `setujuiRka` and the read paths refused with
+// IZIN_BELUM_TERDAFTAR rather than falling back to `admin.rka`, and NOTHING in
+// ./rka-versi.test.ts could go green either, because every version test has to
+// approve something. That blast radius was correct and it was the point:
+// inventing the codes in a fixture to unblock the file is exactly the move the
+// three earlier findings survived.
 //
-// A CONSEQUENCE WORTH STATING PLAINLY: while those codes are missing, NOTHING
-// in ./rka-versi.test.ts can go green either, because every version test has to
-// approve something. That is the correct blast radius. Inventing the codes in a
-// fixture to unblock the file is exactly the move the three earlier findings
-// survived.
+// The catalogue now carries both, so the tests below assert the POSITIVE and
+// keep a record of what they used to claim. See PERMISSION_RKA in ./contract.ts
+// for why neither is a reuse of `admin.rka`, and ./rka-fixture.test.ts for the
+// catalogue evidence and for the guard that keeps IZIN_BELUM_TERDAFTAR
+// exercised on codes the catalogue genuinely lacks.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PERMISSIONS_BY_ROLE, canonicalPermission } from "../auth";
 import { KODE_RKA, PERMISSION_RKA } from "./contract";
@@ -182,10 +185,17 @@ describe("spec 2 rule 5: penolakan otorisasi tercatat di audit log", () => {
   });
 });
 
-describe("TEMUAN: persetujuan RKA tidak punya kode izin sendiri", () => {
-  test("setujuiRka gagal tertutup dengan IZIN_BELUM_TERDAFTAR, bahkan untuk Admin Pusat", async () => {
-    kodeAda(KODE_RKA.IZIN_BELUM_TERDAFTAR);
-    expect(canonicalPermission(PERMISSION_RKA.SETUJUI)).toBeNull();
+describe("persetujuan RKA punya kode izin sendiri, terpisah dari input", () => {
+  test("setujuiRka menuntut admin.rka.approve, dan Admin Pusat memegangnya", async () => {
+    // RE-PINNED. This test used to assert
+    //   canonicalPermission(PERMISSION_RKA.SETUJUI) === null
+    //   setujuiRka(..., adminPusat) refuses with IZIN_BELUM_TERDAFTAR
+    //   the message and detail name the missing code
+    // as a finding: Admin Pusat is built as a spread of PERMISSIONS, so it
+    // held everything the catalogue carried and still could not approve,
+    // because the code did not exist. The catalogue now carries it.
+    expect(canonicalPermission(PERMISSION_RKA.SETUJUI)).toBe(PERMISSION_RKA.SETUJUI);
+    expect(d.ctx.adminPusat.permissions).toContain(PERMISSION_RKA.SETUJUI);
 
     const rka = await d.engine.buatRka(
       {
@@ -196,48 +206,68 @@ describe("TEMUAN: persetujuan RKA tidak punya kode izin sendiri", () => {
       },
       d.ctx.adminPusat,
     );
+    // A DIFFERENT Admin Pusat approves, because the shipped segregation
+    // default is on. That is the subject of the last describe in this file;
+    // here it only has to not be the thing under test.
+    const disetujui = await d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusatLain);
+    expect(disetujui.status).toBe("DISETUJUI");
+    expect((await d.bacaRkaDb(rka.id)).approved_by).toBe(d.userId.adminPusatLain);
+  });
 
-    // Admin Pusat is built as a spread of PERMISSIONS, so it holds everything
-    // the catalogue carries. It still cannot approve, because the code does not
-    // exist. That is the finding, and failing closed is what surfaces it.
-    const err = await tolakDengan(
-      () => d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusat),
-      KODE_RKA.IZIN_BELUM_TERDAFTAR,
+  test("admin.rka TIDAK cukup untuk menyetujui, karena itu menggabungkan penyusun dan pemutus", async () => {
+    // UNCHANGED IN INTENT, AND IT IS THE HALF THAT SURVIVED THE DISCHARGE.
+    // The finding was never "a code is missing", it was "input and approval
+    // must not be one authority". So this still refuses, but now for the right
+    // reason: the holder lacks a code that EXISTS (TIDAK_BERWENANG) rather
+    // than naming one that does not (IZIN_BELUM_TERDAFTAR). An implementation
+    // that gated approval on `admin.rka` would still fail here.
+    //
+    // The context comes from `permissionsForRole` with exactly one code
+    // removed, the technique this file uses elsewhere, so it is not a
+    // hand-written grant.
+    const hanyaKelola = {
+      ...d.ctx.adminPusatLain,
+      permissions: d.ctx.adminPusatLain.permissions.filter(
+        (p) => p !== PERMISSION_RKA.SETUJUI,
+      ),
+    };
+    expect(hanyaKelola.permissions).toContain(PERMISSION_RKA.KELOLA);
+    expect(hanyaKelola.permissions).not.toContain(PERMISSION_RKA.SETUJUI);
+
+    const rka = await d.engine.buatRka(
+      {
+        cabangId: d.cabangId,
+        tahun: TAHUN_RKA,
+        jenis: "NON_PUMK",
+        baris: barisNonPumk(d.bidang.a.id, rp(1_000_000)),
+      },
+      d.ctx.adminPusat,
     );
-    // The message names the missing code, or an administrator has nothing to
-    // act on and concludes the feature is broken.
-    expect(err.message).toContain(PERMISSION_RKA.SETUJUI);
+    const err = await tolakDengan(
+      () => d.engine.setujuiRka({ rkaId: rka.id }, hanyaKelola),
+      KODE_RKA.TIDAK_BERWENANG,
+    );
     expect(err.detail.permission).toBe(PERMISSION_RKA.SETUJUI);
 
     // Nothing approved, so no baseline appeared as a side effect.
     expect((await d.bacaRkaDb(rka.id)).status).toBe("DRAFT");
     expect((await d.bacaRkaDb(rka.id)).approved_by).toBeNull();
   });
-
-  test("admin.rka TIDAK cukup untuk menyetujui, karena itu menggabungkan penyusun dan pemutus", async () => {
-    // The tempting shortcut, refused explicitly. If `admin.rka` gated approval,
-    // this test would pass a rejection that never happened and the finding
-    // would close itself.
-    const rka = await d.engine.buatRka(
-      {
-        cabangId: d.cabangId,
-        tahun: TAHUN_RKA,
-        jenis: "NON_PUMK",
-        baris: barisNonPumk(d.bidang.a.id, rp(1_000_000)),
-      },
-      d.ctx.adminPusat,
-    );
-    expect(d.ctx.adminPusat.permissions).toContain(PERMISSION_RKA.KELOLA);
-    await tolakDengan(
-      () => d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusat),
-      KODE_RKA.IZIN_BELUM_TERDAFTAR,
-    );
-  });
 });
 
-describe("TEMUAN: membaca RKA tidak punya kode baca sendiri", () => {
-  test("daftarRka dan bacaRka gagal tertutup untuk Auditor, yang justru butuh buktinya", async () => {
-    expect(canonicalPermission(PERMISSION_RKA.LIHAT)).toBeNull();
+describe("membaca RKA punya kode baca sendiri, dan Auditor memegangnya", () => {
+  test("daftarRka, bacaRka dan baseline terbuka untuk Auditor, tanpa kode tulis", async () => {
+    // RE-PINNED. This test used to assert
+    //   canonicalPermission(PERMISSION_RKA.LIHAT) === null
+    //   daftarRka / bacaRka / baseline all refuse with IZIN_BELUM_TERDAFTAR
+    // as a finding: spec 16 scenario 23 requires the Auditor to open every
+    // report and every audit screen, "which budget version was approved, by
+    // whom and when" is exactly that evidence, and the role could not reach it
+    // without being granted a WRITE code. The catalogue now carries
+    // `admin.rka.view` and the Auditor holds it.
+    expect(canonicalPermission(PERMISSION_RKA.LIHAT)).toBe(PERMISSION_RKA.LIHAT);
+    expect(d.ctx.auditor.permissions).toContain(PERMISSION_RKA.LIHAT);
+
     const rka = await d.engine.buatRka(
       {
         cabangId: d.cabangId,
@@ -247,22 +277,40 @@ describe("TEMUAN: membaca RKA tidak punya kode baca sendiri", () => {
       },
       d.ctx.adminPusat,
     );
+    await d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusatLain);
 
-    // Spec 16 scenario 23: the Auditor must be able to open every report and
-    // every audit screen. Which budget version was approved, by whom and when
-    // is exactly that kind of evidence, and today the role cannot reach it
-    // without being granted a WRITE code.
-    for (const panggil of [
-      () => d.engine.daftarRka({ tahun: TAHUN_RKA }, d.ctx.auditor),
-      () => d.engine.bacaRka(rka.id, d.ctx.auditor),
+    // All three reads open, and the evidence the finding was about is actually
+    // present in what comes back: which version is the baseline, and who
+    // approved it.
+    const daftar = await d.engine.daftarRka({ tahun: TAHUN_RKA }, d.ctx.auditor);
+    expect(daftar.map((r) => r.id)).toContain(rka.id);
+    const dibaca = await d.engine.bacaRka(rka.id, d.ctx.auditor);
+    expect(dibaca.status).toBe("DISETUJUI");
+    expect(dibaca.approvedBy).toBe(d.userId.adminPusatLain);
+    const dasar = await d.engine.baseline(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: d.cabangId },
+      d.ctx.auditor,
+    );
+    expect(dasar?.id).toBe(rka.id);
+
+    // AND STILL READ ONLY, which is the half of spec 2 that a read grant could
+    // have quietly broken. The Auditor holds neither write code, so both write
+    // paths refuse on the permission rather than on anything incidental.
+    expect(d.ctx.auditor.permissions).not.toContain(PERMISSION_RKA.KELOLA);
+    expect(d.ctx.auditor.permissions).not.toContain(PERMISSION_RKA.SETUJUI);
+    await tolakDengan(
       () =>
-        d.engine.baseline(
-          { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: d.cabangId },
+        d.engine.buatRka(
+          {
+            cabangId: d.cabangId,
+            tahun: TAHUN_RKA + 1,
+            jenis: "NON_PUMK",
+            baris: barisNonPumk(d.bidang.a.id, rp(1_000_000)),
+          },
           d.ctx.auditor,
         ),
-    ]) {
-      await tolakDengan(panggil, KODE_RKA.IZIN_BELUM_TERDAFTAR);
-    }
+      KODE_RKA.TIDAK_BERWENANG,
+    );
   });
 
   test("laporan 24 TIDAK ikut terkunci, karena laporan.view memang ada dan Auditor memegangnya", async () => {
@@ -319,23 +367,62 @@ describe("TEMUAN: membaca RKA tidak punya kode baca sendiri", () => {
 describe("spec 2 rule 3 dan spec 16 skenario 24: scope cabang, lewat manipulasi ID langsung", () => {
   test("RKA cabang lain tidak bisa dibaca dengan menyebut id-nya", async () => {
     kodeAda(KODE_RKA.CABANG_DILUAR_SCOPE);
-    // Created by Admin Pusat, who legitimately crosses branches.
+    // FIXTURE BUG FIXED, ASSERTION UNCHANGED. This used to build the budget in
+    // `d.cabangLainId`, which is the fixture's Admin Cabang's OWN branch
+    // (`ctxUntuk` gives that role `cabangLain` as its home), and then demand a
+    // scope refusal for reading it. While no branch-scoped role held any RKA
+    // read code the call refused anyway, on the permission, so the wrong
+    // branch id was invisible. Now that Admin Cabang holds `admin.rka.view`
+    // the scope check is reachable, which is what it was granted for, and the
+    // budget has to actually be in the OTHER branch for the test to mean what
+    // its title says.
+    //
+    // `d.cabangId` is that other branch: it is the world's main branch, and
+    // Admin Cabang's scope is `[cabangLain]` alone. The sibling test below
+    // already used `d.cabangId` for the same reason.
     const rkaCabangLain = await d.engine.buatRka(
       {
-        cabangId: d.cabangLainId,
+        cabangId: d.cabangId,
         tahun: TAHUN_RKA,
         jenis: "NON_PUMK",
         baris: barisNonPumk(d.bidang.a.id, rp(3_000_000)),
       },
       d.ctx.adminPusat,
     );
+    expect(d.ctx.adminCabang.permissions).toContain(PERMISSION_RKA.LIHAT);
+    expect(d.ctx.adminCabang.cabangId).not.toBe(d.cabangId);
 
     // A branch-scoped caller holding the id. This is scenario 24's exact
     // shape: not "the list did not show it" but "asking for it by primary key
-    // is refused".
-    await tolakDengan(
+    // is refused". And it must refuse on SCOPE, not on permission, or the
+    // check under test never ran.
+    const err = await tolakDengan(
       () => d.engine.bacaRka(rkaCabangLain.id, d.ctx.adminCabang),
       KODE_RKA.CABANG_DILUAR_SCOPE,
+    );
+    expect(err.detail.cabangId).toBe(d.cabangId);
+
+    // The same caller CAN read its own branch's budget, so the refusal above
+    // is about the branch and not about the role being locked out entirely.
+    const milikSendiri = await d.engine.buatRka(
+      {
+        cabangId: d.cabangLainId,
+        tahun: TAHUN_RKA,
+        jenis: "PUMK",
+        baris: [
+          {
+            sektorId: d.sektor.a.id,
+            uraian: "Target sektor A",
+            bulan: 2,
+            jumlahAnggaran: rp(1_000_000),
+            jumlahUnit: 2,
+          },
+        ],
+      },
+      d.ctx.adminPusat,
+    );
+    expect((await d.engine.bacaRka(milikSendiri.id, d.ctx.adminCabang)).id).toBe(
+      milikSendiri.id,
     );
   });
 
@@ -449,20 +536,23 @@ describe("spec 2 rule 3 dan spec 16 skenario 24: scope cabang, lewat manipulasi 
 });
 
 describe("pemisahan tugas pada persetujuan RKA: mekanik dari konfigurasi, bukan angka kebijakan", () => {
-  test("TEMUAN: kunci kebijakannya belum ada, jadi setujuiRka menolak dengan KONFIGURASI_TIDAK_ADA sebelum memutuskan", async () => {
-    kodeAda(KODE_RKA.KONFIGURASI_TIDAK_ADA);
-    // Spec 2 scopes its two segregation rules to "dua modul (PUMK dan Non
-    // PUMK)". The RKA has an approval and no Checker stage, so neither rule
-    // reaches it verbatim and this module must not decide the question. It
-    // reads `rka.pemisahan_tugas_persetujuan`, which the shipped catalogue does
-    // not carry, and refuses NAMING THE KEY.
+  test("tanpa baris bumn, default global yang menjawab, dan defaultnya konservatif", async () => {
+    // RE-PINNED. This test used to assert
+    //   setujuiRka refuses with KONFIGURASI_TIDAK_ADA naming the key
+    // as a finding: `rka.pemisahan_tugas_persetujuan` was not in the shipped
+    // catalogue, so the module could not read the client's answer and had to
+    // refuse rather than decide the control itself.
     //
-    // ORDERING NOTE FOR THE IMPLEMENTATION: today the permission check fires
-    // first, so this call is refused with IZIN_BELUM_TERDAFTAR while
-    // `admin.rka.approve` is also missing. Once the permission exists, this
-    // test must go green as written; until then it is red for a related but
-    // different reason, and the assertion is deliberately left in this shape so
-    // it cannot be satisfied by the permission finding alone.
+    // The catalogue now carries it, as an ASUMSI with a global default of
+    // `true` and a description that says it is waiting on the client
+    // (./rka-fixture.test.ts pins that provenance). So the state this test
+    // named is no longer reachable by omission: KONFIGURASI_AWAL still seeds
+    // no bumn-scoped row, and bumn-then-global resolution finds the shipped
+    // default. What is worth asserting instead is that the default is the
+    // CONSERVATIVE one, because a shipped `false` would be the system quietly
+    // permitting self-approval on a document nobody can check afterwards.
+    expect(await d.bacaKonfigurasi("rka", "pemisahan_tugas_persetujuan")).toBeNull();
+
     const rka = await d.engine.buatRka(
       {
         cabangId: d.cabangId,
@@ -472,11 +562,47 @@ describe("pemisahan tugas pada persetujuan RKA: mekanik dari konfigurasi, bukan 
       },
       d.ctx.adminPusat,
     );
-    const err = await tolakDengan(
-      () => d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusatLain),
-      KODE_RKA.KONFIGURASI_TIDAK_ADA,
+    // Out of the box, the drafter may not approve their own budget...
+    await tolakDengan(
+      () => d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusat),
+      KODE_RKA.KONFLIK_MAKER_APPROVER,
+    );
+    // ...and somebody else may, so the default is a control and not a lockout.
+    const disetujui = await d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusatLain);
+    expect(disetujui.status).toBe("DISETUJUI");
+  });
+
+  test("kalau kuncinya benar benar tidak ada di kedua level, setujuiRka menolak NAMING THE KEY", async () => {
+    kodeAda(KODE_RKA.KONFIGURASI_TIDAK_ADA);
+    // THE GUARD THE DISCHARGE ABOVE WOULD OTHERWISE HAVE KILLED, and it is not
+    // theoretical: spec 2 scopes its two segregation rules to "dua modul (PUMK
+    // dan Non PUMK)", the RKA has an approval and no Checker stage, so neither
+    // rule reaches it verbatim and this module must never decide the question
+    // by falling back to a literal. If the row is gone at BOTH levels the only
+    // honest answer is a refusal that names the key.
+    //
+    // `tanpaKonfigurasi` needs this world to own a row before it can remove
+    // one, and KONFIGURASI_AWAL deliberately seeds none for this key, so the
+    // test writes one first. What it writes is irrelevant: it is removed.
+    await d.setelKonfigurasi("rka", "pemisahan_tugas_persetujuan", "true");
+    const rka = await d.engine.buatRka(
+      {
+        cabangId: d.cabangId,
+        tahun: TAHUN_RKA,
+        jenis: "NON_PUMK",
+        baris: barisNonPumk(d.bidang.a.id, rp(1_000_000)),
+      },
+      d.ctx.adminPusat,
+    );
+    const err = await d.tanpaKonfigurasi("rka", "pemisahan_tugas_persetujuan", () =>
+      tolakDengan(
+        () => d.engine.setujuiRka({ rkaId: rka.id }, d.ctx.adminPusatLain),
+        KODE_RKA.KONFIGURASI_TIDAK_ADA,
+      ),
     );
     expect(err.message).toContain("rka.pemisahan_tugas_persetujuan");
+    // Refused before deciding, so nothing was approved on a guess.
+    expect((await d.bacaRkaDb(rka.id)).status).toBe("DRAFT");
   });
 
   test("dengan kebijakan menyala, penyusun tidak boleh menyetujui RKA-nya sendiri", async () => {

@@ -79,10 +79,46 @@ describe("skenario 15: Kas Akhir = saldo akun is_kas di Laporan Posisi Keuangan"
 
     expect(kas.kasAkhirTahunIni.nilai).toBe(HARAPAN.kasAkhir);
     expect(kas.kasAkhirTahunIni.nilai).toBe(posisi.kasDanSetaraKasTahunIni.nilai);
-    // And in the comparative column, whose cut-off is a different date in each
-    // of the two reports' conventions; if either got it wrong, this diverges.
-    expect(kas.kasAkhirTahunLalu.nilai).toBe(posisi.kasDanSetaraKasTahunLalu.nilai);
-    expect(kas.kasAkhirTahunLalu.nilai).toBe(HARAPAN.kasAkhirTahunLalu);
+  });
+
+  test("di kolom pembanding kedua laporan SENGAJA berbeda, karena konvensinya berbeda", async () => {
+    // THE CONTRADICTION THIS FILE USED TO CONTAIN, RESOLVED AND WRITTEN DOWN.
+    // The test above used to extend the tie to the comparative column as well,
+    // while ./laporan-arus-kas.test.ts also required that column to advertise
+    // a like-for-like span and to satisfy awal + kenaikan = akhir. Those three
+    // cannot all hold: they describe two different columns.
+    //
+    // THE CONVENTION, DECIDED: the comparative column of a cash flow statement
+    // is THE SAME SPAN ONE YEAR EARLIER, because a cash flow statement is a
+    // FLOW statement and its comparative is a period. That is Laporan
+    // Aktivitas's convention. Laporan Posisi Keuangan's comparative is the
+    // preceding year END, because a position is a point. So the two reports'
+    // comparative figures are cash at two different dates and are not equal,
+    // and the difference is exactly the prior year's movements after March.
+    //
+    // WHAT THE SPECIFICATION ACTUALLY ASKS FOR IS UNAFFECTED. Spec 10.3 report
+    // 18 and spec 16 scenario 15 both name Kas Akhir against the balance
+    // sheet's cash FOR THE PERIOD BEING REPORTED, which is the current column,
+    // asserted above and unchanged.
+    const p = d.periodeLaporan();
+    const kas = await arusKas();
+    const posisi = await d.engine.laporanPosisiKeuangan(
+      { periodeId: p.id, cabangId: d.cabangId },
+      d.ctx.adminPusat,
+    );
+
+    // Cash at 2025-03-31, the end of the like-for-like comparative span.
+    expect(kas.kasAkhirTahunLalu.nilai).toBe(HARAPAN.kasAkhirQ1TahunLalu);
+    // Cash at 2025-12-31, the balance sheet's comparative cut-off.
+    expect(posisi.kasDanSetaraKasTahunLalu.nilai).toBe(HARAPAN.kasAkhirTahunLalu);
+    // NON-VACUOUS: they really are different, so a report that quietly used
+    // the balance sheet's cut-off for both cannot pass this.
+    expect(kas.kasAkhirTahunLalu.nilai).not.toBe(posisi.kasDanSetaraKasTahunLalu.nilai);
+    // And the gap is the prior-year cash movement after the comparative span,
+    // rather than an arbitrary difference.
+    expect(
+      kurangUang(kas.kasAkhirTahunLalu.nilai, posisi.kasDanSetaraKasTahunLalu.nilai),
+    ).toBe(rp(220_000_000));
   });
 
   test("juga cocok untuk Semua Cabang", async () => {
@@ -136,6 +172,34 @@ describe("aritmetika arus kas: awal + kenaikan = akhir, dan kenaikan = jumlah ti
     expect(kas.kenaikanKasTahunIni.nilai).toBe(HARAPAN.kenaikanKas);
   });
 
+  test("seksi juga menjumlah ke kenaikan kas DI KOLOM PEMBANDING, dengan span yang sama", async () => {
+    // THE HALF THAT WAS LEFT UNSAID, AND THEREFORE WENT WRONG. Nothing used to
+    // assert that the comparative section totals add up to the comparative
+    // movement, so an implementation could compute the sections over the
+    // advertised like-for-like span while computing `kenaikanKasTahunLalu`
+    // over a different one, and every remaining assertion still passed. A
+    // reader adding up the printed column would not reach the printed total.
+    //
+    // Both are the same span now, and this says so with absolute figures so
+    // that agreeing wrongly is not available either.
+    const kas = await arusKas();
+    const [operasi, investasi, pendanaan] = kas.seksi;
+    expect(operasi.totalTahunLalu.nilai).toBe(HARAPAN.arusOperasiTahunLalu);
+    expect(investasi.totalTahunLalu.nilai).toBe(HARAPAN.arusInvestasiTahunLalu);
+    expect(pendanaan.totalTahunLalu.nilai).toBe(HARAPAN.arusPendanaanTahunLalu);
+    expect(
+      jumlahUang(
+        operasi.totalTahunLalu.nilai,
+        investasi.totalTahunLalu.nilai,
+        pendanaan.totalTahunLalu.nilai,
+      ),
+    ).toBe(kas.kenaikanKasTahunLalu.nilai);
+    expect(kas.kenaikanKasTahunLalu.nilai).toBe(HARAPAN.kenaikanKasTahunLalu);
+    // NON-VACUOUS: the comparative financing section is the opening funding of
+    // the unit, so a column that classified nothing cannot pass.
+    expect(keSen(pendanaan.totalTahunLalu.nilai)).toBeGreaterThan(0n);
+  });
+
   test("kas awal plus kenaikan sama dengan kas akhir, di kedua kolom", async () => {
     const kas = await arusKas();
     expect(kas.kasAwalTahunIni.nilai).toBe(HARAPAN.kasAwal);
@@ -143,6 +207,7 @@ describe("aritmetika arus kas: awal + kenaikan = akhir, dan kenaikan = jumlah ti
     expect(jumlahUang(kas.kasAwalTahunIni.nilai, kas.kenaikanKasTahunIni.nilai)).toBe(
       kas.kasAkhirTahunIni.nilai,
     );
+    expect(kas.kasAwalTahunLalu.nilai).toBe(HARAPAN.kasAwalTahunLalu);
     expect(jumlahUang(kas.kasAwalTahunLalu.nilai, kas.kenaikanKasTahunLalu.nilai)).toBe(
       kas.kasAkhirTahunLalu.nilai,
     );
@@ -237,6 +302,34 @@ describe("akun lawan tanpa klasifikasi arus kas: ditolak, tidak dibuang diam dia
       KODE_LAPORAN.KLASIFIKASI_ARUS_KAS_TIDAK_LENGKAP,
     );
     expect(JSON.stringify(err.detail ?? "")).toContain(d.akun.pendapatanAlokasi.kode);
+  });
+
+  test("kelengkapan diperiksa DI KEDUA KOLOM, bukan hanya di tahun berjalan", async () => {
+    // THE SILENT DROP, ONE COLUMN OVER. This whole describe exists because an
+    // unclassified counter-account cannot be bucketed and dropping it breaks
+    // Kas Akhir. If the check ran over the reporting year only, exactly the
+    // same drop would happen unannounced in the comparative column, for any
+    // counter-account that appears in the prior year and not in this one.
+    //
+    // `asetNetoTidakTerikat` IS such an account in this world: it is the
+    // counter-side of the opening funding in 2025-01 and appears nowhere in
+    // 2026. It carries PENDANAAN in the fixture for that reason; removing the
+    // classification must therefore be refused even though the reporting year
+    // is untouched by it.
+    const asetNeto = d.akun.asetNetoTidakTerikat;
+    await d.setelKlasifikasiArusKas(asetNeto.id, null);
+    try {
+      const err = await tolakDengan(
+        () => arusKas(),
+        KODE_LAPORAN.KLASIFIKASI_ARUS_KAS_TIDAK_LENGKAP,
+      );
+      expect(JSON.stringify(err.detail ?? "")).toContain(asetNeto.kode);
+    } finally {
+      await d.setelKlasifikasiArusKas(asetNeto.id, "PENDANAAN");
+    }
+    // And with it restored the report is produced again, so the refusal above
+    // is about this account and not about the world being broken.
+    expect((await arusKas()).kasAkhirTahunLalu.nilai).toBe(HARAPAN.kasAkhirQ1TahunLalu);
   });
 
   test("akun non kas yang tidak terklasifikasi TIDAK memicu penolakan", async () => {

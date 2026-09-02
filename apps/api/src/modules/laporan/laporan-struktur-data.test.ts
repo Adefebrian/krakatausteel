@@ -240,12 +240,33 @@ describe("tahun buku bukan Januari: rentang dan pembanding ikut konfigurasi", ()
     expect(april.kenaikanAsetNetoTahunIni.nilai).not.toBe(januari.kenaikanAsetNetoTahunIni.nilai);
   });
 
+  test("menghapus baris bumn saja TIDAK menolak: default global yang menjawab", async () => {
+    // THE RESOLUTION ORDER, ASSERTED RATHER THAN ASSUMED. `hapusKonfigurasi`
+    // removes THIS WORLD'S row only, `akuntansi.tahun_buku_mulai_bulan` has a
+    // global row from migrations/0004, and resolution is bumn-scoped THEN
+    // global everywhere in this system. So the statement is produced on the
+    // shipped default, which is January.
+    await d.hapusKonfigurasi("akuntansi", "tahun_buku_mulai_bulan");
+    const l = await aktivitas();
+    expect(l.kolom.dariTahunIni).toBe("2026-01-01");
+  });
+
   test("parameter yang hilang ditolak, bukan diganti nilai tebakan", async () => {
     // A defaulted fiscal year is a wrong comparative in an audited statement
     // that nobody can trace to a decision. Same rule modules/closing follows
     // for its rates.
-    await d.hapusKonfigurasi("akuntansi", "tahun_buku_mulai_bulan");
-    await tolakDengan(() => aktivitas(), KODE_LAPORAN.KONFIGURASI_TIDAK_ADA);
+    //
+    // FIXED TEST, NOT A FIXED ENGINE. This used to call `hapusKonfigurasi`,
+    // which removes one level, and then demand a refusal that bumn-then-global
+    // resolution cannot produce. Rather than being wrong, it was worse: it
+    // pushed this module into resolving THIS ONE KEY branch-only, so the same
+    // question got two answers depending on whether modules/laporan or
+    // modules/rka asked it. `tanpaKonfigurasi` removes BOTH levels, so
+    // "hilang" means what the title always claimed and this module can go back
+    // to the one resolution order the rest of the system uses.
+    await d.tanpaKonfigurasi("akuntansi", "tahun_buku_mulai_bulan", () =>
+      tolakDengan(() => aktivitas(), KODE_LAPORAN.KONFIGURASI_TIDAK_ADA),
+    );
   });
 });
 

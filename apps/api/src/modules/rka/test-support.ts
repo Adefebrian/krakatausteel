@@ -679,6 +679,39 @@ export interface DuniaRka {
   setelKonfigurasi(grup: string, kunciKonfig: string, nilai: string): Promise<void>;
   /** Soft-deletes THIS WORLD'S OWN row, never the global one. See the header. */
   hapusKonfigurasi(grup: string, kunciKonfig: string): Promise<void>;
+  /**
+   * Runs `jalankan` with the configuration key ABSENT AT BOTH LEVELS, this
+   * world's row and the SHIPPED GLOBAL one, then puts both back WHATEVER
+   * HAPPENS.
+   *
+   * WHY IT HAS TO TOUCH THE GLOBAL ROW, having been written twice not to.
+   * Resolution is bumn-scoped THEN global (modules/closing and modules/rka
+   * both, and it is what the catalogue's global defaults exist for), so
+   * removing only this world's row leaves the shipped default answering and
+   * the call SUCCEEDS. A "fails closed on missing configuration" test that
+   * quietly stopped removing the configuration is worse than no test: it
+   * reports green for the one behaviour it exists to prove. That is exactly
+   * what happened here, and it pushed one module into resolving this key
+   * branch-only while every other module resolved it branch-then-global, which
+   * is a worse outcome than either convention on its own.
+   *
+   * THE COST, STATED RATHER THAN HIDDEN. The global row is shared by every
+   * world in this database and `bun test` runs files in parallel, so for the
+   * duration of `jalankan` a concurrent world reading the same key sees it
+   * missing. Three things keep that tolerable and none of them is optional:
+   * the window is one engine call rather than a whole test, the restore is in
+   * a `finally` so a throwing assertion still restores, and rows are
+   * soft-deleted and UN-deleted BY ID rather than deleted and re-inserted, so
+   * the original row comes back with its own id, deskripsi and
+   * perlu_konfirmasi. This is modules/nonpumk's `tanpaKonfigurasi`, which has
+   * carried the same trade since migrations/0022 shipped global defaults.
+   *
+   * A `try`/`finally` rather than a restore written after the assertion: the
+   * body is usually a `tolakDengan`, which THROWS, and a restore that never
+   * runs leaves every later test in the file dying in SETUP with a missing
+   * parameter, which looks exactly like the defect under test.
+   */
+  tanpaKonfigurasi<T>(grup: string, kunciKonfig: string, jalankan: () => Promise<T>): Promise<T>;
   bacaKonfigurasi(grup: string, kunciKonfig: string): Promise<string | null>;
 
   /** Does `tabel.kolom` exist? Used to pin a schema gap as a finding. */
@@ -1652,6 +1685,38 @@ export async function buatDunia(): Promise<DuniaRka> {
           where bumn_id = $1 and grup = $2 and kunci = $3 and deleted_at is null`,
         [bumn.id, grup, kunciKonfig, userId.adminPusat],
       );
+    },
+    async tanpaKonfigurasi(grup, kunciKonfig, jalankan) {
+      // BOTH ROWS. See the port's note: bumn-then-global resolution means
+      // removing one level is not removing the configuration.
+      const hidup = await db.query<{ id: string; bumn_id: string | null }>(
+        `select id::text as id, bumn_id::text as bumn_id from konfigurasi
+          where grup = $2 and kunci = $3 and deleted_at is null
+            and (bumn_id = $1 or bumn_id is null)`,
+        [bumn.id, grup, kunciKonfig],
+      );
+      if (!hidup.some((r) => r.bumn_id === bumn.id)) {
+        throw new Error(
+          `fixture: konfigurasi ${grup}.${kunciKonfig} tidak ada untuk bumn ini; ` +
+            "tambahkan ke KONFIGURASI_AWAL di test-support.ts",
+        );
+      }
+      for (const r of hidup) {
+        await db.query(
+          `update konfigurasi set deleted_at = now(), deleted_by = $2 where id = $1`,
+          [r.id, userId.adminPusat],
+        );
+      }
+      try {
+        return await jalankan();
+      } finally {
+        for (const r of hidup) {
+          await db.query(
+            `update konfigurasi set deleted_at = null, deleted_by = null where id = $1`,
+            [r.id],
+          );
+        }
+      }
     },
     async bacaKonfigurasi(grup, kunciKonfig) {
       const baris = await db.query<{ nilai: string | null }>(

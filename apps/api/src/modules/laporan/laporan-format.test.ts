@@ -64,14 +64,30 @@ async function semuaLaporan() {
   };
 }
 
+/**
+ * Reports that carry NO monetary cell at all, declared rather than inferred.
+ *
+ * Spec 10.3 report 16 is "Tree COA dengan kode, nama, tipe, saldo normal,
+ * status": a chart of accounts, not a statement. ./contract.ts declares no
+ * `Angka` on `LaporanBaganAkun`, and adding one so a formatting helper has
+ * something to check would be a test dictating the shape of a report.
+ *
+ * `semuaAngkaSah` treats this as an assertion, not a skip: a report named here
+ * that ever grows a figure fails, so the list cannot quietly become an
+ * exemption for a walker that stopped walking.
+ */
+const LAPORAN_TANPA_UANG = new Set(["baganAkun"]);
+
 describe("setiap sel uang di ketujuh laporan", () => {
   test("punya nilai desimal dua angka dan tampilan yang bisa dibaca balik", async () => {
     const semua = await semuaLaporan();
     let total = 0;
     for (const [nama, laporan] of Object.entries(semua)) {
-      total += semuaAngkaSah(laporan, nama);
+      total += semuaAngkaSah(laporan, nama, { tanpaUang: LAPORAN_TANPA_UANG.has(nama) });
     }
-    // NON-VACUOUS: a walker that found nothing would pass silently.
+    // NON-VACUOUS: a walker that found nothing would pass silently. This floor
+    // is over all seven together, so the figure-free one contributing 0 does
+    // not weaken it.
     expect(total).toBeGreaterThan(100);
   });
 

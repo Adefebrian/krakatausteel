@@ -540,33 +540,63 @@ describe("laporan 24: bentuk bulanan dan kumulatif year to date", () => {
     expect(tahunBukuApril.baris[0].anggaran).toBe(rp(2_500_000));
   });
 
-  test("konfigurasi tahun buku yang hilang menghentikan laporan, bukan diganti Januari", async () => {
-    kodeAda(KODE_RKA.KONFIGURASI_TIDAK_ADA);
-    // Blanks THIS WORLD'S OWN bumn-scoped row, never the global one. The
-    // module's resolution order is bumn then global, and the global row is
-    // shipped by migrations/0004, so a genuinely missing key only exists when
-    // both are gone; the fixture cannot and must not delete the global one, so
-    // the engine is expected to refuse when the resolution finds nothing for
-    // this bumn's own key set. See the note in ./test-support.ts.
+  test("menghapus baris bumn saja TIDAK menghentikan laporan: default global yang menjawab", async () => {
+    // THE RESOLUTION ORDER, ASSERTED RATHER THAN ASSUMED, and the half the
+    // old version of the test below got wrong. `hapusKonfigurasi` removes
+    // THIS WORLD'S row only; `akuntansi.tahun_buku_mulai_bulan` has a global
+    // row from migrations/0004; resolution is bumn-scoped THEN global. So the
+    // report proceeds on the shipped default, which is January.
+    //
+    // This is not a lesser assertion than the refusal below, it is the other
+    // half of the same rule: a client who configures nothing gets the shipped
+    // default, and a client who has no default anywhere gets a refusal.
     await d.hapusKonfigurasi("akuntansi", "tahun_buku_mulai_bulan");
     d.setelJam("2026-05-20");
     await baseline("NON_PUMK", [
       { bidangId: d.bidang.a.id, uraian: "Pendidikan", bulan: 2, jumlahAnggaran: rp(2_500_000) },
     ]);
-    await tolakDengan(
-      () =>
-        d.engine.laporanRkaVsRealisasi(
-          {
-            tahun: TAHUN_RKA,
-            jenis: "NON_PUMK",
-            cabangId: d.cabangId,
-            mode: "KUMULATIF_YTD",
-            bulan: 5,
-          },
-          d.ctx.adminPusat,
-        ),
-      KODE_RKA.KONFIGURASI_TIDAK_ADA,
+    const laporan = await d.engine.laporanRkaVsRealisasi(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: d.cabangId, mode: "KUMULATIF_YTD", bulan: 5 },
+      d.ctx.adminPusat,
     );
+    expect(laporan.dariBulan).toBe(1);
+    expect(laporan.sampaiBulan).toBe(5);
+  });
+
+  test("konfigurasi tahun buku yang hilang menghentikan laporan, bukan diganti Januari", async () => {
+    kodeAda(KODE_RKA.KONFIGURASI_TIDAK_ADA);
+    // FIXED TEST, NOT A FIXED ENGINE. This used to call `hapusKonfigurasi`,
+    // which removes this world's row only, and then demand a refusal that
+    // bumn-then-global resolution can never produce; its own comment conceded
+    // the resolution order and then asserted against it. The engine was right
+    // and the test was wrong, and the same defect in modules/laporan's copy of
+    // it pushed that module into resolving this one key branch-only, which is
+    // one key with two resolution orders in one system.
+    //
+    // `tanpaKonfigurasi` removes BOTH levels for the duration of the call, so
+    // "hilang" now means what the title always claimed. The refusal must name
+    // the key, or an administrator has nothing to act on.
+    d.setelJam("2026-05-20");
+    await baseline("NON_PUMK", [
+      { bidangId: d.bidang.a.id, uraian: "Pendidikan", bulan: 2, jumlahAnggaran: rp(2_500_000) },
+    ]);
+    const err = await d.tanpaKonfigurasi("akuntansi", "tahun_buku_mulai_bulan", () =>
+      tolakDengan(
+        () =>
+          d.engine.laporanRkaVsRealisasi(
+            {
+              tahun: TAHUN_RKA,
+              jenis: "NON_PUMK",
+              cabangId: d.cabangId,
+              mode: "KUMULATIF_YTD",
+              bulan: 5,
+            },
+            d.ctx.adminPusat,
+          ),
+        KODE_RKA.KONFIGURASI_TIDAK_ADA,
+      ),
+    );
+    expect(err.message).toContain("tahun_buku_mulai_bulan");
   });
 
   test("baris anggaran tahunan tanpa bulan ikut di kumulatif tapi tidak di satu bulan", async () => {
