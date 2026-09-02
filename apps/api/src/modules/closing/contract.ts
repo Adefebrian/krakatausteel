@@ -670,6 +670,17 @@ export interface PeriodeClosing {
   reopenedBy: string | null;
   reopenedAt: string | null;
   alasanReopen: string | null;
+  /**
+   * The report template this period was CLOSED under, written by `tutupPeriode`
+   * from the template in force at `tanggalAkhir` (migrations/0028, ADR 0017).
+   *
+   * NULL means "no stamp", and there are exactly three ways to get one: the
+   * period is OPEN, it was reopened (the reopen clears it, the way it deletes
+   * the frozen balances), or it was closed before 0028 shipped. A reprint that
+   * finds NULL falls back to the effective-dated lookup and has to SAY that it
+   * did; it must not invent a template and present it as the one reported.
+   */
+  templateLaporanId: string | null;
 }
 
 /**

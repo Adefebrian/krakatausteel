@@ -253,6 +253,7 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
       reopenedBy: p.reopened_by,
       reopenedAt: p.reopened_at,
       alasanReopen: p.alasan_reopen,
+      templateLaporanId: p.template_laporan_id,
     };
   }
 
@@ -1617,11 +1618,36 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
           await repo.hapusSaldoAkunPeriode(tx, periode.id);
           await repo.tulisSaldoAkunPeriode(tx, periode.id, ctx.userId, saldo);
 
+          // THE TEMPLATE STAMP (migrations/0028, ADR 0017), resolved from the
+          // period's OWN END DATE and not from wall clock time: the effective
+          // range of a template is over the period being reported on, so a
+          // January close run in March is still a January statement.
+          //
+          // Read inside this transaction, next to the freeze, on purpose. The
+          // frozen balances and the stamp are the two halves of one answer to
+          // "what was reported": the figures, and the shape they were presented
+          // in. A stamp written in a later transaction could disagree with the
+          // balances it labels, and a template adopted between the two writes
+          // would produce exactly the silent restatement the column exists to
+          // prevent.
+          //
+          // NULL IS ALLOWED AND IS NOT A REFUSAL. A BUMN with no template in
+          // force for that date has a closable period; spec 8.4's checklist has
+          // ten items and this is not an eleventh. The reader falls back to the
+          // effective-dated lookup and says so, which is the same handover
+          // periods closed before 0028 already need.
+          const templateLaporanId = await repo.templateBerlakuPada(
+            tx,
+            periode.bumn_id,
+            periode.tanggal_akhir,
+          );
+
           const ditutup = await repo.tandaiClosed(
             tx,
             periode.id,
             ctx.userId,
             jam().toISOString(),
+            templateLaporanId,
           );
           // The second half of the lock. `tandaiClosed` carries
           // `status <> 'CLOSED'`, so a close that lost a race updates nothing
@@ -1648,6 +1674,10 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
                 })),
                 konfirmasiKasNegatif: input.konfirmasiKasNegatif === true,
                 jumlahSaldoDibekukan: saldo.length,
+                // Which layout this statement was issued under, in the same
+                // record as the figures' count. A reprint that later disagrees
+                // with the archive is then answerable rather than arguable.
+                templateLaporanId,
               },
               hasil: "SUKSES",
               keterangan:
@@ -1726,8 +1756,13 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
               aksi: "periode.reopen",
               entitas: "periode",
               entitasId: periode.id,
-              nilaiLama: { status: "CLOSED" },
-              nilaiBaru: { status: "OPEN", alasanReopen: alasan },
+              // The template stamp travels in `nilaiLama` because the reopen
+              // ERASES it (repo.tandaiOpenKembali). This record is then the only
+              // place that still says which layout the undone close was issued
+              // under, which is what makes clearing the column a reversible
+              // decision rather than a lost fact.
+              nilaiLama: { status: "CLOSED", templateLaporanId: periode.template_laporan_id },
+              nilaiBaru: { status: "OPEN", alasanReopen: alasan, templateLaporanId: null },
               hasil: "SUKSES",
               keterangan: `Buka kembali periode ${labelPeriode(periode)}: ${alasan}`,
             },

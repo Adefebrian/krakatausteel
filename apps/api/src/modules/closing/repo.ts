@@ -44,6 +44,13 @@ export interface PeriodeRow {
   reopened_by: string | null;
   reopened_at: string | null;
   alasan_reopen: string | null;
+  /**
+   * The report template this period was CLOSED under (migrations/0028, ADR
+   * 0017). NULL on an open period, and NULL on a period closed before 0028
+   * shipped; a reprint of one of those falls back to the effective-dated lookup
+   * and has to say that it did.
+   */
+  template_laporan_id: string | null;
 }
 
 export interface RangeRow {
@@ -169,7 +176,8 @@ const KOLOM_PERIODE = `
   p.id::text as id, p.bumn_id::text as bumn_id, p.tahun, p.bulan,
   p.tanggal_mulai::text as tanggal_mulai, p.tanggal_akhir::text as tanggal_akhir,
   p.status, p.closed_by::text as closed_by, p.closed_at::text as closed_at,
-  p.reopened_by::text as reopened_by, p.reopened_at::text as reopened_at, p.alasan_reopen`;
+  p.reopened_by::text as reopened_by, p.reopened_at::text as reopened_at, p.alasan_reopen,
+  p.template_laporan_id::text as template_laporan_id`;
 
 // ---------------------------------------------------------------------------
 // The repo
@@ -245,26 +253,66 @@ export function buatRepoClosing() {
     },
 
     /**
+     * The report template in force for a REPORTED date (migrations/0028: the
+     * effective range is over the period being reported on, not over wall clock
+     * time). At most one row can match, because 0028's TJSL-TPL-001 trigger
+     * forbids a BUMN's ranges from overlapping; the ORDER BY is belt and braces
+     * for a database whose trigger was somehow bypassed, not a tie-break rule.
+     *
+     * Deliberately the same predicate as modules/laporan's `templateBerlaku`.
+     * The two must agree, because this is what a reprint of a closed period
+     * will resolve THROUGH: a stamp written under one rule and read under
+     * another would be worse than no stamp at all.
+     */
+    async templateBerlakuPada(
+      tx: QueryRunner,
+      bumnId: string,
+      tanggal: string,
+    ): Promise<string | null> {
+      const row = await satu<{ id: string }>(
+        tx,
+        `select id::text as id from template_laporan
+          where bumn_id = $1::uuid and deleted_at is null and aktif
+            and berlaku_dari <= $2::date
+            and (berlaku_sampai is null or berlaku_sampai >= $2::date)
+          order by berlaku_dari desc
+          limit 1`,
+        [bumnId, tanggal],
+      );
+      return row?.id ?? null;
+    },
+
+    /**
      * Returns null when the row was NOT the engine's to close, which under this
      * predicate means somebody else closed it first. The `status <> 'CLOSED'`
      * clause is the second half of the lock above: the lock serialises the two
      * transactions, this makes the loser's write a no-op it can detect instead
      * of a silent second close.
+     *
+     * `template_laporan_id` IS WRITTEN HERE, in the same statement that flips
+     * the status and inside the same transaction that freezes the balances.
+     * That is the point of migrations/0028's column: the period records the
+     * layout it was reported under, so adopting a new template later cannot
+     * reshape a statement that has already been issued. NULL is a legitimate
+     * value and not a refusal: a BUMN with no template in force for that date
+     * still has a closable period, and the reader falls back to the
+     * effective-dated lookup and says so (ADR 0017).
      */
     async tandaiClosed(
       tx: QueryRunner,
       periodeId: string,
       userId: string,
       saatIni: string,
+      templateLaporanId: string | null,
     ): Promise<PeriodeRow | null> {
       return satu<PeriodeRow>(
         tx,
         `update periode p
             set status = 'CLOSED', closed_by = $2::uuid, closed_at = $3::timestamptz,
-                updated_by = $2::uuid
+                template_laporan_id = $4::uuid, updated_by = $2::uuid
           where p.id = $1::uuid and p.status <> 'CLOSED'
         returning ${KOLOM_PERIODE}`,
-        [periodeId, userId, saatIni],
+        [periodeId, userId, saatIni, templateLaporanId],
       );
     },
 
@@ -282,11 +330,25 @@ export function buatRepoClosing() {
       // carries its own: with the row lock taken, the loser of a concurrent
       // reopen updates nothing and finds out, instead of reopening a period the
       // winner already reopened and closed again.
+      //
+      // `template_laporan_id` IS CLEARED, for the reason the frozen balances
+      // two lines up in the service are DELETED: both are products of a close
+      // that has been undone, and a reopened period is not "closed under
+      // template X", it is open. Keeping the stamp would leave an OPEN period
+      // asserting a close that no longer exists, and would make the re-close's
+      // write either a silent overwrite or a no-op depending on the order of
+      // two statements, which is exactly the kind of thing that is discovered a
+      // year later on a reprint. The value is not lost: the reopen's audit
+      // record carries it in `nilaiLama`, so which template the undone close ran
+      // under stays answerable from `audit_log` (ADR 0017 mitigates by evidence
+      // rather than by prevention). A re-close then re-resolves the template in
+      // force TODAY, which is the honest answer for a period being closed
+      // today.
       return satu<PeriodeRow>(
         tx,
         `update periode p
             set status = 'OPEN', reopened_by = $2::uuid, reopened_at = $4::timestamptz,
-                alasan_reopen = $3, updated_by = $2::uuid
+                alasan_reopen = $3, template_laporan_id = null, updated_by = $2::uuid
           where p.id = $1::uuid and p.status = 'CLOSED'
         returning ${KOLOM_PERIODE}`,
         [periodeId, userId, alasan, saatIni],
