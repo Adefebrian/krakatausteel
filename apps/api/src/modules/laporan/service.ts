@@ -1146,56 +1146,52 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       );
     }
 
+    // THE ROWS OF BOTH COLUMNS, MERGED ONCE. A counter-account that appears in
+    // only one of the two spans still prints a line, with `0,00` in the column
+    // it did not move in (spec 10: zero prints, "karena tim akuntansi
+    // memakainya untuk cross check"). Collecting the row set from the reporting
+    // span alone would drop such a line from the comparative column while its
+    // amount stayed in that column's total, so the printed column would not add
+    // up to its own footing. Metadata comes from whichever span carries the
+    // account; it is the same `akun` row either way.
+    const nilaiIni = new Map(lawanIni.map((r) => [r.akun_id, uangDariDb(r.nilai)]));
     const nilaiLalu = new Map(lawanLalu.map((r) => [r.akun_id, uangDariDb(r.nilai)]));
+    const lawanGabungan = new Map(lawanLalu.map((r) => [r.akun_id, r]));
+    for (const r of lawanIni) lawanGabungan.set(r.akun_id, r);
+    const lawanSemua = [...lawanGabungan.values()].sort((x, y) =>
+      x.kode < y.kode ? -1 : x.kode > y.kode ? 1 : 0,
+    );
+
     const namaSeksiArus = new Map<string, string>();
     for (const row of await repo.barisLaporan(tx(), ctx.bumnId, templat.templateId, "ARUS_KAS")) {
       if (row.seksi) namaSeksiArus.set(row.seksi, row.nama);
     }
 
-    // A SECTION TOTAL IS THE WHOLE SPAN, per column, over every counter-account
-    // classified into that section. Summing the printed rows instead would make
-    // the comparative total depend on which accounts happen to appear in the
-    // CURRENT year, and the column would then no longer foot to the movement in
-    // cash. See the note on `baris` below.
-    const totalSeksi = (
-      baris: readonly { klasifikasi_arus_kas: string | null; nilai: string }[],
-      klasifikasi: KlasifikasiArusKas,
-    ): bigint =>
-      baris
-        .filter((r) => r.klasifikasi_arus_kas === klasifikasi)
-        .reduce((t, r) => t + uangDariDb(r.nilai), 0n);
-
     const seksi: SeksiArusKas[] = URUTAN_ARUS_KAS.map((klasifikasi) => {
-      const barisSeksi: BarisArusKas[] = lawanIni
+      const barisSeksi: BarisArusKas[] = lawanSemua
         .filter((r) => r.klasifikasi_arus_kas === klasifikasi)
         .map((r) => ({
           akunId: r.akun_id,
           akunKode: r.kode,
           // The caption is the account's own name, which is data.
           uraian: r.nama,
-          nilaiTahunIni: angka(uangDariDb(r.nilai)),
+          nilaiTahunIni: angka(nilaiIni.get(r.akun_id) ?? 0n),
           nilaiTahunLalu: angka(nilaiLalu.get(r.akun_id) ?? 0n),
         }))
+        // A row that moved in neither column is not a movement at all. A row
+        // that moved in ONE of them stays, and prints `0,00` in the other.
         .filter(
           (b) => keSen(b.nilaiTahunIni.nilai) !== 0n || keSen(b.nilaiTahunLalu.nilai) !== 0n,
         );
+      // EACH COLUMN'S TOTAL IS ITS OWN SPAN, and it is the sum of that column's
+      // printed cells: the row set spans both columns now, so the footing an
+      // accountant adds up by hand is the footing that prints.
       return {
         klasifikasi,
         nama: namaSeksiArus.get(klasifikasi) ?? klasifikasi,
-        // KNOWN GAP, LOUD RATHER THAN SILENT. The printed rows are the
-        // counter-accounts of the REPORTING span, so a counter-account that
-        // appears only in the comparative span (in the fixture's world, the
-        // opening funding through `3.1.01`) contributes to `totalTahunLalu`
-        // without printing a line of its own, and the comparative column does
-        // not foot to its printed rows. Widening the row set to the union of
-        // both spans is the fix and is a two-line change here; it is blocked by
-        // ./laporan-arus-kas.test.ts asserting the PENDANAAN section prints
-        // exactly one row. The totals are the figure that must be right, so
-        // they are complete and this is reported upward rather than papered
-        // over by narrowing them back.
         baris: barisSeksi,
-        totalTahunIni: angka(totalSeksi(lawanIni, klasifikasi)),
-        totalTahunLalu: angka(totalSeksi(lawanLalu, klasifikasi)),
+        totalTahunIni: angka(barisSeksi.reduce((t, b) => t + keSen(b.nilaiTahunIni.nilai), 0n)),
+        totalTahunLalu: angka(barisSeksi.reduce((t, b) => t + keSen(b.nilaiTahunLalu.nilai), 0n)),
       };
     });
 

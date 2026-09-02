@@ -263,8 +263,59 @@ describe("metode langsung: dari mutasi kas, bukan dari laporan aktivitas", () =>
     expect(investasi.baris[0].nilaiTahunIni.tampil).toBe("(75.000.000,00)");
 
     const pendanaan = kas.seksi.find((s) => s.klasifikasi === "PENDANAAN")!;
-    expect(pendanaan.baris.map((b) => b.akunKode)).toEqual([d.akun.pendapatanTerikat.kode]);
-    expect(pendanaan.baris[0].nilaiTahunIni.nilai).toBe(rp(25_000_000));
+    // UPDATED, AND IT RECORDS REALITY RATHER THAN FITTING AN IMPLEMENTATION.
+    // This used to expect exactly `[d.akun.pendapatanTerikat.kode]`, and that
+    // was right when it was written: `3.1.01` carried no `klasifikasi_arus_kas`
+    // at all, so it could never appear as a financing row however the row set
+    // was collected. Classifying the two net-asset accounts PENDANAAN (see
+    // ./test-support.ts) is what made it one. The row set is now the UNION of
+    // both columns' spans, so a counter-account that moved in only one of them
+    // still prints a line and shows `0,00` in the other, which is what lets the
+    // comparative column foot to its own printed rows. `3.1.01` is the opening
+    // funding of the unit in 2025-01 and appears nowhere in 2026; `4.1.05` is
+    // the restricted contribution in 2026-03. Ordered by account code, as every
+    // other listing in this module is.
+    expect(pendanaan.baris.map((b) => b.akunKode)).toEqual([
+      d.akun.asetNetoTidakTerikat.kode,
+      d.akun.pendapatanTerikat.kode,
+    ]);
+    // INDEXED BY ACCOUNT CODE, NOT BY POSITION. This used to read
+    // `pendanaan.baris[0]`, which meant "the restricted contribution" only
+    // because this section happened to have exactly one row; the union gives it
+    // two, and `baris[0]` silently re-aimed at `3.1.01`. Naming the account says
+    // what the assertion always meant, and it cannot re-aim again the next time
+    // the row set changes.
+    //
+    // THE ROW ORDER WAS NOT CHANGED TO KEEP THE OLD INDEX WORKING. Putting the
+    // reporting span's movers first would have kept `baris[0]` meaning what it
+    // used to mean without touching a test, which is exactly why it was the
+    // wrong fix: a statement whose row order depends on which column you are
+    // reading is not one an accountant can cross-check.
+    expect(
+      pendanaan.baris.find((b) => b.akunKode === d.akun.pendapatanTerikat.kode)!.nilaiTahunIni
+        .nilai,
+    ).toBe(rp(25_000_000));
+    // AND THE COMPARATIVE-ONLY ROW PRINTS ZERO IN THIS COLUMN. `3.1.01` moved in
+    // 2025 and not in 2026, so its reporting-column cell is a genuine zero, and
+    // spec 10 is explicit that it prints: "Nilai nol ditampilkan sebagai `0,00`
+    // bukan kosong, karena tim akuntansi memakainya untuk cross check".
+    //
+    // ASSERTED HERE RATHER THAN LEFT TO THE FORMAT WALKER. ./laporan-format.test.ts
+    // checks that every `Angka` in every report renders its zero as `0,00`, but
+    // it can only check cells that EXIST: if this row were ever dropped from the
+    // reporting column again, that walker would stay green and the section would
+    // quietly stop footing to its own printed rows. This pins the half that
+    // would regress silently, which is the failure mode worth a named test.
+    const funding = pendanaan.baris.find(
+      (b) => b.akunKode === d.akun.asetNetoTidakTerikat.kode,
+    )!;
+    expect(funding.nilaiTahunIni.nilai).toBe(rp(0));
+    // The literal, not the contract's `NOL_TAMPIL`, for the reason
+    // ./test-support.ts re-states `formatTampil` instead of importing it: a
+    // rendered cell is compared against the specification's own string rather
+    // than against the constant the implementation renders from.
+    expect(funding.nilaiTahunIni.tampil).toBe("0,00");
+    expect(funding.nilaiTahunLalu.nilai).toBe(rp(1_000_000_000));
   });
 
   test("satu jurnal dengan beberapa akun lawan dipecah menurut nilainya", async () => {
