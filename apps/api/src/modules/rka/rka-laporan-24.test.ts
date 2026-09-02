@@ -35,7 +35,7 @@
 // under which both reports can be right at once. Whether report 13 should show
 // gross, net, or both is a client question.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { KODE_RKA } from "./contract";
+import { KODE_RKA, NAMA_LAPORAN_RKA } from "./contract";
 import {
   BEBAN_OPERASIONAL_FEB,
   PENCAIRAN_SEKTOR_A,
@@ -713,5 +713,143 @@ describe("laporan 24: scope cabang ikut ke angka realisasi, bukan hanya ke angga
     expect(semua.baris[0].realisasi).toBe(
       jumlahUang(PENCAIRAN_SEKTOR_A, PENCAIRAN_SEKTOR_B),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The report header spec 10's preamble requires OF EVERY REPORT
+// ---------------------------------------------------------------------------
+//
+// "Header laporan yang berisi nama BUMN, nama laporan, periode, cabang,
+// tanggal cetak, dan nama pencetak" (spec 10, verbatim). Report 24 shipped
+// without one, which is why the screen was reading the entity name out of
+// report 16's payload: a workaround for a gap, and a workaround that breaks
+// the moment a user may open report 24 without also being allowed report 16.
+//
+// EVERY FIELD IS COMPARED AGAINST THE DATABASE, NOT AGAINST A LITERAL, for the
+// same reason the realisation assertions are: a header built from the caller's
+// own request would pass an equality with a fixture constant while printing an
+// entity name nobody stored.
+describe("laporan 24: header laporan (preambul Bagian 10)", () => {
+  async function baris1(): Promise<void> {
+    await baseline("NON_PUMK", [
+      { bidangId: d.bidang.a.id, uraian: "Pendidikan Februari", bulan: 2, jumlahAnggaran: rp(1_000_000) },
+    ]);
+  }
+
+  test("membawa nama BUMN, nama laporan, periode, cabang, tanggal cetak dan pencetaknya", async () => {
+    d.setelJam("2026-04-15");
+    await baris1();
+
+    const l = await d.engine.laporanRkaVsRealisasi(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: d.cabangId, mode: "BULANAN", bulan: 2 },
+      d.ctx.adminPusat,
+    );
+
+    const [bumn] = await d.db.query<{ nama: string }>(
+      "select nama from bumn where id = $1::uuid",
+      [d.bumnId],
+    );
+    const [cabang] = await d.db.query<{ nama: string }>(
+      "select nama from cabang where id = $1::uuid",
+      [d.cabangId],
+    );
+    const [pengguna] = await d.db.query<{ nama: string }>(
+      "select nama from app_user where id = $1::uuid",
+      [d.userId.adminPusat],
+    );
+
+    expect(l.header.namaBumn).toBe(bumn.nama);
+    expect(l.header.namaLaporan).toBe(NAMA_LAPORAN_RKA);
+    expect(l.header.namaCabang).toBe(cabang.nama);
+    expect(l.header.cabangId).toBe(d.cabangId);
+    expect(l.header.dicetakOleh).toBe(pengguna.nama);
+    // From the INJECTED clock, so a printed page is reproducible in a test
+    // instead of carrying today's date.
+    expect(l.header.tanggalCetak).toBe("2026-04-15");
+
+    // The period reported, and the span the figures actually cover.
+    const p = d.periode(TAHUN_RKA, 2);
+    expect(l.header.periodeId).toBe(p.id);
+    expect(l.header.periodeLabel).toBe("Februari 2026");
+    expect(l.header.dariTanggal).toBe(p.tanggalMulai);
+    expect(l.header.sampaiTanggal).toBe(p.tanggalAkhir);
+    // `bacaPeriode` hands back the column as a plain string, so the comparison
+    // is made as strings rather than by widening the header's own union.
+    expect(String(l.header.statusPeriode)).toBe((await d.bacaPeriode(p.id)).status);
+
+    // Report 24 prints budget lines, not `baris_laporan` lines, so it names no
+    // layout template rather than naming one it did not print from.
+    expect(l.header.templateLaporanId).toBeNull();
+    expect(l.header.sumberTemplate).toBe("TANPA_TEMPLATE");
+  });
+
+  test("periode di header adalah rentang yang benar-benar dijumlah, bukan hanya bulan yang diminta", async () => {
+    d.setelJam("2026-04-15");
+    await baris1();
+
+    const l = await d.engine.laporanRkaVsRealisasi(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: d.cabangId, mode: "KUMULATIF_YTD", bulan: 3 },
+      d.ctx.adminPusat,
+    );
+
+    expect(l.header.periodeLabel).toBe("Januari - Maret 2026");
+    // The window's ends, read from the periods themselves.
+    expect(l.header.dariTanggal).toBe(d.periode(TAHUN_RKA, 1).tanggalMulai);
+    expect(l.header.sampaiTanggal).toBe(d.periode(TAHUN_RKA, 3).tanggalAkhir);
+    // The period the page is AS OF is the month asked for, and every month's
+    // own source stays visible in `sumberPerPeriode`.
+    expect(l.header.periodeId).toBe(d.periode(TAHUN_RKA, 3).id);
+    expect(l.sumberPerPeriode).toHaveLength(3);
+  });
+
+  test("sumberData header menyatakan klaim yang sama dengan sumberRealisasi tiap baris", async () => {
+    d.setelJam("2026-04-15");
+    await baris1();
+
+    const hidup = await d.engine.laporanRkaVsRealisasi(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: d.cabangId, mode: "BULANAN", bulan: 2 },
+      d.ctx.adminPusat,
+    );
+    expect(hidup.baris.every((b) => b.sumberRealisasi === "V_LEDGER_BARIS")).toBe(true);
+    expect(hidup.header.sumberData).toBe("LEDGER_LIVE");
+    expect(hidup.header.statusPeriode).toBe("OPEN");
+  });
+
+  test('cabang tidak diminta: "Semua Cabang" hanya kalau memang semua cabang, bukan kalau scope-nya sempit', async () => {
+    d.setelJam("2026-04-15");
+    // A CONSOLIDATED baseline (`cabang_id IS NULL`), because that is what a
+    // report asking for no branch in particular compares against.
+    const barisKonsolidasi = [
+      { bidangId: d.bidang.a.id, uraian: "Pendidikan Februari", bulan: 2, jumlahAnggaran: rp(1_000_000) },
+    ];
+    const konsolidasi = await d.engine.buatRka(
+      { cabangId: null, tahun: TAHUN_RKA, jenis: "NON_PUMK", baris: barisKonsolidasi as never },
+      d.ctx.adminPusat,
+    );
+    await d.engine.setujuiRka({ rkaId: konsolidasi.id }, d.ctx.adminPusatLain);
+
+    // Admin Pusat sees both branches, so the consolidated page really is
+    // entity-wide.
+    const pusat = await d.engine.laporanRkaVsRealisasi(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: null, mode: "BULANAN", bulan: 2 },
+      d.ctx.adminPusat,
+    );
+    expect(pusat.header.cabangId).toBeNull();
+    expect(pusat.header.namaCabang).toBe("Semua Cabang");
+
+    // A branch user asking for no branch in particular gets THEIR branches
+    // consolidated (this report narrows rather than refusing, unlike
+    // modules/laporan), so the header must not claim the whole entity.
+    const branch = await d.engine.laporanRkaVsRealisasi(
+      { tahun: TAHUN_RKA, jenis: "NON_PUMK", cabangId: null, mode: "BULANAN", bulan: 2 },
+      d.ctx.maker,
+    );
+    const [milikMaker] = await d.db.query<{ nama: string }>(
+      "select nama from cabang where id = $1::uuid",
+      [d.ctx.maker.cabangId],
+    );
+    expect(branch.header.namaCabang).toBe(milikMaker.nama);
+    expect(branch.header.namaCabang).not.toBe("Semua Cabang");
   });
 });

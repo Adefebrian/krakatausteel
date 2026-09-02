@@ -65,6 +65,7 @@
 //    period is therefore refused with `SKEMA_BELUM_LENGKAP` rather than
 //    silently recomputed from live master data. See `MetodeRealisasi`.
 import type { DbPort, QueryRunner } from "../../core/ports/db";
+import type { HeaderLaporan } from "../laporan/index";
 import { buatEngineRka } from "./service";
 
 // ---------------------------------------------------------------------------
@@ -494,6 +495,51 @@ export interface FilterRka {
 /** Monthly, or cumulative from the start of the financial year. */
 export type ModeLaporanRka = "BULANAN" | "KUMULATIF_YTD";
 
+/**
+ * Report 24's printed title, verbatim from the spec 10.3 catalogue, for the
+ * same reason modules/laporan keeps `NAMA_LAPORAN`: the header, the Excel
+ * sheet name and the PDF title must not drift apart, and a test should name
+ * the report the way the contract does.
+ */
+export const NAMA_LAPORAN_RKA = "Laporan RKA versus Realisasi";
+
+/**
+ * THE HEADER SPEC 10'S PREAMBLE REQUIRES OF EVERY REPORT, and report 24 is
+ * every report too.
+ *
+ * It is modules/laporan's `HeaderLaporan`, imported through that module's
+ * index and NOT a same-shaped copy declared here. Two structurally identical
+ * types are two types: one of them gains a field, the other does not, and the
+ * screen ends up with two header renderers that disagree about what a printed
+ * page states. Sharing the type means a change over there fails to compile
+ * here, which is the loud handover this repository prefers everywhere else.
+ *
+ * Report 24 lives in this module rather than in modules/laporan because its
+ * figures are budget versus realisation, not `baris_laporan` lines (see this
+ * file's header). That is a reason for the SERVICE to be here; it is not a
+ * reason for the printed preamble to be different, and until now report 24 was
+ * the only one of the 31 reports that shipped without one, so the screen
+ * borrowed the entity name out of report 16's header. That was a workaround
+ * for a gap, and this is the gap closed.
+ *
+ * TWO FIELDS ARE FILLED DIFFERENTLY FROM A modules/laporan REPORT, and both
+ * differences are stated rather than fudged:
+ *
+ *   `sumberTemplate` is always TANPA_TEMPLATE and `templateLaporanId` is always
+ *   null. That member means "this report has no layout template at all", which
+ *   is exactly true here: report 24 prints budget lines per dimension, no
+ *   `baris_laporan` row is involved, and naming a template the page did not use
+ *   would be a false claim about its reproducibility.
+ *
+ *   `sumberData` is the same claim `sumberRealisasi` makes per row, in
+ *   modules/laporan's vocabulary: SNAPSHOT_PERIODE when EVERY month in the
+ *   window was read from the frozen `saldo_akun_periode`, LEDGER_LIVE
+ *   otherwise. A mixed window is LEDGER_LIVE, because a page that was half
+ *   recomputed cannot call itself reproducible; `sumberPerPeriode` still says
+ *   which month came from where.
+ */
+export type HeaderLaporanRka = HeaderLaporan;
+
 export interface FilterLaporanRka {
   tahun: number;
   jenis: JenisRka;
@@ -587,6 +633,9 @@ export interface SumberPeriode {
 }
 
 export interface LaporanRkaVsRealisasi {
+  /** Spec 10's preamble: entity, report name, period, branch, print date and
+   *  who printed it. See `HeaderLaporanRka`. */
+  header: HeaderLaporanRka;
   rkaId: string;
   jenis: JenisRka;
   dimensi: DimensiRka;

@@ -93,6 +93,32 @@ Pagar keamanan di `tools/db.ts`: perintah destruktif menolak jalan kalau nama da
 
 `db:reset` membuang **schema**, bukan database, supaya tidak butuh privilege `CREATEDB`, tidak pernah gagal dengan "database is being accessed by other users", dan sama perilakunya di lokal maupun di service container CI.
 
+### Sesudah migrasi 0029: ada daftar kerja yang harus dibaca
+
+`migrations/0029_koreksi_seksi_baris_laporan.sql` memperbaiki `baris_laporan.seksi`
+pada database yang sudah pernah diseed sebelum perbaikan seed (nilainya berisi
+nama laporan, bukan nama seksi, sehingga Laporan Posisi Keuangan menolak dengan
+`SEKSI_ASET_NETO_TIDAK_DIKENAL`).
+
+Migrasi itu **tidak menebak**. Baris Laporan Aktivitas hanya dikoreksi kalau
+templatenya punya tepat satu kategori aset neto, karena kalau kategorinya dua
+(mis. template gaya PSAK 45: tidak terikat dan terikat temporer) hanya akuntan
+yang tahu baris pendapatan itu masuk yang mana. Baris seperti itu **dibiarkan apa
+adanya** dan dicatat, jadi sesudah menjalankan migrasi periksa daftarnya:
+
+```sql
+SELECT b.kode AS bumn, r.laporan, r.kode, r.seksi_lama, r.alasan
+  FROM _migrasi_0029_seksi_baris_laporan r
+  JOIN baris_laporan l ON l.id = r.baris_laporan_id
+  JOIN bumn b ON b.id = l.bumn_id
+ WHERE r.keputusan = 'DILEWATI';
+```
+
+Baris yang muncul di situ masih membuat laporan 17, 19 dan 20 menolak untuk
+entitas tersebut sampai seseorang mengisi seksinya dengan kode baris kategori
+aset neto yang benar. Tabel yang sama menyimpan nilai lama setiap baris yang
+dikoreksi, dan itulah yang dipakai rollback migrasi supaya pemulihannya persis.
+
 ### Test tidak akan pernah menyentuh DB dev
 
 `bunfig.toml` di root memuat `tools/test-env.ts` sebagai preload, sebelum satu pun modul di-import. File itu menimpa `DATABASE_URL` dengan `TEST_DATABASE_URL` untuk proses test, dan menolak jalan kalau hasilnya bukan database `_test`. `tools/db.test.ts` menguji pagar ini, jadi kalau preload dilepas, suite yang gagal.

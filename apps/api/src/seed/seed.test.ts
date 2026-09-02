@@ -15,7 +15,7 @@ import { entriTambahan } from "../modules/konfigurasi";
 
 const db = createDbAdapter();
 
-/** argon2 floor, so seeding seven accounts twice does not cost a second. */
+/** argon2 floor, so seeding every demo account twice does not cost a second. */
 const FAST = { memoryCost: 4096, timeCost: 1 } as const;
 
 /** Entities this file inserted directly, closed once it is done. */
@@ -224,6 +224,45 @@ describe("demo accounts (spec 14: bisa login dengan semua role)", () => {
     );
     for (const row of rows) expect(Number(row.n)).toBe(1);
   });
+
+  // -------------------------------------------------------------------------
+  // The demo must be able to reach an APPROVED budget baseline
+  // -------------------------------------------------------------------------
+  //
+  // `rka.pemisahan_tugas_persetujuan` ships ON, so `setujuiRka` refuses an
+  // approver who drafted or last edited the version. `admin.rka.approve` is
+  // held by ADMIN_PUSAT alone, deliberately (OPEN-QUESTIONS 26). With one
+  // Admin Pusat account, the drafter is therefore ALWAYS the only possible
+  // approver, every approval is refused, and no demo database can hold a
+  // DISETUJUI baseline for report 24 to compare against.
+  //
+  // This asserts the PRECONDITION the control needs in order to be satisfiable
+  // at all, from the shipped grant matrix rather than from a literal list, so
+  // it keeps holding if the catalogue moves the code to another role.
+  test("two different demo accounts hold the RKA approval right, so a budget can actually be approved", async () => {
+    await seedAll();
+    const rows = await db.query<{ username: string }>(
+      `SELECT DISTINCT u.username
+         FROM app_user u
+         JOIN user_role ur ON ur.user_id = u.id
+         JOIN role_permission rp ON rp.role_id = ur.role_id
+         JOIN permission p ON p.id = rp.permission_id
+        WHERE p.kode = 'admin.rka.approve'
+          AND u.deleted_at IS NULL
+          AND u.username = ANY($1::text[])
+        ORDER BY u.username`,
+      [DEMO_USERS.map((u) => u.username)],
+    );
+    // Two DISTINCT people, which is what "someone else must approve" needs.
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    // And they are not two logins of one human: distinct rows, distinct NIPs.
+    const nip = await db.query<{ n: string }>(
+      "SELECT count(DISTINCT nip)::text AS n FROM app_user WHERE username = ANY($1::text[]) AND deleted_at IS NULL",
+      [rows.map((r) => r.username)],
+    );
+    expect(Number(nip[0]!.n)).toBe(rows.length);
+  }, 20_000);
 
   test("the demo password is stored as an argon2id hash, never as plaintext", async () => {
     await seedAll();

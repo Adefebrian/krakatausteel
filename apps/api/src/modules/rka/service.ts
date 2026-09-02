@@ -65,10 +65,13 @@ import {
   type BuatRevisiInput,
   type BuatRkaInput,
   type DimensiRka,
+  NAMA_LAPORAN_RKA,
   type FilterLaporanRka,
   type FilterRka,
+  type HeaderLaporanRka,
   type JenisRka,
   type LaporanRkaVsRealisasi,
+  type ModeLaporanRka,
   type MetodeRealisasi,
   type Rka,
   type RkaContext,
@@ -100,6 +103,35 @@ import { keSen, persenCapaian, sen, tambah, uangDariDb } from "./uang";
 
 /** Accounts a budget line may name. Spec 9.3: expense budgets and revenue targets. */
 const TIPE_AKUN_DAPAT_DIANGGARKAN = new Set(["BEBAN", "PENDAPATAN"]);
+
+/**
+ * Month names for report 24's `periodeLabel`.
+ *
+ * A SECOND COPY, AND THE DUPLICATION IS DELIBERATE RATHER THAN OVERLOOKED.
+ * modules/laporan has the same list and the same range-label rule, but both are
+ * private to that module's ./service.ts, and this module may only reach it
+ * through its index (the boundary rule, and check:boundaries enforces it). The
+ * honest fix is to move them into modules/laporan's ./contract.ts, which is the
+ * file that module already exports its formatting contract from; that is a
+ * change inside modules/laporan and belongs to whoever owns that file next.
+ * Until then the two lists MUST stay identical, because "Agustus 2026" printed
+ * two different ways on two reports of the same month is exactly the drift the
+ * shared `NAMA_LAPORAN` catalogue exists to prevent.
+ */
+const NAMA_BULAN = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+] as const;
+
+/** Same rule as modules/laporan's `labelRentang`, over months rather than dates. */
+function labelRentangBulan(dari: BulanJendela, sampai: BulanJendela): string {
+  if (dari.tahun === sampai.tahun) {
+    return dari.bulan === sampai.bulan
+      ? `${NAMA_BULAN[dari.bulan - 1]} ${dari.tahun}`
+      : `${NAMA_BULAN[dari.bulan - 1]} - ${NAMA_BULAN[sampai.bulan - 1]} ${sampai.tahun}`;
+  }
+  return `${NAMA_BULAN[dari.bulan - 1]} ${dari.tahun} - ${NAMA_BULAN[sampai.bulan - 1]} ${sampai.tahun}`;
+}
 
 interface BarisSiap {
   akunId: string | null;
@@ -512,6 +544,85 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
     for (let b = mulai; b <= 12; b += 1) out.push({ tahun, bulan: b });
     for (let b = 1; b <= bulan; b += 1) out.push({ tahun: tahun + 1, bulan: b });
     return out;
+  }
+
+  // --- report 24's header (spec 10 preamble) -------------------------------
+
+  /**
+   * The header every other report already carries, for report 24.
+   *
+   * WHY `namaCabang` IS NOT SIMPLY "Semua Cabang" WHEN NO BRANCH WAS ASKED FOR,
+   * which is what modules/laporan prints. That module refuses a consolidated
+   * report to anyone whose scope is not the whole entity, so for it the two
+   * statements are the same statement. This report does not refuse: a branch
+   * Maker asking for no branch in particular gets their OWN branches
+   * consolidated (`cabangTerlihat`), which is a deliberate difference and the
+   * right one. Printing "Semua Cabang" on that page would make a one-branch
+   * figure claim to be an entity-wide one, and a header is read as a statement
+   * of what the figures below it cover. So the label names what was actually
+   * consolidated, and says "Semua Cabang" only when that is true.
+   */
+  async function buatHeaderLaporan(
+    ctx: RkaContext,
+    opsi: {
+      cabangId: string | null;
+      cabangIds: readonly string[];
+      periode: readonly PeriodeRow[];
+      mode: ModeLaporanRka;
+      sumber: SumberRealisasi;
+    },
+  ): Promise<HeaderLaporanRka> {
+    const bumn = await repo.bumn(db, ctx.bumnId);
+    const pengguna = await repo.pengguna(db, ctx.userId);
+    const semuaCabang = await repo.cabangBumn(db, ctx.bumnId);
+    const namaPer = new Map(semuaCabang.map((c) => [c.id, c.nama]));
+
+    let namaCabang: string;
+    if (opsi.cabangId !== null) {
+      namaCabang = namaPer.get(opsi.cabangId) ?? "";
+    } else if (semuaCabang.length > 0 && semuaCabang.every((c) => opsi.cabangIds.includes(c.id))) {
+      namaCabang = "Semua Cabang";
+    } else {
+      // In `kode` order, not in the order the caller's scope happened to be
+      // built, so two people with the same scope print the same page.
+      namaCabang = semuaCabang
+        .filter((c) => opsi.cabangIds.includes(c.id))
+        .map((c) => c.nama)
+        .join(", ");
+    }
+
+    // The period the report is AS OF, which is the month asked for: the last
+    // one of the window in both modes. `sumberPerPeriode` carries every month
+    // and its own status, so nothing is lost by the header naming one.
+    const utama = opsi.periode[opsi.periode.length - 1];
+    const awal = opsi.periode[0];
+
+    return {
+      namaBumn: bumn?.nama ?? "",
+      namaLaporan: NAMA_LAPORAN_RKA,
+      periodeLabel:
+        opsi.mode === "BULANAN"
+          ? `${NAMA_BULAN[utama.bulan - 1]} ${utama.tahun}`
+          : labelRentangBulan(
+              { tahun: awal.tahun, bulan: awal.bulan },
+              { tahun: utama.tahun, bulan: utama.bulan },
+            ),
+      periodeId: utama.id,
+      statusPeriode: utama.status,
+      dariTanggal: awal.tanggal_mulai,
+      sampaiTanggal: utama.tanggal_akhir,
+      cabangId: opsi.cabangId,
+      namaCabang,
+      tanggalCetak: jam().toISOString().slice(0, 10),
+      dicetakOleh: pengguna?.nama ?? "",
+      // modules/laporan's vocabulary for the claim `sumberRealisasi` makes per
+      // row. See `HeaderLaporanRka`.
+      sumberData: opsi.sumber === "SALDO_AKUN_PERIODE" ? "SNAPSHOT_PERIODE" : "LEDGER_LIVE",
+      // Report 24 prints budget lines, not `baris_laporan` lines: there is no
+      // layout template, and saying so is more honest than naming one.
+      templateLaporanId: null,
+      sumberTemplate: "TANPA_TEMPLATE",
+    };
   }
 
   // --- realisation ---------------------------------------------------------
@@ -1063,6 +1174,13 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
           baris.length === 0 ? "0.00" : tambah(...baris.map((b) => b.realisasi));
 
         return {
+          header: await buatHeaderLaporan(ctx, {
+            cabangId: cabangFilter,
+            cabangIds,
+            periode,
+            mode: filter.mode,
+            sumber: sumberBaris,
+          }),
           rkaId: rka.id,
           jenis: rka.jenis,
           dimensi,

@@ -94,6 +94,21 @@ export interface DimensiRow {
   nama: string;
 }
 
+/** The three rows report 24's header is printed from (spec 10's preamble). */
+export interface BumnRow {
+  nama: string;
+}
+
+export interface PenggunaRow {
+  nama: string;
+}
+
+export interface CabangRow {
+  id: string;
+  kode: string;
+  nama: string;
+}
+
 /** One dimension's movement in a window, debit-positive, in `nilai`. */
 export interface AgregatRow {
   dimensi_id: string | null;
@@ -220,6 +235,14 @@ export interface RepoRka {
   ): Promise<AgregatRow[]>;
 
   konfigurasi(tx: QueryRunner, bumnId: string, grup: string, kunci: string): Promise<string | null>;
+
+  // --- report 24's header (spec 10 preamble) --------------------------------
+  bumn(tx: QueryRunner, bumnId: string): Promise<BumnRow | null>;
+  pengguna(tx: QueryRunner, userId: string): Promise<PenggunaRow | null>;
+  /** Every branch of the entity, in `kode` order. Both the branch NAME and the
+   *  question "does the caller's scope cover all of them" are answered from
+   *  this one read. */
+  cabangBumn(tx: QueryRunner, bumnId: string): Promise<CabangRow[]>;
 }
 
 export function buatRepoRka(): RepoRka {
@@ -648,6 +671,30 @@ export function buatRepoRka(): RepoRka {
         [grup, kunci, bumnId],
       );
       return row?.nilai ?? null;
+    },
+
+    // --- report 24's header ------------------------------------------------
+    //
+    // Deliberately the same three reads modules/laporan makes for its own
+    // header, with the same predicates, so the two headers cannot disagree
+    // about an entity's name or about who printed a page. No `deleted_at`
+    // filter on `bumn` or `app_user`, for the reason that module gives: a page
+    // printed by a user who has since been deactivated must still say who
+    // printed it.
+    bumn(tx, bumnId) {
+      return satu<BumnRow>(tx, `select nama from bumn where id = $1::uuid`, [bumnId]);
+    },
+
+    pengguna(tx, userId) {
+      return satu<PenggunaRow>(tx, `select nama from app_user where id = $1::uuid`, [userId]);
+    },
+
+    cabangBumn(tx, bumnId) {
+      return tx.query<CabangRow>(
+        `select id::text as id, kode, nama
+           from cabang where bumn_id = $1::uuid and deleted_at is null order by kode`,
+        [bumnId],
+      );
     },
   };
 }

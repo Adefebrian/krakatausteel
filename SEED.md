@@ -30,10 +30,10 @@ Isinya:
 
 | Modul | Isi | Kapan dipakai |
 |---|---|---|
-| `seedRbac` | 42 permission, 6 role sistem, dan grant antar keduanya | selalu |
-| `seedKonfigurasiTambahan` | 9 kunci konfigurasi kapabilitas yang tidak dibawa migrasi (lihat `docs/BUILD-PLAN.md`) | selalu |
-| `seedDemo` | 1 BUMN, 1 pusat + 2 cabang, 7 akun, 1 mitra + akun portal, 1 periode berjalan | **hanya demo** |
-| `seedCoaDanEventMapping` | COA inti (5 header + 15 akun postable) + 6 baris laporan + **19 event mapping Bagian 6.4**, per BUMN | selalu |
+| `seedRbac` | 47 permission, 6 role sistem, dan grant antar keduanya | selalu |
+| `seedKonfigurasiTambahan` | 10 kunci konfigurasi kapabilitas yang tidak dibawa migrasi (lihat `docs/BUILD-PLAN.md`) | selalu |
+| `seedDemo` | 1 BUMN, 1 pusat + 2 cabang, 8 akun, 1 mitra + akun portal, 1 periode berjalan | **hanya demo** |
+| `seedCoaDanEventMapping` | COA inti (5 header + 16 akun postable), 1 template laporan `BAWAAN` + 6 klasifikasi akun + 10 baris laporan + 7 pemetaan, dan **22 event mapping Bagian 6.4**, per BUMN | selalu |
 
 ### Kenapa event mapping wajib diseed
 
@@ -69,7 +69,34 @@ Password untuk **semua** akun di bawah: `TjslDemo#2026`
 | `admincabang` | Admin Cabang | 01 Cabang Cilegon | Semua kewenangan operasional, **tetap terikat satu cabang** |
 | `maker.serang` | Maker | 02 Cabang Serang | Ada supaya skenario lintas cabang punya data di kedua sisi |
 | `adminpusat` | Admin Pusat | 00 Kantor Pusat | Semua cabang, master data, COA, konfigurasi, reopen periode |
+| `adminpusat2` | Admin Pusat | 00 Kantor Pusat | Admin Pusat **kedua**, supaya RKA bisa disetujui orang lain daripada yang menyusunnya |
 | `auditor` | Auditor | 00 Kantor Pusat | Read only penuh termasuk audit trail. **Tidak bisa mengubah apa pun** |
+
+### Kenapa ada dua akun Admin Pusat
+
+Bukan akun cadangan. `rka.pemisahan_tugas_persetujuan` **aktif** secara bawaan,
+jadi `setujuiRka` menolak penyetuju yang menyusun atau terakhir mengubah versi
+itu (`KONFLIK_MAKER_APPROVER`), dan hak `admin.rka.approve` hanya dipegang
+ADMIN_PUSAT (keputusan sadar, lihat `apps/api/src/modules/auth/permissions.ts`
+dan OPEN-QUESTIONS 26: Admin Cabang boleh **membaca** RKA, tidak boleh
+menyetujui).
+
+Dengan satu akun Admin Pusat, penyusun RKA selalu satu-satunya calon penyetuju,
+setiap persetujuan ditolak, dan database demo **tidak pernah bisa punya baseline
+DISETUJUI**. Laporan 24 (RKA versus Realisasi) membandingkan terhadap baseline
+itu dan menolak dengan `BASELINE_TIDAK_ADA` kalau tidak ada, jadi laporannya
+tidak bisa didemokan sama sekali.
+
+Perbaikannya ada di **daftar pemainnya**, bukan di kontrolnya: mematikan kunci
+pemisahan tugas untuk demo berarti mendemokan sistem tanpa kontrol yang justru
+sedang dibeli klien, dan memberikan `admin.rka.approve` ke APPROVER atau
+ADMIN_CABANG memindahkan persetujuan anggaran ke cabang. Instalasi sungguhan pun
+begitu: satu entitas dengan satu administrator pusat tidak bisa menjalankan
+aturan empat mata apa pun.
+
+Alur demonya: login `adminpusat` untuk menyusun RKA, lalu login `adminpusat2`
+untuk menyetujuinya. Menyetujui dengan akun yang sama tetap ditolak, dan itu
+memang yang ingin ditunjukkan.
 
 Akun portal mitra (login portal publik, endpointnya baru dibangun di Fase 7):
 
@@ -79,13 +106,15 @@ Akun portal mitra (login portal publik, endpointnya baru dibangun di Fase 7):
 
 Username `maker` sampai `auditor` sengaja sama dengan akun demo di
 `apps/web/src/api/auth.ts`, jadi SPA berperilaku sama baik saat memakai stub
-demo maupun saat sudah menembak API sungguhan.
+demo maupun saat sudah menembak API sungguhan. `adminpusat2` lebih baru
+daripada stub itu dan untuk sementara hanya ada di sisi API; tidak ada yang
+rusak karenanya, stub-nya saja yang belum bisa melogin akun tersebut.
 
 ## Struktur organisasi demo
 
 ```
 BUMN  KRAS  PT Krakatau Steel (Persero) Tbk
-├── 00  Kantor Pusat     (is_pusat)   adminpusat, auditor
+├── 00  Kantor Pusat     (is_pusat)   adminpusat, adminpusat2, auditor
 ├── 01  Cabang Cilegon               maker, checker, approver, admincabang
 └── 02  Cabang Serang                maker.serang
 ```
@@ -98,7 +127,7 @@ dipilih sebagai petugas survey di Fase 3 tanpa seed tambahan.
 Empat hal yang bisa dibuktikan hari ini, semuanya lewat API langsung
 (`curl`) maupun lewat UI:
 
-1. **Login semua role.** `POST /auth/login` untuk ketujuh akun, lalu
+1. **Login semua role.** `POST /auth/login` untuk kedelapan akun, lalu
    `GET /auth/session`. Perhatikan `permissions` berbeda per role dan menu di
    SPA ikut menyesuaikan. Ini kriteria selesai Fase 0 di spesifikasi Bagian 14.
 2. **Akses tidak sah ditolak di API, bukan cuma tombolnya hilang.**

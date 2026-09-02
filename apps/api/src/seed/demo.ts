@@ -1,4 +1,6 @@
-// DEMO ONLY. One account per role in spec 2, plus a Mitra portal account.
+// DEMO ONLY. One account per role in spec 2, plus a second Maker for the
+// cross-branch scenario, a SECOND Admin Pusat so a four-eyes approval has a
+// second pair of eyes, and a Mitra portal account.
 //
 // EVERY CREDENTIAL BELOW IS PUBLIC AND MUST NEVER EXIST ON A PRODUCTION
 // DATABASE. They are here so "bisa login dengan semua role" (the Fase 0 done
@@ -8,7 +10,10 @@
 // secret is worse than one that is obviously not.
 //
 // Usernames match the demo stub in apps/web/src/api/auth.ts, so the SPA
-// behaves identically whether it is talking to the stub or to this API.
+// behaves identically whether it is talking to the stub or to this API. NOTE:
+// `adminpusat2` is newer than that stub and is API-side only until somebody
+// adds it there; nothing breaks meanwhile, the stub simply cannot log that one
+// account in.
 //
 // Branch layout matches spec 13 and the SPA stub: one pusat plus branches, so
 // the cross-branch scenario (spec 16 #24, a Maker from cabang A refused
@@ -89,6 +94,45 @@ export const DEMO_USERS: readonly DemoUserSpec[] = [
     role: "ADMIN_PUSAT",
     cabangKode: "00",
     catatan: "Lintas cabang, master data, COA, konfigurasi, reopen periode",
+  },
+  {
+    // A SECOND ADMIN PUSAT, AND IT IS NOT A DUPLICATE ACCOUNT.
+    //
+    // `rka.pemisahan_tugas_persetujuan` ships ON (ASSUMPTIONS.md A-31), so
+    // `setujuiRka` refuses an approver who created or last edited the version
+    // (KONFLIK_MAKER_APPROVER). `admin.rka` (enter a budget) and
+    // `admin.rka.approve` (bless it) are both held by ADMIN_PUSAT alone, by
+    // deliberate decision recorded in modules/auth/permissions.ts and
+    // OPEN-QUESTIONS 26: an Admin Cabang may READ a budget, never approve one.
+    //
+    // With ONE Admin Pusat account, the drafter is therefore always the only
+    // possible approver, every approval is refused, and no demo database can
+    // ever hold a DISETUJUI baseline. Report 24 defaults to that baseline and
+    // refuses with BASELINE_TIDAK_ADA without one, so the budget-versus-
+    // realisation report could not be demonstrated at all.
+    //
+    // The fix belongs HERE, in the cast of characters, not in the control. The
+    // alternatives were considered and rejected: turning the segregation key
+    // off for the demo would demonstrate a system that does not have the
+    // control the client is buying; granting `admin.rka.approve` to APPROVER or
+    // ADMIN_CABANG would hand budget approval to a branch, which is the exact
+    // question OPEN-QUESTIONS 26 answered the other way. A second holder of the
+    // same role is also what the real installation looks like: an entity with
+    // one head-office administrator cannot operate ANY four-eyes rule.
+    //
+    // modules/rka's own fixture reached the same conclusion first and calls it
+    // `adminPusatLain` (see apps/api/src/modules/rka/test-support.ts): "with
+    // one holder of the approval right there is nobody for a 'someone else must
+    // approve' rule to hand the document to, and the test would be asserting
+    // the absence of a control rather than the control".
+    username: "adminpusat2",
+    nama: "Demo Admin Pusat Dua",
+    email: "adminpusat2@demo.tjsl.local",
+    nip: "D-0008",
+    role: "ADMIN_PUSAT",
+    cabangKode: "00",
+    catatan:
+      "Admin Pusat kedua, supaya persetujuan RKA punya pihak kedua (pemisahan tugas maker/approver)",
   },
   {
     username: "auditor",
