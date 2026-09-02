@@ -285,6 +285,10 @@ export const KODE_ANGSURAN = {
   JURNAL_GAGAL: "JURNAL_GAGAL", // journal port rejected; the whole allocation rolled back
 
   // --- reschedule (spec 7.3)
+  // Carrying accrued jasa onto the new version found no room for it, so the
+  // restructure would silently write off income already recognised and a
+  // receivable already in the ledger (migrations/0030).
+  AKRUAL_TIDAK_TERTAMPUNG: "AKRUAL_TIDAK_TERTAMPUNG",
   RESCHEDULE_TIDAK_DITEMUKAN: "RESCHEDULE_TIDAK_DITEMUKAN",
   RESCHEDULE_BELUM_DISETUJUI: "RESCHEDULE_BELUM_DISETUJUI",
   RESCHEDULE_SUDAH_DIPROSES: "RESCHEDULE_SUDAH_DIPROSES",
@@ -459,6 +463,19 @@ export interface HasilAlokasi {
   alokasiPokok: Uang;
   alokasiJasa: Uang;
   alokasiKelebihan: Uang;
+  /**
+   * The two halves of `alokasiJasa`, and they always sum to it.
+   *
+   * `alokasiJasaAkrual` is the part that CLEARS Piutang Jasa Administrasi
+   * because the closing engine had already accrued it onto the schedule rows
+   * this receipt paid (`ANGSURAN_JASA_ADM_AKRUAL`); `alokasiJasaLangsung` is
+   * the part recognised as income now (`ANGSURAN_JASA_ADM`). One receipt can
+   * legitimately need both. Exposed rather than left inside the journal so a
+   * caller, a report and a test can see the classification without reading
+   * `jurnal_baris` back. See migrations/0030.
+   */
+  alokasiJasaAkrual: Uang;
+  alokasiJasaLangsung: Uang;
   rincian: RincianAlokasiBaris[];
   /**
    * The waterfall the engine actually walked, in order, as read from
@@ -476,6 +493,15 @@ export interface HasilAlokasi {
     status: StatusAkad;
     tanggalLunas: string | null;
   };
+}
+
+/** What `pulihkanAkrualSetoran` gave back, and to which rows. */
+export interface HasilPemulihanAkrual {
+  angsuranId: string;
+  /** Sum restored by THIS call. "0.00" when there was nothing left to restore. */
+  totalDipulihkan: Uang;
+  /** Per active-version schedule row, in due-date order. */
+  perBaris: Array<{ jadwalId: string; nilai: Uang }>;
 }
 
 /** Spec 7.3 step 1: a reschedule is drafted, then approved. */
@@ -676,6 +702,31 @@ export interface AngsuranEngine {
    * of what a reschedule is for.
    */
   setujuiReschedule(rescheduleId: string, ctx: AngsuranContext): Promise<HasilReschedule>;
+
+  /**
+   * Gives back the accrued jasa a receipt consumed, so Piutang Jasa
+   * Administrasi is restored to what it was before that receipt cleared it.
+   *
+   * THE HALF OF A RECEIPT REVERSAL THIS MODULE OWNS, and deliberately only
+   * that half. Reversing a receipt end to end (un-allocating the schedule
+   * rows, restoring the akad's outstanding, undoing a `pumk_kelebihan`) has no
+   * implementation anywhere in this repository today: no `PembalikStateBisnis`
+   * is registered for `referensi_tipe = 'pumk_angsuran'`, so
+   * `reversalJurnal` REFUSES such a journal outright with
+   * `PEMBALIK_STATE_BISNIS_TIDAK_TERDAFTAR` rather than reversing the
+   * accounting alone. When that reverser is built it MUST call this, because
+   * the accrual balance is the one piece of receipt state that lives outside
+   * both the ledger and the payment columns.
+   *
+   * Idempotent: the second call finds every consumption already restored and
+   * changes nothing. Restores onto the ORIGINAL schedule row when it is still
+   * on the active version, and onto the active version's earliest rows with
+   * room when a reschedule has since retired it.
+   */
+  pulihkanAkrualSetoran(
+    angsuranId: string,
+    ctx: AngsuranContext,
+  ): Promise<HasilPemulihanAkrual>;
 
   /**
    * The conversion helper docs/BUILD-PLAN.md requires: derive the FLAT rate

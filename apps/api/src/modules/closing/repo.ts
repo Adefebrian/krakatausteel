@@ -1048,6 +1048,74 @@ export function buatRepoClosing() {
       );
     },
 
+    /**
+     * PER SCHEDULE ROW, the same accrual the snapshot records per akad
+     * (migrations/0030).
+     *
+     * WHY THE ROWS AND NOT ONLY THE SNAPSHOT. `akrual_jasa_snapshot` is per
+     * akad per period and carries one total, which cannot answer the question a
+     * receipt has to ask: "how much of THIS instalment's jasa is already in
+     * Piutang Jasa Administrasi". Without that answer every receipt credited
+     * 1.1.04 whether or not anything had ever debited it, which is the defect
+     * 0030 closes. The engine writes the fact where it is a fact.
+     *
+     * SET, NOT ADDED, and that is what makes a re-run of the accrual safe: the
+     * value is `jasa_adm - jasa_terbayar` as the row stands now, which is
+     * exactly the akad-level `jasa_jatuh_tempo_periode - jasa_diterima_periode`
+     * decomposed (a row can never be overpaid, `pumk_jadwal_terbayar_ck`, so no
+     * row's contribution is negative and the two agree to the sen). A second
+     * run after a payment lands on the correct smaller number instead of
+     * doubling.
+     *
+     * An akad that has DROPPED OUT of the accrual population between runs is
+     * reset to zero rather than left carrying a stale balance, which is why
+     * this is a LEFT JOIN over the whole scope rather than an update of the
+     * qualifying rows alone.
+     */
+    async tulisAkrualBaris(
+      tx: QueryRunner,
+      input: {
+        periodeId: string;
+        userId: string;
+        cabangIds: readonly string[];
+        kelas: readonly string[];
+        mulai: string;
+        akhir: string;
+      },
+    ): Promise<void> {
+      if (input.cabangIds.length === 0) return;
+      const params: unknown[] = [input.periodeId, input.userId, input.mulai, input.akhir];
+      const phCabang = daftarPlaceholder(params.length + 1, input.cabangIds.length);
+      params.push(...input.cabangIds);
+      // An empty class list is a real configuration ("accrue nothing"), and it
+      // must zero the whole scope rather than skip the statement.
+      const predikatKelas =
+        input.kelas.length === 0
+          ? "false"
+          : `s.kolektibilitas in (${daftarPlaceholder(params.length + 1, input.kelas.length, "::text")})`;
+      params.push(...input.kelas);
+      const nilaiBaru =
+        "case when q.akad_id is null then 0::numeric(20,2) else r.jasa_adm - r.jasa_terbayar end";
+      await tx.query(
+        `update pumk_jadwal_angsuran r
+            set jasa_akrual_belum_tertagih = ${nilaiBaru},
+                updated_by = $2::uuid, updated_at = now()
+           from pumk_akad a
+           left join (
+             select s.akad_id
+               from kolektibilitas_snapshot s
+              where s.periode_id = $1::uuid and s.deleted_at is null and ${predikatKelas}
+           ) q on q.akad_id = a.id
+          where r.akad_id = a.id
+            and a.deleted_at is null
+            and a.cabang_id in (${phCabang})
+            and r.is_active_version and r.deleted_at is null
+            and r.tanggal_jatuh_tempo between $3::date and $4::date
+            and r.jasa_akrual_belum_tertagih is distinct from (${nilaiBaru})`,
+        params,
+      );
+    },
+
     // --- spec 8.4 prerequisites ------------------------------------------
 
     jurnalDraftPeriode(

@@ -156,6 +156,9 @@ export const NAMA_ERROR_BERKODE: ReadonlySet<string> = new Set([
   // sweeps every `export class *Error` under apps/api/src/modules and fails if
   // one is missing from here, so the fourth module cannot repeat it silently.
   "ClosingError",
+  // Fase 7, listed WITH their routers rather than after them.
+  "ToolsError",
+  "DashboardError",
 ]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
@@ -274,6 +277,11 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   KLASIFIKASI_ARUS_KAS_TIDAK_LENGKAP: "KONFLIK",
   SEKSI_ASET_NETO_TIDAK_DIKENAL: "KONFLIK",
   SALDO_PERIODE_BELUM_DIBEKUKAN: "KONFLIK",
+  // The same shape one table over: the period exists, the request is well
+  // formed, and Closing Kolektibilitas simply has not run for it yet. A retry
+  // with the same query refuses again until somebody runs the step, which is
+  // what KONFLIK means here and why it is not a 400.
+  SNAPSHOT_KOLEKTIBILITAS_BELUM_ADA: "KONFLIK",
   LAPORAN_TIDAK_BALANCE: "KONFLIK",
 
   // --- modules/closing (spec 8) -------------------------------------------
@@ -337,6 +345,10 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   RESCHEDULE_BELUM_DISETUJUI: "KONFLIK",
   OUTSTANDING_NEGATIF: "KONFLIK",
   TOTAL_POKOK_TIDAK_COCOK: "KONFLIK",
+  // migrations/0030: jasa already accrued into Piutang Jasa Administrasi does
+  // not fit on the rows it has to move to. The request is well formed and the
+  // refusal is about ledger state, so KONFLIK and never a 400.
+  AKRUAL_TIDAK_TERTAMPUNG: "KONFLIK",
 
   // A collaborating engine refused, so nothing was written. The caller cannot
   // fix the body; the state has to change first.
@@ -352,6 +364,21 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   BASIS_EKUIVALENSI_BELUM_DIPUTUSKAN: "KONFLIK",
   KONFIGURASI_TIDAK_ADA: "KONFLIK",
   KONFIGURASI_TIDAK_VALID: "KONFLIK",
+
+  // --- modules/tools (spec 9.6) and modules/dashboard (spec 11) ------------
+  //
+  // Same rule as everywhere above: absent means 400, which is right for
+  // `PEMERIKSAAN_TIDAK_DIKENAL` (a check code that is not in the catalogue is
+  // a malformed path) and for `METRIK_TIDAK_DIKENAL`. Listed here are only the
+  // codes where 400 would be a LIE: the SYSTEM is not ready, and no rewriting
+  // of the request will help.
+  //
+  // `MAPPING_PIUTANG_TIDAK_ADA` is the reconciliation refusing to run because
+  // `event_jurnal_mapping` names no receivable account. Answering it with
+  // zeroes would report "no difference" when the truth is "nothing was
+  // compared", which is the one wrong answer an operator would act on.
+  MAPPING_PIUTANG_TIDAK_ADA: "KONFLIK",
+  PERIODE_TIDAK_ADA: "TIDAK_DITEMUKAN",
 };
 
 /**

@@ -110,6 +110,39 @@ export async function periksaIntegritas(dunia: Dunia): Promise<Pemeriksaan[]> {
     detail: `${outstandingNegatif} akad`,
   });
 
+  // THE CHECK THAT WAS MISSING WHEN THE DEFECT SHIPPED (ADR 0018,
+  // migrations/0030). Piutang Jasa Administrasi was minus Rp 86,7 juta for
+  // twenty four months and every check above stayed green, because the income
+  // was missing by the same amount and the balance sheet still balanced. An
+  // asset with a credit balance is not an accounting opinion, so it gets a
+  // check of its own, at every month end rather than only at the last one: the
+  // defect drifted negative gradually and a final-month-only test would have
+  // reported a smaller number without ever saying which month broke it.
+  const bulanPiutangNegatif = await db.query<{ bulan: string; saldo: string }>(
+    `SELECT p.tahun || '-' || lpad(p.bulan::text, 2, '0') AS bulan,
+            s.saldo::numeric(20,2)::text AS saldo
+       FROM periode p
+       JOIN LATERAL (
+         SELECT coalesce(sum(l.nilai_debit_positif), 0) AS saldo
+           FROM v_ledger_baris l
+           JOIN akun a ON a.id = l.akun_id
+          WHERE a.kode = '1.1.04' AND l.tanggal_transaksi <= p.tanggal_akhir
+       ) s ON true
+      WHERE p.bumn_id = $1::uuid AND p.deleted_at IS NULL AND s.saldo < 0
+      ORDER BY p.tahun, p.bulan`,
+    [dunia.bumnId],
+  );
+  out.push({
+    nama: "Piutang Jasa Administrasi (1.1.04) tidak pernah bersaldo kredit di akhir bulan mana pun",
+    lulus: bulanPiutangNegatif.length === 0,
+    detail:
+      bulanPiutangNegatif.length === 0
+        ? "0 bulan negatif"
+        : bulanPiutangNegatif
+            .map((b) => `${b.bulan} ${rupiahTampil(b.saldo)}`)
+            .join(", "),
+  });
+
   return out;
 }
 

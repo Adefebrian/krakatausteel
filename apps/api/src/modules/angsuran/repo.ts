@@ -64,6 +64,22 @@ export interface JadwalBaris {
   jasa_terbayar: string;
   tanggal_lunas: string | null;
   is_active_version: boolean;
+  /**
+   * Jasa on this row already accrued into Piutang Jasa Administrasi by the
+   * closing engine (spec 8.3) and not yet collected. migrations/0030: this is
+   * what lets a receipt decide, per rupiah, whether its jasa leg CLEARS the
+   * receivable or RECOGNISES income.
+   */
+  jasa_akrual_belum_tertagih: string;
+}
+
+/** One receipt's consumption of accrued jasa, per schedule row (0030). */
+export interface KonsumsiAkrualBaris {
+  id: string;
+  angsuran_id: string;
+  jadwal_id: string;
+  nilai: string;
+  dipulihkan_at: string | null;
 }
 
 export interface RescheduleBaris {
@@ -111,7 +127,8 @@ const KOLOM_JADWAL = `
   pokok::text as pokok, jasa_adm::text as jasa_adm, total::text as total,
   saldo_pokok_setelah::text as saldo_pokok_setelah, status,
   pokok_terbayar::text as pokok_terbayar, jasa_terbayar::text as jasa_terbayar,
-  tanggal_lunas::text as tanggal_lunas, is_active_version`;
+  tanggal_lunas::text as tanggal_lunas, is_active_version,
+  jasa_akrual_belum_tertagih::text as jasa_akrual_belum_tertagih`;
 
 const KOLOM_RESCHEDULE = `
   id, akad_id, tanggal_pengajuan::text as tanggal_pengajuan, alasan, jenis,
@@ -173,9 +190,39 @@ export interface AngsuranRepo {
       jasaTerbayar: string;
       status: string;
       tanggalLunas: string | null;
+      /**
+       * What is LEFT accrued on this row after the receipt consumed part of
+       * it. Written in the SAME statement as `jasaTerbayar` on purpose:
+       * `pumk_jadwal_akrual_ck` compares the two, so splitting them into two
+       * UPDATEs would make a legal end state fail on the intermediate row.
+       */
+      jasaAkrualBelumTertagih: string;
       userId: string;
     },
   ): Promise<void>;
+  /**
+   * Sets the accrued balance alone, for the two paths that move it without a
+   * payment: a reschedule carrying it onto the new version, and a reversal
+   * putting it back (migrations/0030).
+   */
+  setAkrualBaris(
+    tx: AngsuranTx,
+    input: { jadwalId: string; nilai: string; userId: string },
+  ): Promise<void>;
+  /** Active-version rows, oldest first, for placing a carried accrual. */
+  barisAktif(tx: AngsuranTx, akadId: string): Promise<JadwalBaris[]>;
+  catatKonsumsiAkrual(
+    tx: AngsuranTx,
+    input: {
+      angsuranId: string;
+      userId: string;
+      baris: ReadonlyArray<{ jadwalId: string; nilai: string }>;
+    },
+  ): Promise<void>;
+  /** The receipt header, for the scope check on a reversal. */
+  angsuran(tx: AngsuranTx, angsuranId: string): Promise<{ id: string; akad_id: string } | null>;
+  konsumsiAkrual(tx: AngsuranTx, angsuranId: string): Promise<KonsumsiAkrualBaris[]>;
+  tandaiKonsumsiDipulihkan(tx: AngsuranTx, ids: readonly string[], userId: string): Promise<void>;
 
   buatAngsuran(
     tx: AngsuranTx,
@@ -428,7 +475,8 @@ export function createAngsuranRepo(): AngsuranRepo {
         `update pumk_jadwal_angsuran
             set pokok_terbayar = $2::numeric, jasa_terbayar = $3::numeric,
                 status = $4, tanggal_lunas = $5::date,
-                updated_by = $6::uuid, updated_at = now()
+                jasa_akrual_belum_tertagih = $6::numeric,
+                updated_by = $7::uuid, updated_at = now()
           where id = $1::uuid`,
         [
           input.jadwalId,
@@ -436,9 +484,79 @@ export function createAngsuranRepo(): AngsuranRepo {
           input.jasaTerbayar,
           input.status,
           input.tanggalLunas,
+          input.jasaAkrualBelumTertagih,
           input.userId,
         ],
       );
+    },
+
+    async setAkrualBaris(tx, input) {
+      await tx.query(
+        `update pumk_jadwal_angsuran
+            set jasa_akrual_belum_tertagih = $2::numeric,
+                updated_by = $3::uuid, updated_at = now()
+          where id = $1::uuid`,
+        [input.jadwalId, input.nilai, input.userId],
+      );
+    },
+
+    async barisAktif(tx, akadId) {
+      return tx.query<JadwalBaris>(
+        `select ${KOLOM_JADWAL}
+           from pumk_jadwal_angsuran
+          where akad_id = $1::uuid and is_active_version and deleted_at is null
+          order by tanggal_jatuh_tempo, angsuran_ke
+          for update`,
+        [akadId],
+      );
+    },
+
+    async catatKonsumsiAkrual(tx, input) {
+      // Driver fact 2: no arrays are bound, so the rows go in one statement at
+      // a time inside the caller's transaction, exactly as buatBarisJadwal does.
+      for (const b of input.baris) {
+        await tx.query(
+          `insert into pumk_angsuran_akrual
+             (angsuran_id, jadwal_id, nilai, created_by, updated_by)
+           values ($1::uuid, $2::uuid, $3::numeric, $4::uuid, $4::uuid)`,
+          [input.angsuranId, b.jadwalId, b.nilai, input.userId],
+        );
+      }
+    },
+
+    async angsuran(tx, angsuranId) {
+      const r = await tx.query<{ id: string; akad_id: string }>(
+        `select id::text as id, akad_id::text as akad_id
+           from pumk_angsuran
+          where id = $1::uuid and deleted_at is null`,
+        [angsuranId],
+      );
+      return r[0] ?? null;
+    },
+
+    async konsumsiAkrual(tx, angsuranId) {
+      return tx.query<KonsumsiAkrualBaris>(
+        `select id::text as id, angsuran_id::text as angsuran_id,
+                jadwal_id::text as jadwal_id, nilai::text as nilai,
+                dipulihkan_at::text as dipulihkan_at
+           from pumk_angsuran_akrual
+          where angsuran_id = $1::uuid and deleted_at is null
+          order by created_at, id
+          for update`,
+        [angsuranId],
+      );
+    },
+
+    async tandaiKonsumsiDipulihkan(tx, ids, userId) {
+      for (const id of ids) {
+        await tx.query(
+          `update pumk_angsuran_akrual
+              set dipulihkan_at = now(), dipulihkan_by = $2::uuid,
+                  updated_by = $2::uuid, updated_at = now()
+            where id = $1::uuid and dipulihkan_at is null`,
+          [id, userId],
+        );
+      }
     },
 
     async buatAngsuran(tx, input) {

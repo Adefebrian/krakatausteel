@@ -47,13 +47,26 @@ menyatakan saat kas diterima "pakai event `ANGSURAN_JASA_ADM_AKRUAL`". Dengan de
 saat jasa yang diterima belum pernah diakrual (misalnya akad kolektibilitas MACET yang tidak
 diakrual, atau setoran di bulan yang sama sebelum closing), atau tidak terpakai sama sekali.
 
-**Dipakai sekarang:** model data tidak memaksa pilihan. `event_jurnal_mapping` menyimpan kedua
-event, dan `akrual_jasa_snapshot` menyimpan berapa jasa yang sudah diakrual per akad per
-periode, sehingga engine bisa memutuskan per rupiah: sebesar yang pernah diakrual pakai event
-akrual, sisanya pakai event non akrual.
+**TERJAWAB, migrasi 0030 dan ADR 0018.** Aturannya persis yang dirumuskan di sini: **per
+rupiah**, sebesar yang pernah diakrual pakai `ANGSURAN_JASA_ADM_AKRUAL`, sisanya
+`ANGSURAN_JASA_ADM`, dan satu setoran boleh memakai keduanya. Yang berubah dari catatan lama
+hanyalah SUMBER faktanya: `akrual_jasa_snapshot` per akad per periode tidak cukup untuk
+menjawab "berapa jasa BARIS INI yang sudah jadi piutang", jadi faktanya pindah ke kolom
+`pumk_jadwal_angsuran.jasa_akrual_belum_tertagih`, ditulis mesin akrual closing dan dikurangi
+saat jasanya tertagih.
 
-**Perlu keputusan:** aturan pemilihan event tersebut wajib dikonfirmasi tim akuntansi sebelum
-engine angsuran dibangun, karena salah pilih berarti pendapatan diakui dua kali.
+Sampai itu dikerjakan, engine memilih event hanya dari
+`akuntansi.metode_pengakuan_jasa_adm`, dan akibatnya persis yang ditakutkan di butir ini,
+hanya dengan tanda terbalik: setiap setoran mengkredit Piutang Jasa Administrasi tanpa debit
+pasangannya, sehingga 1.1.04 bersaldo negatif dan pendapatan jasa tidak pernah diakui.
+Neraca tetap balance, jadi tidak ada pemeriksaan integritas yang menangkapnya.
+
+**Masih perlu konfirmasi tim akuntansi**, tapi bukan lagi sebagai prasyarat: satu kasus batas
+yang sengaja ditolak keras, bukan ditebak, adalah reschedule yang membuat jasa jadwal baru
+LEBIH KECIL dari jasa yang sudah diakrual sebagai pendapatan. Itu penghapusan pendapatan
+(waiver) dan spec 6.4 tidak punya eventnya, jadi engine menolak dengan
+`AKRUAL_TIDAK_TERTAMPUNG`. Kalau tim akuntansi memang menghendaki waiver, event jurnalnya
+harus dinamai lebih dulu.
 
 ## 4. Basis 360 hari dipakai di mana pada metode FLAT?
 
@@ -533,3 +546,37 @@ modul. Tidak dikerjakan sekarang karena tabel itu dilalui tiga modul yang sedang
 
 **Pemilik:** arsitektur. **Batas waktu:** sebelum modul Pinbuk dan modul program berikutnya menambah
 event baru.
+
+## 29. Akrual jasa yang dijalankan ulang memposting jurnal kedua tanpa membalik yang pertama
+
+**Ditemukan saat mengerjakan migrasi 0030 dan ADR 0018, TIDAK diperbaiki di sana**, karena ini
+cacat tersendiri di `jalankanAkrualJasaAdm` dan bukan bagian dari salah klasifikasi yang
+dikerjakan.
+
+Invarian 13 mengizinkan langkah closing diulang selama periodenya masih OPEN. Kalau akrual
+diulang dan totalnya berubah (misalnya karena ada setoran di antara dua run), engine memposting
+`AKRUAL_JASA_ADM` **baru** dan tidak membalik yang lama: kunci idempotensinya
+`closing:akrual:<periode>:<cabang>:<total>` memuat totalnya, dan `hapusAkrual` hanya menghapus
+baris `akrual_jasa_snapshot`, bukan jurnalnya.
+
+Terukur, bukan dugaan (probe dua run dengan setoran 15.000,00 di tengahnya, jasa periode
+30.000,00):
+
+| Langkah | Saldo 1.1.04 | `jasa_akrual_belum_tertagih` baris |
+|---|---|---|
+| run akrual pertama | 30.000,00 | 30.000,00 |
+| setoran 15.000,00 | 15.000,00 | 15.000,00 |
+| run akrual kedua | **30.000,00** | 15.000,00 |
+
+Jadi buku besar menggandakan akrual sementara sub ledger benar, persis kebalikan dari cacat yang
+ditutup ADR 0018. Dunia demo tidak terkena karena generatornya menjalankan pipeline closing tepat
+sekali per periode, jadi ini belum pernah muncul di data mana pun yang ada sekarang.
+
+**Perlu keputusan:** apakah run ulang **membalik** jurnal akrual sebelumnya (reversal, ADR 0010,
+jadi ada dua baris di buku besar dan jejaknya utuh) atau memposting **selisihnya** saja (satu
+baris, lebih ringkas, tapi jurnal akrual sebuah periode tidak lagi bisa dibaca sebagai satu
+angka). Keduanya sah secara akuntansi; yang tidak sah adalah yang berjalan sekarang.
+
+**Pemilik:** pemilik `modules/closing`, dengan konfirmasi tim akuntansi untuk pilihan reversal
+versus selisih. **Batas waktu:** sebelum operator dilatih membuka dan mengulang periode, karena
+sesudah itu cacat ini bisa masuk ke data produksi.

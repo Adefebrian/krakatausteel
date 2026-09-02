@@ -439,3 +439,150 @@ describe("spec 8.3: idempotensi dan cakupan cabang", () => {
     expect(await d.bacaAkrual(p.id)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE ACCRUAL AND THE RECEIPT, END TO END (migrations/0030)
+// ---------------------------------------------------------------------------
+//
+// The one thing spec 8.3 could not prove on its own. The close's arithmetic was
+// always right, and so was the receipt's; what was wrong was that the receipt
+// decided WHICH ACCOUNT to credit from a single configuration cell
+// (`akuntansi.metode_pengakuan_jasa_adm`) instead of from whether that jasa had
+// actually been accrued. The cell ships as ACCRUAL, so every receipt credited
+// Piutang Jasa Administrasi (1.1.04); an instalment paid in the month it fell
+// due was never accrued, so nothing ever debited it. Twenty four months of the
+// demo world drove 1.1.04 to roughly MINUS Rp 87,5 juta with almost no jasa
+// income, and every integrity check passed, because the missing income kept the
+// balance sheet balanced.
+//
+// Only a test that runs BOTH engines can see it. Each module's own suite was
+// green throughout.
+//
+// NOTHING HERE ASSERTS A RECOGNITION POLICY, exactly as the file header says:
+// the accrual runs because the world's `konfigurasi` says ACCRUAL, and the
+// third test flips `akrual_hanya_untuk_kolektibilitas` rather than claiming a
+// value for it. What is asserted is that the ledger ends where the arithmetic
+// says it should, whichever policy is in force.
+describe("spec 8.3 + spec 7.2: piutang jasa yang diakrual harus bisa ditagih sampai nol", () => {
+  // 12.000.000,00 FLAT 3 percent over 12 months: total jasa 360.000,00 across
+  // twelve rows of pokok 1.000.000,00 + jasa 30.000,00 = 1.030.000,00. With
+  // `hariTunggakan: 10` against 30 June 2027, row 1 falls due 20 June 2027 and
+  // it is the only row inside the period.
+  const JASA_BARIS = "30000.00";
+  const ANGSURAN_BARIS = "1030000.00";
+
+  test("diakrual di Juni, ditagih di Juli: 1.1.04 kembali NOL dan pendapatan diakui SEKALI", async () => {
+    const juni = d.periode(2027, 6);
+    const juli = d.periode(2027, 7);
+    d.setelJam(juni.tanggalAkhir);
+    const akad = await akadJatuhTempoDiPeriode(d, juni.tanggalAkhir, 10);
+
+    await d.engine.jalankanKolektibilitas({ periodeId: juni.id }, d.ctx.approver);
+    const akrual = await d.engine.jalankanAkrualJasaAdm({ periodeId: juni.id }, d.ctx.approver);
+    expect(akrual.baris.find((b) => b.akadId === akad.akadId)?.jasaDiakrual).toBe(JASA_BARIS);
+
+    // The receivable exists in the ledger...
+    expect(await d.saldoLedger(d.akun.piutangJasa.id, juni.tanggalAkhir)).toBe(JASA_BARIS);
+    expect(await d.saldoLedger(d.akun.pendapatanJasaAdm.id, juni.tanggalAkhir)).toBe("-30000.00");
+
+    // ...AND on the schedule row it belongs to, which is the fact the receipt
+    // reads. Without it the receipt has to guess, and guessing is the defect.
+    const jadwal = await d.bacaJadwal(akad.akadId);
+    expect(jadwal[0].jasa_akrual_belum_tertagih).toBe(JASA_BARIS);
+
+    d.setelJam("2027-07-05");
+    const setoran = await d.bayarSetoran(akad.akadId, "2027-07-05", ANGSURAN_BARIS);
+    expect(setoran.alokasiJasa).toBe(JASA_BARIS);
+    expect(setoran.alokasiJasaAkrual).toBe(JASA_BARIS);
+    expect(setoran.alokasiJasaLangsung).toBe("0.00");
+
+    // THE ASSERTION THE WHOLE FIX EXISTS FOR.
+    expect(await d.saldoLedger(d.akun.piutangJasa.id, juli.tanggalAkhir)).toBe("0.00");
+    // Recognised ONCE, by the close, and not again by the receipt.
+    expect(await d.saldoLedger(d.akun.pendapatanJasaAdm.id, juli.tanggalAkhir)).toBe("-30000.00");
+    expect((await d.bacaJadwal(akad.akadId))[0].jasa_akrual_belum_tertagih).toBe("0.00");
+  });
+
+  test("dibayar di bulan jatuh temponya sebelum closing: 1.1.04 tidak pernah bergerak", async () => {
+    // The exact shape of the demo defect. The close correctly accrues nothing,
+    // because the fee was collected in cash inside the period; the receipt must
+    // therefore recognise the income itself. Before the fix it credited 1.1.04
+    // instead, and 1.1.04 went to -30.000,00 with no income anywhere.
+    const juni = d.periode(2027, 6);
+    d.setelJam(juni.tanggalAkhir);
+    const akad = await akadJatuhTempoDiPeriode(d, juni.tanggalAkhir, 10);
+    const jatuhTempo = (await d.bacaJadwal(akad.akadId))[0].tanggal_jatuh_tempo;
+
+    d.setelJam(jatuhTempo);
+    const setoran = await d.bayarSetoran(akad.akadId, jatuhTempo, ANGSURAN_BARIS);
+    expect(setoran.alokasiJasaAkrual).toBe("0.00");
+    expect(setoran.alokasiJasaLangsung).toBe(JASA_BARIS);
+
+    d.setelJam(juni.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: juni.id }, d.ctx.approver);
+    const akrual = await d.engine.jalankanAkrualJasaAdm({ periodeId: juni.id }, d.ctx.approver);
+    expect(akrual.baris.find((b) => b.akadId === akad.akadId)?.jasaDiakrual).toBe("0.00");
+
+    expect(await d.saldoLedger(d.akun.piutangJasa.id, juni.tanggalAkhir)).toBe("0.00");
+    expect(await d.saldoLedger(d.akun.pendapatanJasaAdm.id, juni.tanggalAkhir)).toBe("-30000.00");
+  });
+
+  test("akad di luar kelas yang diakrual: setorannya pendapatan langsung, bukan pelunasan piutang", async () => {
+    // The standard non-performing treatment, and it needs no branch of its own:
+    // the close never touched this akad, so its rows carry no accrued balance
+    // and every rupiah collected is income now.
+    const juni = d.periode(2027, 6);
+    const juli = d.periode(2027, 7);
+    await d.setelKonfigurasi("akuntansi", "akrual_hanya_untuk_kolektibilitas", '["MACET"]');
+    d.setelJam(juni.tanggalAkhir);
+    const akad = await akadJatuhTempoDiPeriode(d, juni.tanggalAkhir, 10);
+
+    await d.engine.jalankanKolektibilitas({ periodeId: juni.id }, d.ctx.approver);
+    const akrual = await d.engine.jalankanAkrualJasaAdm({ periodeId: juni.id }, d.ctx.approver);
+    expect(akrual.kelasDiakrual).toEqual(["MACET"]);
+    expect(akrual.baris.find((b) => b.akadId === akad.akadId)).toBeUndefined();
+    expect((await d.bacaJadwal(akad.akadId))[0].jasa_akrual_belum_tertagih).toBe("0.00");
+    expect(await d.saldoLedger(d.akun.piutangJasa.id, juni.tanggalAkhir)).toBe("0.00");
+
+    d.setelJam("2027-07-05");
+    const setoran = await d.bayarSetoran(akad.akadId, "2027-07-05", ANGSURAN_BARIS);
+    expect(setoran.alokasiJasaAkrual).toBe("0.00");
+    expect(setoran.alokasiJasaLangsung).toBe(JASA_BARIS);
+    expect(await d.saldoLedger(d.akun.piutangJasa.id, juli.tanggalAkhir)).toBe("0.00");
+    expect(await d.saldoLedger(d.akun.pendapatanJasaAdm.id, juli.tanggalAkhir)).toBe("-30000.00");
+  });
+
+  test("akrual dijalankan ulang sesudah setoran tidak menggandakan saldo baris", async () => {
+    // Invariant 13 lets a period's accrual be re-run while it is still OPEN.
+    // The per-row balance is SET to `jasa_adm - jasa_terbayar`, never added to,
+    // so a second run after a collection lands on the smaller correct number.
+    const juni = d.periode(2027, 6);
+    d.setelJam(juni.tanggalAkhir);
+    const akad = await akadJatuhTempoDiPeriode(d, juni.tanggalAkhir, 10);
+
+    await d.engine.jalankanKolektibilitas({ periodeId: juni.id }, d.ctx.approver);
+    await d.engine.jalankanAkrualJasaAdm({ periodeId: juni.id }, d.ctx.approver);
+    expect((await d.bacaJadwal(akad.akadId))[0].jasa_akrual_belum_tertagih).toBe(JASA_BARIS);
+
+    // Half the fee is collected before the month is closed.
+    d.setelJam("2027-06-25");
+    const setoran = await d.bayarSetoran(akad.akadId, "2027-06-25", "15000.00");
+    expect(setoran.alokasiJasaAkrual).toBe("15000.00");
+    expect((await d.bacaJadwal(akad.akadId))[0].jasa_akrual_belum_tertagih).toBe("15000.00");
+
+    d.setelJam(juni.tanggalAkhir);
+    await d.engine.jalankanKolektibilitas({ periodeId: juni.id }, d.ctx.approver);
+    const ulang = await d.engine.jalankanAkrualJasaAdm({ periodeId: juni.id }, d.ctx.approver);
+    expect(ulang.baris.find((b) => b.akadId === akad.akadId)?.jasaDiakrual).toBe("15000.00");
+    expect((await d.bacaJadwal(akad.akadId))[0].jasa_akrual_belum_tertagih).toBe("15000.00");
+
+    // NO LEDGER ASSERTION HERE, AND THE SILENCE IS NOT APPROVAL. A second run
+    // whose total changed posts a SECOND AKRUAL_JASA_ADM journal without
+    // reversing the first, so 1.1.04 reads 30.000,00 while the sub-ledger
+    // correctly reads 15.000,00. That is a separate, pre-existing defect in
+    // `jalankanAkrualJasaAdm`'s idempotency (the key carries the total, and
+    // `hapusAkrual` removes only the snapshot rows), it is measured and
+    // written up in OPEN-QUESTIONS item 29, and asserting the wrong number
+    // here would make it look decided.
+  });
+});

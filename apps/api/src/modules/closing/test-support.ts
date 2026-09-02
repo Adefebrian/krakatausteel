@@ -437,6 +437,12 @@ export interface BarisJadwalDb {
   status: string;
   pokok_terbayar: string;
   jasa_terbayar: string;
+  /**
+   * migrations/0030. What the accrual step left on this row as an uncollected
+   * receivable, and what a receipt then reads to decide whether its jasa leg
+   * CLEARS Piutang Jasa Administrasi or RECOGNISES income.
+   */
+  jasa_akrual_belum_tertagih: string;
 }
 
 export interface SnapshotDb {
@@ -1354,7 +1360,8 @@ export async function buatDunia(): Promise<DuniaClosing> {
       return db.query<BarisJadwalDb>(
         `select angsuran_ke, tanggal_jatuh_tempo::text as tanggal_jatuh_tempo,
                 pokok::text as pokok, jasa_adm::text as jasa_adm, total::text as total,
-                status, pokok_terbayar::text as pokok_terbayar, jasa_terbayar::text as jasa_terbayar
+                status, pokok_terbayar::text as pokok_terbayar, jasa_terbayar::text as jasa_terbayar,
+                jasa_akrual_belum_tertagih::text as jasa_akrual_belum_tertagih
            from pumk_jadwal_angsuran
           where akad_id = $1 and is_active_version and deleted_at is null
           order by angsuran_ke`,

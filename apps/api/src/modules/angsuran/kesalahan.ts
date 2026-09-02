@@ -59,6 +59,8 @@ const PESAN: Record<KodeAngsuran, string> = {
     "Alokasi ini akan membuat piutang menjadi negatif. Kelebihan setoran harus masuk ke Kelebihan Pembayaran Angsuran.",
   JURNAL_GAGAL: "Jurnal untuk setoran ini gagal dibuat, jadi seluruh alokasi dibatalkan.",
 
+  AKRUAL_TIDAK_TERTAMPUNG:
+    "Jasa administrasi yang sudah diakrual sebagai piutang tidak tertampung di jadwal baru, jadi perubahan ini ditolak. Menghapusnya berarti membatalkan pendapatan yang sudah diakui, dan itu keputusan akuntansi tersendiri, bukan efek samping reschedule.",
   RESCHEDULE_TIDAK_DITEMUKAN: "Pengajuan reschedule tidak ditemukan.",
   RESCHEDULE_BELUM_DISETUJUI: "Reschedule ini belum disetujui, jadi belum berlaku.",
   RESCHEDULE_SUDAH_DIPROSES: "Pengajuan reschedule ini sudah pernah diproses.",
@@ -104,6 +106,10 @@ const PETA_CONSTRAINT: Record<string, KodeAngsuran> = {
   pumk_jadwal_versi_aktif_uq: "JADWAL_SUDAH_ADA",
   pumk_jadwal_versi_uq: "JADWAL_SUDAH_ADA",
   pumk_jadwal_terbayar_ck: "OUTSTANDING_NEGATIF",
+  // migrations/0030: a row may never claim more accrued jasa than it still
+  // owes. The engine bounds every write by that already, so a refusal here is
+  // the same class of fault as an overpayment reaching the column.
+  pumk_jadwal_akrual_ck: "AKRUAL_TIDAK_TERTAMPUNG",
   pumk_jadwal_lunas_ck: "OUTSTANDING_NEGATIF",
   pumk_angsuran_alokasi_ck: "OUTSTANDING_NEGATIF",
   pumk_angsuran_jumlah_diterima_check: "SETORAN_TIDAK_POSITIF",

@@ -256,6 +256,15 @@ const KONFIGURASI_AWAL: ReadonlyArray<[string, string, string, string]> = [
   ["angsuran", "urutan_alokasi_setoran_preset", "DEFAULT", "STRING"],
   ["angsuran", "hari_jatuh_tempo_tetap", "0", "NUMBER"],
   ["akuntansi", "jasa_grace_period", "TIDAK_DIHITUNG", "ENUM"],
+  // NEITHER OF THE NEXT TWO IS READ BY THIS ENGINE, and they are seeded here
+  // precisely so a test can prove that. Until migrations/0030 the first one
+  // ALONE decided which account a receipt's jasa leg credited, which is how
+  // Piutang Jasa Administrasi went negative; the classification now follows
+  // `pumk_jadwal_angsuran.jasa_akrual_belum_tertagih`, and
+  // angsuran-jasa-akrual.test.ts flips these cells to show the behaviour does
+  // not follow them. The values match what migrations/0004 ships globally.
+  ["akuntansi", "metode_pengakuan_jasa_adm", "ACCRUAL", "ENUM"],
+  ["akuntansi", "akrual_hanya_untuk_kolektibilitas", '["LANCAR"]', "JSON"],
   ["jasa_adm", "jasa_adm_basis_hari", "360", "ENUM"],
   ["jasa_adm", "turunkan_flat_dari_efektif", "false", "BOOLEAN"],
   ["jasa_adm", "rate_efektif_acuan", "0.030000", "NUMBER"],
@@ -323,6 +332,8 @@ export interface BarisJadwalDb {
   jasa_terbayar: string;
   tanggal_lunas: string | null;
   is_active_version: boolean;
+  /** migrations/0030. Written by the closing accrual, consumed by a receipt. */
+  jasa_akrual_belum_tertagih: string;
 }
 
 export interface AkadDb {
@@ -381,6 +392,29 @@ export interface DuniaAngsuran {
    */
   tandaiLunas(akadId: string, versi: number, angsuranKe: number, tanggal: string): Promise<void>;
   setelKonfigurasi(grup: string, kunciKonfig: string, nilai: string): Promise<void>;
+  /**
+   * Puts accrued jasa on one schedule row, exactly as `modules/closing`'s
+   * accrual step would have (migrations/0030).
+   *
+   * BY HAND, AND ON PURPOSE. This world has no closing engine in it, and a
+   * failure in the allocation tests must mean "the receipt classified its jasa
+   * wrongly", not "the accrual engine is also involved". The end-to-end proof
+   * that the close writes this column and the receipt then clears exactly it
+   * lives in modules/closing, where both engines are wired.
+   */
+  setelAkrualBaris(
+    akadId: string,
+    versi: number,
+    angsuranKe: number,
+    nilai: Uang,
+  ): Promise<void>;
+  /**
+   * Debit-positive balance of an account, from the shipped view (ADR 0010).
+   * Returns a plain decimal string and NOT `Uang`, because the whole point of
+   * the tests that use it is that this number may go negative when the
+   * classification is wrong.
+   */
+  saldoLedger(akunId: string): Promise<string>;
   bacaJadwal(akadId: string, versi?: number): Promise<BarisJadwalDb[]>;
   bacaAkad(akadId: string): Promise<AkadDb>;
   bacaVersi(akadId: string): Promise<Array<{ versi: number; is_active_version: boolean; status: string; reschedule_id: string | null }>>;
@@ -740,13 +774,37 @@ export async function buatDunia(): Promise<DuniaAngsuran> {
       }
     },
 
+    async setelAkrualBaris(akadId, versi, angsuranKe, nilai): Promise<void> {
+      await db.query(
+        `update pumk_jadwal_angsuran
+            set jasa_akrual_belum_tertagih = $4::numeric
+          where akad_id = $1::uuid and versi = $2 and angsuran_ke = $3`,
+        [akadId, versi, angsuranKe, nilai],
+      );
+    },
+
+    async saldoLedger(akunId): Promise<string> {
+      // v_ledger_baris, never a POSTED-only filter: a REVERSED journal stays in
+      // the ledger and is offset by its reversal (ADR 0010). `::numeric(20,2)`
+      // before `::text` so the answer always has two decimals and can be
+      // compared to a fixture literal without a float ever existing.
+      const r = await satu<{ saldo: string }>(
+        db,
+        `select coalesce(sum(nilai_debit_positif), 0)::numeric(20,2)::text as saldo
+           from v_ledger_baris where akun_id = $1::uuid`,
+        [akunId],
+      );
+      return r.saldo;
+    },
+
     async bacaJadwal(akadId, versi): Promise<BarisJadwalDb[]> {
       return db.query<BarisJadwalDb>(
         `select id, versi, angsuran_ke, tanggal_jatuh_tempo::text as tanggal_jatuh_tempo,
                 pokok::text as pokok, jasa_adm::text as jasa_adm, total::text as total,
                 saldo_pokok_setelah::text as saldo_pokok_setelah, status,
                 pokok_terbayar::text as pokok_terbayar, jasa_terbayar::text as jasa_terbayar,
-                tanggal_lunas::text as tanggal_lunas, is_active_version
+                tanggal_lunas::text as tanggal_lunas, is_active_version,
+                jasa_akrual_belum_tertagih::text as jasa_akrual_belum_tertagih
            from pumk_jadwal_angsuran
           where akad_id = $1 and ($2::int is null or versi = $2) and deleted_at is null
           order by versi, angsuran_ke`,

@@ -47,6 +47,7 @@ import {
   type BarisJadwal,
   type GenerateJadwalInput,
   type HasilAlokasi,
+  type HasilPemulihanAkrual,
   type HasilReschedule,
   type Jadwal,
   type KebijakanJasaGrace,
@@ -65,6 +66,12 @@ import {
   type Uang,
 } from "./contract";
 import { alokasikan, type BarisTerbuka } from "./alokasi";
+import {
+  bagiJasaSetoran,
+  tempatkanAkrual,
+  type BagianBarisJasa,
+  type KapasitasAkrual,
+} from "./alokasi-akrual";
 import { rateFlatDariEfektif, ringkas, susunJadwal, pecahTanggal } from "./jadwal";
 import { bersihkanKesalahan, tolak } from "./kesalahan";
 import { createAngsuranRepo, type AkadBaris, type AngsuranRepo, type JadwalBaris } from "./repo";
@@ -140,7 +147,6 @@ interface KonfigurasiAngsuran {
   rateAcuanMikro: bigint | null;
   plafonMinSen: bigint | null;
   plafonMaxSen: bigint | null;
-  eventJasa: string;
 }
 
 const UNIT: Record<string, bigint> = { "0": 1n, "100": 10_000n, "1000": 100_000n };
@@ -238,15 +244,29 @@ async function bacaKonfigurasi(
   const plafonMinSen = uangKonfigurasi(await ambil("batasan", "plafon_min_pumk"), "batasan.plafon_min_pumk");
   const plafonMaxSen = uangKonfigurasi(await ambil("batasan", "plafon_max_pumk"), "batasan.plafon_max_pumk");
 
-  // WHICH jasa event applies follows from the recognition method (spec 8.3):
-  // on an accrual basis the jasa is already a receivable, so a payment clears
-  // Piutang Jasa Administrasi; on a cash basis it becomes income when received.
-  // Read, not hardcoded.
-  const pengakuan = (await ambil("akuntansi", "metode_pengakuan_jasa_adm"))?.trim().toUpperCase() ?? "";
-  const eventJasa =
-    pengakuan === "ACCRUAL" || pengakuan === "AKRUAL"
-      ? "ANGSURAN_JASA_ADM_AKRUAL"
-      : "ANGSURAN_JASA_ADM";
+  // WHICH jasa event applies is DELIBERATELY NOT READ FROM CONFIGURATION.
+  //
+  // It used to be: `akuntansi.metode_pengakuan_jasa_adm` alone chose the event
+  // for the whole receipt. That is the defect migrations/0030 closes. The cell
+  // ships as ACCRUAL, so every receipt posted ANGSURAN_JASA_ADM_AKRUAL, which
+  // CREDITS Piutang Jasa Administrasi on the assumption the receivable already
+  // exists; but an instalment paid in the month it falls due is never accrued
+  // (the close computes `jasa_jatuh_tempo - jasa_diterima`, which nets to
+  // zero), so nothing ever DEBITED it. Piutang Jasa Administrasi went negative
+  // and the income was never recognised, on a balance sheet that still
+  // balanced because both halves were missing.
+  //
+  // The event now follows the FACT, not the policy cell: each schedule row
+  // carries `jasa_akrual_belum_tertagih`, written by the accrual engine, so
+  // the receipt asks the row itself how much of its jasa is already sitting in
+  // 1.1.04. That answers the config question as a consequence rather than as a
+  // separate rule: under CASH_BASIS nothing is ever accrued, every row reads
+  // zero, and every receipt is direct income exactly as before. It also gets
+  // the two cases a config cell cannot see: an akad whose kolektibilitas is
+  // outside `akrual_hanya_untuk_kolektibilitas` is never accrued, and a config
+  // flipped from ACCRUAL to CASH_BASIS still has to collect the receivables it
+  // already booked. See OPEN-QUESTIONS item 3, which asked for exactly this
+  // ("per rupiah"), and ./alokasi-akrual.ts for the split itself.
 
   return {
     pembulatan: Number(mentahPembulatan.trim()),
@@ -261,7 +281,6 @@ async function bacaKonfigurasi(
     rateAcuanMikro,
     plafonMinSen,
     plafonMaxSen,
-    eventJasa,
   };
 }
 
@@ -628,7 +647,8 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
           }
 
           // Steps 1 and 2.
-          const terbuka: BarisTerbuka[] = (await repo.barisBelumLunas(tx, akad.id)).map((b) => ({
+          const barisTerbukaDb = await repo.barisBelumLunas(tx, akad.id);
+          const terbuka: BarisTerbuka[] = barisTerbukaDb.map((b) => ({
             jadwalId: b.id,
             angsuranKe: b.angsuran_ke,
             tanggalJatuhTempo: b.tanggal_jatuh_tempo,
@@ -638,8 +658,27 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
             pokokTerbayarSen: senDari(b.pokok_terbayar),
             jasaTerbayarSen: senDari(b.jasa_terbayar),
           }));
+          // migrations/0030: how much of each row's jasa is ALREADY sitting in
+          // Piutang Jasa Administrasi. Read here, from the same locked rows the
+          // waterfall walks, so nothing can accrue or be collected in between.
+          const akrualPerBaris = new Map(
+            barisTerbukaDb.map((b) => [b.id, senDari(b.jasa_akrual_belum_tertagih)]),
+          );
 
           const hasil = alokasikan(terbuka, urutan, jumlah.sen, input.tanggal);
+
+          // THE CLASSIFICATION, per rupiah rather than per configuration cell.
+          // See the note in `bacaKonfigurasi` for what this replaced and why.
+          const bagian = bagiJasaSetoran(
+            hasil.baris.map((b) => ({
+              jadwalId: b.jadwalId,
+              tambahJasaSen: b.tambahJasaSen,
+              akrualTersediaSen: akrualPerBaris.get(b.jadwalId) ?? 0n,
+            })),
+          );
+          const bagianPerBaris = new Map<string, BagianBarisJasa>(
+            bagian.baris.map((b) => [b.jadwalId, b]),
+          );
 
           // Step 6, computed by subtraction rather than by re-summing the
           // rows: after a reschedule the paid rows live on a superseded
@@ -654,14 +693,22 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
             });
           }
 
-          // Step 4.
+          // Step 4. `jasaAkrualBelumTertagih` rides along in the SAME
+          // statement as `jasaTerbayar`: pumk_jadwal_akrual_ck relates the two,
+          // so writing them separately would fail on an intermediate row that
+          // no caller ever asked for.
           for (const b of hasil.baris) {
+            const sisaAkrual =
+              bagianPerBaris.get(b.jadwalId)?.sisaAkrualSen ??
+              akrualPerBaris.get(b.jadwalId) ??
+              0n;
             await repo.perbaruiPembayaranBaris(tx, {
               jadwalId: b.jadwalId,
               pokokTerbayar: dariSen(b.pokokTerbayarSen),
               jasaTerbayar: dariSen(b.jasaTerbayarSen),
               status: b.statusSetelah,
               tanggalLunas: b.lunas ? input.tanggal : null,
+              jasaAkrualBelumTertagih: dariSen(sisaAkrual),
               userId: ctx.userId,
             });
           }
@@ -679,6 +726,18 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
             metodeAlokasi: cfg.presetAlokasi,
             keterangan: input.keterangan ?? null,
             userId: ctx.userId,
+          });
+
+          // The provenance of every rupiah of receivable this receipt cleared,
+          // so a reversal can put back exactly what was taken instead of
+          // recomputing an approximation onto whichever row looks plausible
+          // later (migrations/0030).
+          await repo.catatKonsumsiAkrual(tx, {
+            angsuranId,
+            userId: ctx.userId,
+            baris: bagian.baris
+              .filter((b) => b.pakaiAkrualSen > 0n)
+              .map((b) => ({ jadwalId: b.jadwalId, nilai: dariSen(b.pakaiAkrualSen) })),
           });
 
           // Step 5: invariant 10. A surplus becomes a liability, never a
@@ -728,8 +787,21 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
           // Administrasi, and the surplus leg on Kelebihan Pembayaran
           // Angsuran, so tagging those with a mitra would make the whole
           // journal illegal and roll the allocation back.
-          if (hasil.jasaSen > 0n) {
-            komponen.push({ eventCode: cfg.eventJasa, nilai: dariSen(hasil.jasaSen) });
+          // TWO LEGS, NOT ONE, WHEN THE RECEIPT GENUINELY NEEDS BOTH. A
+          // partial payment against a row that was partly accrued clears the
+          // receivable up to what was accrued and recognises the rest as
+          // income; those are two different accounts, so they are two
+          // components of the SAME journal (spec 7.2 step 8 forbids a second
+          // journal, not a second line). `bagian.akrualSen + bagian.langsungSen`
+          // is `hasil.jasaSen` by construction, so the cash leg still balances.
+          if (bagian.akrualSen > 0n) {
+            komponen.push({
+              eventCode: "ANGSURAN_JASA_ADM_AKRUAL",
+              nilai: dariSen(bagian.akrualSen),
+            });
+          }
+          if (bagian.langsungSen > 0n) {
+            komponen.push({ eventCode: "ANGSURAN_JASA_ADM", nilai: dariSen(bagian.langsungSen) });
           }
           if (hasil.kelebihanSen > 0n) {
             komponen.push({
@@ -783,6 +855,8 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
             jumlahDiterima: dariSen(jumlah.sen),
             alokasiPokok: dariSen(hasil.pokokSen),
             alokasiJasa: dariSen(hasil.jasaSen),
+            alokasiJasaAkrual: dariSen(bagian.akrualSen),
+            alokasiJasaLangsung: dariSen(bagian.langsungSen),
             alokasiKelebihan: dariSen(hasil.kelebihanSen),
             rincian,
             urutanKomponenDipakai: urutan,
@@ -795,6 +869,105 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
               tanggalLunas: lunas ? input.tanggal : akad.tanggal_lunas,
             },
           };
+        }),
+      );
+    },
+
+    async pulihkanAkrualSetoran(
+      angsuranId: string,
+      ctx: AngsuranContext,
+    ): Promise<HasilPemulihanAkrual> {
+      // Same permission as making the receipt: giving a receivable back is the
+      // same class of act as consuming it, and neither is a read.
+      wajibPermission(ctx, PERMISSION.SETORAN);
+      return bersihkanKesalahan(() =>
+        deps.db.transaction(async (tx) => {
+          const setoran = await repo.angsuran(tx, angsuranId);
+          if (!setoran) throw tolak("AKAD_TIDAK_DITEMUKAN", { angsuranId });
+          const akad = await repo.akadUntukDiubah(tx, setoran.akad_id);
+          if (!akad) throw tolak("AKAD_TIDAK_DITEMUKAN", { akadId: setoran.akad_id });
+          wajibScope(ctx, akad.cabang_id);
+
+          const konsumsi = (await repo.konsumsiAkrual(tx, angsuranId)).filter(
+            (k) => k.dipulihkan_at === null,
+          );
+          // IDEMPOTENT BY CONSTRUCTION, not by a flag the caller has to check:
+          // the second call sees every row already marked and gives back
+          // nothing. A reversal that ran twice must not double the receivable.
+          if (konsumsi.length === 0) {
+            return { angsuranId, totalDipulihkan: dariSen(0n), perBaris: [] };
+          }
+
+          const baris = await repo.barisAktif(tx, akad.id);
+          const aktif = new Map(baris.map((b) => [b.id, b]));
+          const sisaSekarang = new Map(
+            baris.map((b) => [b.id, senDari(b.jasa_akrual_belum_tertagih)]),
+          );
+          const kapasitas = (jadwalId: string): bigint => {
+            const b = aktif.get(jadwalId);
+            if (!b) return 0n;
+            return (
+              senDari(b.jasa_adm) - senDari(b.jasa_terbayar) - (sisaSekarang.get(jadwalId) ?? 0n)
+            );
+          };
+
+          let belumDitempatkanSen = 0n;
+          for (const k of konsumsi) {
+            const nilai = senDari(k.nilai);
+            // ONTO THE ORIGINAL ROW FIRST. That row is where the accrual was,
+            // so restoring it there is the only placement that reconstructs
+            // the exact state the receipt found. It only fails to be available
+            // when a reschedule has since retired the version, and a retired
+            // row can hold nothing an allocation would ever reach.
+            const muat = kapasitas(k.jadwal_id);
+            const langsung = nilai < muat ? nilai : muat;
+            if (langsung > 0n) {
+              sisaSekarang.set(k.jadwal_id, (sisaSekarang.get(k.jadwal_id) ?? 0n) + langsung);
+            }
+            belumDitempatkanSen += nilai - langsung;
+          }
+
+          if (belumDitempatkanSen > 0n) {
+            const penempatan = tempatkanAkrual(
+              baris.map<KapasitasAkrual>((b) => ({ jadwalId: b.id, kapasitasSen: kapasitas(b.id) })),
+              belumDitempatkanSen,
+            );
+            if (penempatan.sisaSen > 0n) {
+              // The rows cannot hold a receivable the ledger already carries.
+              // Refuse, for the same reason a reschedule refuses: the only
+              // honest alternative is a write-off journal nobody has specified.
+              throw tolak("AKRUAL_TIDAK_TERTAMPUNG", {
+                angsuranId,
+                tidakTertampung: dariSen(penempatan.sisaSen),
+              });
+            }
+            for (const t of penempatan.penempatan) {
+              sisaSekarang.set(t.jadwalId, (sisaSekarang.get(t.jadwalId) ?? 0n) + t.tambahSen);
+            }
+          }
+
+          const perBaris: HasilPemulihanAkrual["perBaris"] = [];
+          let total = 0n;
+          for (const b of baris) {
+            const sebelum = senDari(b.jasa_akrual_belum_tertagih);
+            const sesudah = sisaSekarang.get(b.id) ?? sebelum;
+            if (sesudah === sebelum) continue;
+            await repo.setAkrualBaris(tx, {
+              jadwalId: b.id,
+              nilai: dariSen(sesudah),
+              userId: ctx.userId,
+            });
+            total += sesudah - sebelum;
+            perBaris.push({ jadwalId: b.id, nilai: dariSen(sesudah - sebelum) });
+          }
+
+          await repo.tandaiKonsumsiDipulihkan(
+            tx,
+            konsumsi.map((k) => k.id),
+            ctx.userId,
+          );
+
+          return { angsuranId, totalDipulihkan: dariSen(total), perBaris };
         }),
       );
     },
@@ -978,6 +1151,26 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
           });
           if (diproses === 0) throw tolak("RESCHEDULE_SUDAH_DIPROSES", { rescheduleId: r.id });
 
+          // ACCRUED JASA IS MONEY ALREADY IN THE LEDGER, SO IT MOVES WITH THE
+          // RESTRUCTURE (migrations/0030). The superseded version's rows carry
+          // whatever the closing engine accrued into Piutang Jasa Administrasi
+          // and nobody has collected yet. Retiring the version without moving
+          // that balance would strand a receivable no future receipt could
+          // ever clear, because allocation only ever walks the ACTIVE version:
+          // the debit would sit in 1.1.04 forever and every later collection
+          // would be booked as income a second time.
+          let akrualTerbawaSen = 0n;
+          for (const b of versiLamaBaris) {
+            const sisa = senDari(b.jasa_akrual_belum_tertagih);
+            if (sisa <= 0n) continue;
+            akrualTerbawaSen += sisa;
+            await repo.setAkrualBaris(tx, {
+              jadwalId: b.id,
+              nilai: dariSen(0n),
+              userId: ctx.userId,
+            });
+          }
+
           // Step 3, before the new version exists: pumk_jadwal_versi_aktif_uq
           // allows exactly one active version per akad. The row-level flag and
           // the DIRESCHEDULE status of the unpaid rows are propagated by
@@ -1000,6 +1193,41 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
             `Reschedule ${r.jenis} (spec 7.3)`,
             ctx.userId,
           );
+
+          // ...and lands on the new version, earliest row first. A remainder
+          // means the restructured schedule carries LESS jasa than has already
+          // been recognised as income and booked as a receivable, which is a
+          // WAIVER: it needs a correcting journal, and spec 6.4 lists no event
+          // for one. Same seam, and the same answer, as RESTRUKTUR_POKOK
+          // above: refuse with a sentence rather than quietly write the
+          // receivable off.
+          if (akrualTerbawaSen > 0n) {
+            const barisBaru = await repo.barisAktif(tx, akad.id);
+            const kapasitas: KapasitasAkrual[] = barisBaru.map((b) => ({
+              jadwalId: b.id,
+              kapasitasSen:
+                senDari(b.jasa_adm) -
+                senDari(b.jasa_terbayar) -
+                senDari(b.jasa_akrual_belum_tertagih),
+            }));
+            const penempatan = tempatkanAkrual(kapasitas, akrualTerbawaSen);
+            if (penempatan.sisaSen > 0n) {
+              throw tolak("AKRUAL_TIDAK_TERTAMPUNG", {
+                akadId: akad.id,
+                akrualDibawa: dariSen(akrualTerbawaSen),
+                tidakTertampung: dariSen(penempatan.sisaSen),
+                jasaJadwalBaru: tabel.ringkasan.totalJasa,
+              });
+            }
+            const sisaAwal = new Map(barisBaru.map((b) => [b.id, senDari(b.jasa_akrual_belum_tertagih)]));
+            for (const t of penempatan.penempatan) {
+              await repo.setAkrualBaris(tx, {
+                jadwalId: t.jadwalId,
+                nilai: dariSen((sisaAwal.get(t.jadwalId) ?? 0n) + t.tambahSen),
+                userId: ctx.userId,
+              });
+            }
+          }
 
           // Step 6: RESCHEDULED is still an active receivable. The new
           // version's jasa replaces the superseded version's remaining jasa,

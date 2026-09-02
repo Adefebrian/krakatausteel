@@ -1532,6 +1532,24 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
             })),
           );
 
+          // The SAME accrual, written where a receipt can act on it
+          // (migrations/0030). The snapshot above says how much this akad was
+          // accrued in this period; these rows say which instalment carries
+          // it, which is the fact `modules/angsuran` needs at receipt time to
+          // decide whether its jasa leg CLEARS Piutang Jasa Administrasi or
+          // RECOGNISES income. Written in the same transaction as the journal
+          // and the snapshot, because a receivable that exists in the ledger
+          // and not on the row is exactly the state that made 1.1.04 go
+          // negative.
+          await repo.tulisAkrualBaris(tx, {
+            periodeId: h.periode.id,
+            userId: ctx.userId,
+            cabangIds: h.daftar,
+            kelas: h.kelas,
+            mulai: h.periode.tanggal_mulai,
+            akhir: h.periode.tanggal_akhir,
+          });
+
           return {
             periodeId: h.periode.id,
             metode: h.metode,

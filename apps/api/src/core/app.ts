@@ -51,6 +51,7 @@ import { createNonPumkHttpModule } from "../modules/nonpumk";
 import { createPumkHttpModule } from "../modules/pumk";
 import { createRkaHttpModule } from "../modules/rka";
 import { createLaporanHttpModule } from "../modules/laporan";
+import { createToolsHttpModule } from "../modules/tools";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -215,6 +216,18 @@ export function createApp(overrides: AppOverrides = {}) {
   // request can override that choice.
   const laporan = createLaporanHttpModule({ db, guards: auth.guards });
 
+  // Fase 7 (spec 9.6), the diagnostic tools: the integrity health check and the
+  // receivable reconciliation.
+  //
+  // NO JOURNAL PORT AND NO AUDIT PORT, and every route is a GET. This engine
+  // issues SELECTs and nothing else, so invariant 11 is unreachable from it
+  // rather than merely respected: a repair path here would be a second way into
+  // the ledger, around `postingEvent`. The checks it exposes are the same SQL
+  // apps/api/src/seed/demo-dunia/periksa.ts runs, so the health check page and
+  // the seed's acceptance rule cannot disagree about whether the books are
+  // intact.
+  const tools = createToolsHttpModule({ db, guards: auth.guards });
+
   // modules/example IS NOT MOUNTED, and must not be.
   //
   // It is the repo template's reference module and it is unauthenticated by
@@ -240,6 +253,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/rka", rka.routes)
     .route("/closing", closing.routes)
     .route("/laporan", laporan.routes)
+    .route("/tools", tools.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -264,6 +278,7 @@ export function createApp(overrides: AppOverrides = {}) {
     rkaBaca: rka.baca,
     laporan: laporan.engine,
     laporanBaca: laporan.baca,
+    tools: tools.engine,
   };
 }
 
@@ -281,4 +296,5 @@ export const nonpumk = instance.nonpumk;
 export const closing = instance.closing;
 export const rka = instance.rka;
 export const laporan = instance.laporan;
+export const tools = instance.tools;
 export type AppType = typeof app;
