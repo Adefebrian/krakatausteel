@@ -736,6 +736,9 @@ export interface BarisJurnalFixture {
   akun: KunciAkun;
   debit?: Uang;
   kredit?: Uang;
+  /** Dimensions the operational reports group by. See `inputJurnal`. */
+  mitraId?: string;
+  akadId?: string;
 }
 
 export interface JurnalFixture {
@@ -744,6 +747,15 @@ export interface JurnalFixture {
   keterangan: string;
   /** Defaults to the world's main branch. */
   diCabangLain?: boolean;
+  /** An explicit branch, for a third branch the two flags cannot express. */
+  cabangId?: string;
+  /**
+   * `jurnal.referensi_tipe`, which is what the disbursement figure of reports
+   * 1, 2, 3 and 7 is selected on. `'pumk_pencairan'` is the value those
+   * reports look for.
+   */
+  referensiTipe?: string | null;
+  referensiId?: string | null;
   baris: BarisJurnalFixture[];
 }
 
@@ -1509,14 +1521,24 @@ export async function buatDunia(): Promise<DuniaLaporan> {
 
   function inputJurnal(j: JurnalFixture) {
     return {
-      cabangId: j.diCabangLain ? cabangLain.id : cabang.id,
+      cabangId: j.cabangId ?? (j.diCabangLain ? cabangLain.id : cabang.id),
       jenis: j.jenis,
       tanggalTransaksi: j.tanggal,
       keterangan: j.keterangan,
+      // THE OPERATIONAL REPORTS READ THESE TWO COLUMNS, which is why the
+      // fixture can set them. `jurnal.referensi_tipe` plus a line carrying an
+      // `akad_id` is exactly what report 1, 2, 3 and 7's disbursement figure
+      // is selected on (./kontrak-operasional.ts reading A) and what
+      // modules/rka reads for report 24; a fixture that could not set them
+      // could only test those four reports against zero.
+      ...(j.referensiTipe === undefined ? {} : { referensiTipe: j.referensiTipe }),
+      ...(j.referensiId === undefined ? {} : { referensiId: j.referensiId }),
       baris: j.baris.map((b) => ({
         akunId: akun[b.akun].id,
         ...(b.debit === undefined ? {} : { debit: b.debit }),
         ...(b.kredit === undefined ? {} : { kredit: b.kredit }),
+        ...(b.mitraId === undefined ? {} : { mitraId: b.mitraId }),
+        ...(b.akadId === undefined ? {} : { akadId: b.akadId }),
       })),
     };
   }

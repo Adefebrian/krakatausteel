@@ -90,3 +90,32 @@ export function angka(minor: bigint): Angka {
 export function jumlah(...minor: bigint[]): bigint {
   return minor.reduce((t, n) => t + n, 0n);
 }
+
+/**
+ * `atas / bawah * 100`, two decimals, rounded HALF UP away from zero.
+ *
+ * NULL WHEN `bawah` IS ZERO, DELIBERATELY. A share of nothing is not "0
+ * percent" and it is not infinity; it is a question with no answer, and the
+ * report says so by leaving the column empty rather than printing a number
+ * that reads as compliance (report 2's realisation against an unbudgeted
+ * sector) or as insignificance (report 8's share of an empty portfolio).
+ *
+ * ENTIRELY IN BigInt. A float here would turn a percentage a manager acts on
+ * into a value that differs in the last decimal between two runs.
+ *
+ * The same arithmetic as modules/rka's `persenCapaian`, re-declared for the
+ * reason ./kontrak-operasional.ts gives: modules/rka already imports from this
+ * module's index, so an import in the other direction would close a cycle.
+ */
+export function persen(atas: bigint, bawah: bigint): string | null {
+  if (bawah === 0n) return null;
+  // Scale by 10_000 = 100 (percent) * 100 (two decimals), then round half up.
+  const pembilang = atas * 10_000n;
+  const negatif = pembilang < 0n !== bawah < 0n;
+  const absAtas = pembilang < 0n ? -pembilang : pembilang;
+  const absBawah = bawah < 0n ? -bawah : bawah;
+  const dibulatkan = (absAtas + absBawah / 2n) / absBawah;
+  const bertanda = negatif ? -dibulatkan : dibulatkan;
+  const abs = bertanda < 0n ? -bertanda : bertanda;
+  return `${bertanda < 0n ? "-" : ""}${abs / 100n}.${String(abs % 100n).padStart(2, "0")}`;
+}

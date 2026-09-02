@@ -520,16 +520,31 @@ describe("validasi batas", () => {
 });
 
 describe("katalog dan periode: apa yang layar filter butuhkan", () => {
-  test("katalog menyebut ketujuh laporan modul ini dengan path yang benar-benar ada", async () => {
+  test("katalog menyebut TIGA PULUH laporan spec 10, dan hanya 24 yang tidak ada", async () => {
     const hasil = await d.ok<{ data: Array<{ nomor: number; nama: string; path: string }> }>(
       "AUDITOR",
       "/laporan/katalog",
     );
-    expect(hasil.data.map((e) => e.nomor)).toEqual([16, 17, 18, 19, 20, 22, 23]);
-    expect(hasil.data.map((e) => e.nama)).toEqual(Object.values(NAMA_LAPORAN));
-    // Every path in the catalogue answers. A catalogue that named a route
-    // nobody registered is a menu of dead links.
-    for (const entri of hasil.data) {
+    // Spec 10 numbers 31 reports. Report 24 (RKA versus Realisasi) lives in
+    // modules/rka because it is the budget module's own comparison, and
+    // listing it here would put this module in charge of a path it does not
+    // own. Everything else is answered here.
+    expect(hasil.data.map((e) => e.nomor)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+      25, 26, 27, 28, 29, 30, 31,
+    ]);
+    // The seven accounting statements still carry EXACTLY the names
+    // `NAMA_LAPORAN` gives them, in the specification's order.
+    const akuntansi = hasil.data.filter((e) => [16, 17, 18, 19, 20, 22, 23].includes(e.nomor));
+    expect(akuntansi.map((e) => e.nama)).toEqual(Object.values(NAMA_LAPORAN));
+    for (const entri of hasil.data) expect(entri.path.startsWith("/laporan/")).toBe(true);
+    expect(new Set(hasil.data.map((e) => e.path)).size).toBe(hasil.data.length);
+    // THAT EVERY ONE OF THOSE PATHS ANSWERS is asserted in
+    // ./laporan-rute-operasional.test.ts, which calls all thirty with valid
+    // parameters. A catalogue that named a route nobody registered would be a
+    // menu of dead links, and checking it here against this file's seven-path
+    // list would only ever have covered seven of them.
+    for (const entri of hasil.data.filter((e) => [16, 17, 18, 19, 20, 22, 23].includes(e.nomor))) {
       const jalur = jalurSemuaCabang(d).find((j) => j.startsWith(entri.path));
       expect(jalur, entri.path).toBeDefined();
     }

@@ -301,6 +301,30 @@ export const KODE_LAPORAN = {
   PERIODE_TIDAK_DITEMUKAN: "PERIODE_TIDAK_DITEMUKAN",
   CABANG_TIDAK_DITEMUKAN: "CABANG_TIDAK_DITEMUKAN",
   AKUN_TIDAK_DITEMUKAN: "AKUN_TIDAK_DITEMUKAN",
+  /** Report 9 (Kartu Piutang) is the only report keyed on one partner. */
+  MITRA_TIDAK_DITEMUKAN: "MITRA_TIDAK_DITEMUKAN",
+
+  /**
+   * Reports 8, 10, 11 and 28 are asked for a period whose Closing
+   * Kolektibilitas (spec 8.1) has never run, so `kolektibilitas_snapshot`
+   * carries no row for it.
+   *
+   * REFUSING IS THE POINT, and it is the same argument as
+   * SALDO_PERIODE_BELUM_DIBEKUKAN one table over. Classification, days overdue
+   * and the provision rate are produced by ONE run and recorded per akad with
+   * the rate and the basis that produced them (ADR 0014). Recomputing them at
+   * print time would be a second implementation of the provisioning engine, it
+   * would disagree with the journal the period actually posted, and it would
+   * make spec 16 scenario 17's reconciliation unfalsifiable. "Closing
+   * Kolektibilitas belum dijalankan untuk periode ini" is a thing an operator
+   * fixes in one click.
+   *
+   * A period whose portfolio is genuinely empty is NOT refused: with no akad
+   * carrying an outstanding balance there is nothing to classify, and refusing
+   * would make the first months of any go-live unreportable, exactly as it
+   * would for the frozen trial balance.
+   */
+  SNAPSHOT_KOLEKTIBILITAS_BELUM_ADA: "SNAPSHOT_KOLEKTIBILITAS_BELUM_ADA",
 
   /**
    * The `baris_laporan` template for this statement has no active line. The

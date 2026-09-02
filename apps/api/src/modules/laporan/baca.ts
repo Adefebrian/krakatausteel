@@ -42,6 +42,7 @@ import {
   type LaporanDbPort,
   type StatusPeriode,
 } from "./contract";
+import { NAMA_LAPORAN_OPERASIONAL } from "./kontrak-operasional";
 
 export interface LaporanBacaDeps {
   db: LaporanDbPort;
@@ -108,23 +109,60 @@ export interface LaporanBaca {
 }
 
 /**
- * The seven reports this module implements, with the path each is reached at.
+ * THE THIRTY REPORTS THIS MODULE ANSWERS, with the path each is reached at, in
+ * the specification's own numbering.
  *
- * SPEC 10.3 LISTS 31 REPORTS AND THIS IS SEVEN OF THEM. The catalogue returned
- * here is what THIS MODULE can answer, not a claim about the specification: the
- * PUMK and Non PUMK reports belong to those modules and report 24 belongs to
- * modules/rka, which is why none of them is listed here. A single catalogue
- * across all 31 is a later composition, and inventing it here would put this
- * module in charge of paths it does not own.
+ * SPEC 10 LISTS 31 AND EXACTLY ONE IS ABSENT: report 24, RKA versus Realisasi,
+ * which lives in modules/rka because it is the budget module's own comparison
+ * and reaches `rka_detail` through that module's repository. Listing it here
+ * would put this module in charge of a path it does not own; a single
+ * catalogue across all 31 is a composition above both, and it is one entry.
+ *
+ * `perluPeriode` FALSE MEANS THE ROUTE TAKES NO `periodeId` AT ALL, which is
+ * true of three reports and for three different reasons: report 16 is a
+ * structure rather than a balance, report 5 asks about the FUTURE and takes a
+ * forward due-date window, and report 31 is an audit log over an arbitrary
+ * date range. A screen that offered a period picker on any of them would be
+ * offering a control the API refuses.
  */
 const KATALOG: readonly EntriKatalogLaporan[] = [
+  // --- 10.1 Laporan Pendanaan UMK -----------------------------------------
+  { nomor: 1, kode: "REALISASI_WILAYAH", nama: NAMA_LAPORAN_OPERASIONAL.REALISASI_WILAYAH, path: "/laporan/realisasi-wilayah", perluPeriode: true, perluAkun: false },
+  { nomor: 2, kode: "REALISASI_SEKTOR", nama: NAMA_LAPORAN_OPERASIONAL.REALISASI_SEKTOR, path: "/laporan/realisasi-sektor", perluPeriode: true, perluAkun: false },
+  { nomor: 3, kode: "PENYALURAN_NASIONAL", nama: NAMA_LAPORAN_OPERASIONAL.PENYALURAN_NASIONAL, path: "/laporan/penyaluran-nasional", perluPeriode: true, perluAkun: false },
+  { nomor: 4, kode: "PENERIMAAN_ANGSURAN", nama: NAMA_LAPORAN_OPERASIONAL.PENERIMAAN_ANGSURAN, path: "/laporan/penerimaan-angsuran", perluPeriode: true, perluAkun: false },
+  { nomor: 5, kode: "JATUH_TEMPO", nama: NAMA_LAPORAN_OPERASIONAL.JATUH_TEMPO, path: "/laporan/jatuh-tempo", perluPeriode: false, perluAkun: false },
+  { nomor: 6, kode: "REKAP_PERMOHONAN_PUMK", nama: NAMA_LAPORAN_OPERASIONAL.REKAP_PERMOHONAN_PUMK, path: "/laporan/rekap-permohonan", perluPeriode: true, perluAkun: false },
+  { nomor: 7, kode: "REKAP_REALISASI_PUMK", nama: NAMA_LAPORAN_OPERASIONAL.REKAP_REALISASI_PUMK, path: "/laporan/rekap-realisasi", perluPeriode: true, perluAkun: false },
+  { nomor: 8, kode: "AGING_PIUTANG", nama: NAMA_LAPORAN_OPERASIONAL.AGING_PIUTANG, path: "/laporan/aging-piutang", perluPeriode: true, perluAkun: false },
+  { nomor: 9, kode: "KARTU_PIUTANG", nama: NAMA_LAPORAN_OPERASIONAL.KARTU_PIUTANG, path: "/laporan/kartu-piutang", perluPeriode: true, perluAkun: false },
+  { nomor: 10, kode: "KOLEKTIBILITAS", nama: NAMA_LAPORAN_OPERASIONAL.KOLEKTIBILITAS, path: "/laporan/kolektibilitas", perluPeriode: true, perluAkun: false },
+  { nomor: 11, kode: "PERPINDAHAN_KOLEKTIBILITAS", nama: NAMA_LAPORAN_OPERASIONAL.PERPINDAHAN_KOLEKTIBILITAS, path: "/laporan/perpindahan-kolektibilitas", perluPeriode: true, perluAkun: false },
+
+  // --- 10.2 Laporan Non PUMK ----------------------------------------------
+  { nomor: 12, kode: "PENYALURAN_NON_PUMK", nama: NAMA_LAPORAN_OPERASIONAL.PENYALURAN_NON_PUMK, path: "/laporan/penyaluran-non-pumk", perluPeriode: true, perluAkun: false },
+  { nomor: 13, kode: "REKAP_BIDANG", nama: NAMA_LAPORAN_OPERASIONAL.REKAP_BIDANG, path: "/laporan/rekap-bidang", perluPeriode: true, perluAkun: false },
+  { nomor: 14, kode: "PEMETAAN_SDG", nama: NAMA_LAPORAN_OPERASIONAL.PEMETAAN_SDG, path: "/laporan/pemetaan-sdg", perluPeriode: true, perluAkun: false },
+  { nomor: 15, kode: "MONITORING_LPJ", nama: NAMA_LAPORAN_OPERASIONAL.MONITORING_LPJ, path: "/laporan/monitoring-lpj", perluPeriode: true, perluAkun: false },
+
+  // --- 10.3 Laporan Akuntansi ---------------------------------------------
   { nomor: 16, kode: "BAGAN_AKUN", nama: NAMA_LAPORAN.BAGAN_AKUN, path: "/laporan/bagan-akun", perluPeriode: false, perluAkun: false },
   { nomor: 17, kode: "AKTIVITAS", nama: NAMA_LAPORAN.AKTIVITAS, path: "/laporan/aktivitas", perluPeriode: true, perluAkun: false },
   { nomor: 18, kode: "ARUS_KAS", nama: NAMA_LAPORAN.ARUS_KAS, path: "/laporan/arus-kas", perluPeriode: true, perluAkun: false },
   { nomor: 19, kode: "POSISI_KEUANGAN", nama: NAMA_LAPORAN.POSISI_KEUANGAN, path: "/laporan/posisi-keuangan", perluPeriode: true, perluAkun: false },
   { nomor: 20, kode: "PERUBAHAN_ASET_NETO", nama: NAMA_LAPORAN.PERUBAHAN_ASET_NETO, path: "/laporan/perubahan-aset-neto", perluPeriode: true, perluAkun: false },
+  { nomor: 21, kode: "REKAP_JURNAL", nama: NAMA_LAPORAN_OPERASIONAL.REKAP_JURNAL, path: "/laporan/rekap-jurnal", perluPeriode: true, perluAkun: false },
   { nomor: 22, kode: "BUKU_BESAR", nama: NAMA_LAPORAN.BUKU_BESAR, path: "/laporan/buku-besar", perluPeriode: true, perluAkun: true },
   { nomor: 23, kode: "NERACA_LAJUR", nama: NAMA_LAPORAN.NERACA_LAJUR, path: "/laporan/neraca-lajur", perluPeriode: true, perluAkun: false },
+
+  // --- 10.4 Laporan Lainnya -----------------------------------------------
+  { nomor: 25, kode: "PORTAL_PUMK", nama: NAMA_LAPORAN_OPERASIONAL.PORTAL_PUMK, path: "/laporan/portal-pumk", perluPeriode: true, perluAkun: false },
+  { nomor: 26, kode: "PORTAL_NON_PUMK", nama: NAMA_LAPORAN_OPERASIONAL.PORTAL_NON_PUMK, path: "/laporan/portal-non-pumk", perluPeriode: true, perluAkun: false },
+  { nomor: 27, kode: "DEMOGRAFI_MITRA", nama: NAMA_LAPORAN_OPERASIONAL.DEMOGRAFI_MITRA, path: "/laporan/demografi-mitra", perluPeriode: true, perluAkun: false },
+  { nomor: 28, kode: "PERHITUNGAN_PENYISIHAN", nama: NAMA_LAPORAN_OPERASIONAL.PERHITUNGAN_PENYISIHAN, path: "/laporan/perhitungan-penyisihan", perluPeriode: true, perluAkun: false },
+  { nomor: 29, kode: "BEBAN_PENYISIHAN", nama: NAMA_LAPORAN_OPERASIONAL.BEBAN_PENYISIHAN, path: "/laporan/beban-penyisihan", perluPeriode: true, perluAkun: false },
+  { nomor: 30, kode: "AKRUAL_JASA", nama: NAMA_LAPORAN_OPERASIONAL.AKRUAL_JASA, path: "/laporan/akrual-jasa", perluPeriode: true, perluAkun: false },
+  { nomor: 31, kode: "AUDIT_TRAIL", nama: NAMA_LAPORAN_OPERASIONAL.AUDIT_TRAIL, path: "/laporan/audit-trail", perluPeriode: false, perluAkun: false },
 ];
 
 /**

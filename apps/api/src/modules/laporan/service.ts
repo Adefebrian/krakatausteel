@@ -33,13 +33,9 @@
 //
 // AND IT WRITES NOTHING. Every statement in ./repo.ts is a SELECT; spec 16
 // scenario 23 is a standing constraint on this file.
-import { PERMISSIONS } from "../auth";
 import {
   KODE_LAPORAN,
-  KUNCI_KONFIGURASI_LAPORAN,
-  LaporanError,
   NAMA_LAPORAN,
-  PERMISSION_LAPORAN,
   type Angka,
   type BarisArusKas,
   type BarisBaganAkun,
@@ -52,7 +48,6 @@ import {
   type FilterLaporan,
   type HeaderLaporan,
   type KlasifikasiArusKas,
-  type KodeLaporan,
   type KolomPembanding,
   type LaporanAktivitas,
   type LaporanArusKas,
@@ -75,12 +70,16 @@ import {
   type TipeAkun,
   type TipeBaris,
 } from "./contract";
+import { buatDasarLaporan, gagal, type TemplatDicetak } from "./dasar";
+import type { AkunRow, BarisLaporanRow, PeriodeRow } from "./repo";
 import {
-  buatRepoLaporan,
-  type AkunRow,
-  type BarisLaporanRow,
-  type PeriodeRow,
-} from "./repo";
+  NAMA_BULAN,
+  awalTahunBuku,
+  labelRentang,
+  labelTanggal,
+  mundurSetahun,
+  tambahHari,
+} from "./tanggal";
 import { angka, keSen, sen, uangDariDb } from "./uang";
 
 // ---------------------------------------------------------------------------
@@ -100,75 +99,9 @@ const SEKSI_ASET_NETO = "ASET_NETO";
 
 const URUTAN_ARUS_KAS: readonly KlasifikasiArusKas[] = ["OPERASI", "INVESTASI", "PENDANAAN"];
 
-const NAMA_BULAN = [
-  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
-] as const;
-
-// ---------------------------------------------------------------------------
-// Dates. UTC throughout, no local-time drift.
-// ---------------------------------------------------------------------------
-
-function pecahTanggal(iso: string): { tahun: number; bulan: number; hari: number } {
-  const [t, b, h] = iso.split("-").map((x) => Number.parseInt(x, 10));
-  return { tahun: t, bulan: b, hari: h };
-}
-
-function rakitTanggal(tahun: number, bulan: number, hari: number): TanggalIso {
-  return `${String(tahun).padStart(4, "0")}-${String(bulan).padStart(2, "0")}-${String(hari).padStart(2, "0")}`;
-}
-
-function tambahHari(iso: string, hari: number): TanggalIso {
-  const { tahun, bulan, hari: h } = pecahTanggal(iso);
-  const d = new Date(Date.UTC(tahun, bulan - 1, h));
-  d.setUTCDate(d.getUTCDate() + hari);
-  return d.toISOString().slice(0, 10);
-}
-
-function hariDalamBulan(tahun: number, bulan: number): number {
-  return new Date(Date.UTC(tahun, bulan, 0)).getUTCDate();
-}
-
-/** One year earlier, clamped (29 February becomes 28 February). */
-function mundurSetahun(iso: string): TanggalIso {
-  const { tahun, bulan, hari } = pecahTanggal(iso);
-  return rakitTanggal(tahun - 1, bulan, Math.min(hari, hariDalamBulan(tahun - 1, bulan)));
-}
-
-/**
- * First day of the financial year containing `sampai`, given the month the
- * financial year starts in. NEVER assumes January: a hardcoded month 1 prints
- * the wrong comparative for any client on a non-calendar year and nothing
- * downstream detects it (spec 5.6, `akuntansi.tahun_buku_mulai_bulan`).
- */
-function awalTahunBuku(sampai: string, bulanMulai: number): TanggalIso {
-  const { tahun, bulan } = pecahTanggal(sampai);
-  return rakitTanggal(bulan >= bulanMulai ? tahun : tahun - 1, bulanMulai, 1);
-}
-
-function labelTanggal(iso: string): string {
-  const { tahun, bulan, hari } = pecahTanggal(iso);
-  return `${hari} ${NAMA_BULAN[bulan - 1]} ${tahun}`;
-}
-
-function labelRentang(dari: string, sampai: string): string {
-  const a = pecahTanggal(dari);
-  const b = pecahTanggal(sampai);
-  if (a.tahun === b.tahun) {
-    return a.bulan === b.bulan
-      ? `${NAMA_BULAN[a.bulan - 1]} ${a.tahun}`
-      : `${NAMA_BULAN[a.bulan - 1]} - ${NAMA_BULAN[b.bulan - 1]} ${b.tahun}`;
-  }
-  return `${NAMA_BULAN[a.bulan - 1]} ${a.tahun} - ${NAMA_BULAN[b.bulan - 1]} ${b.tahun}`;
-}
-
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
-
-function gagal(kode: KodeLaporan, pesan: string, detail?: unknown): never {
-  throw new LaporanError(kode, pesan, detail === undefined ? undefined : { detail });
-}
 
 /** +1 for a debit-normal account, -1 for a credit-normal one. */
 function arah(a: AkunRow): bigint {
@@ -185,119 +118,27 @@ function tandaBaris(row: BarisLaporanRow): 1 | -1 {
 // ---------------------------------------------------------------------------
 
 export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
-  const repo = buatRepoLaporan();
-  const db = deps.db;
-  const jam = deps.jam ?? (() => new Date());
-  const tx = (): LaporanTx => db;
-
-  // --- authorisation ------------------------------------------------------
-
-  /**
-   * FAIL CLOSED ON AN UNREGISTERED CODE. A permission this module names that
-   * is absent from the shipped catalogue is a FINDING, never something
-   * silently treated as granted; that mechanism has already caught three real
-   * gaps in this repo.
-   */
-  function pastikanIzin(ctx: LaporanContext): void {
-    const kode: string = PERMISSION_LAPORAN.LIHAT;
-    if (!(PERMISSIONS as readonly string[]).includes(kode)) {
-      gagal(
-        KODE_LAPORAN.IZIN_BELUM_TERDAFTAR,
-        `Izin ${kode} belum terdaftar di katalog izin sistem, sehingga laporan tidak bisa dibuka.`,
-        { izin: kode },
-      );
-    }
-    if (!ctx.permissions.includes(kode)) {
-      gagal(KODE_LAPORAN.TIDAK_BERWENANG, "Anda tidak berwenang membuka laporan ini.");
-    }
-  }
-
-  /**
-   * Branch scope, spec 16 scenario 24. `null` is spec 10's Semua Cabang and is
-   * allowed ONLY to a user whose scope already covers every branch of the
-   * entity; for a branch user it is the same request as asking for every other
-   * branch at once, and it is refused rather than quietly narrowed.
-   */
-  async function pastikanCabang(
-    ctx: LaporanContext,
-    diminta: string | null | undefined,
-  ): Promise<{ cabangId: string | null; namaCabang: string }> {
-    const scope = new Set<string>(ctx.cabangDalamScope ?? [ctx.cabangId]);
-    const semua = await repo.cabangBumn(tx(), ctx.bumnId);
-    if (diminta === null || diminta === undefined) {
-      if (semua.length === 0 || !semua.every((c) => scope.has(c.id))) {
-        gagal(
-          KODE_LAPORAN.CABANG_DILUAR_SCOPE,
-          "Anda tidak berwenang membuka laporan untuk semua cabang.",
-        );
-      }
-      return { cabangId: null, namaCabang: "Semua Cabang" };
-    }
-    const cabang = semua.find((c) => c.id === diminta);
-    if (!cabang || !scope.has(diminta)) {
-      gagal(
-        KODE_LAPORAN.CABANG_DILUAR_SCOPE,
-        "Anda tidak berwenang membuka laporan untuk cabang tersebut.",
-      );
-    }
-    return { cabangId: cabang.id, namaCabang: cabang.nama };
-  }
-
-  async function ambilPeriode(ctx: LaporanContext, periodeId: string): Promise<PeriodeRow> {
-    const p = periodeId ? await repo.periode(tx(), periodeId) : null;
-    if (!p || p.bumn_id !== ctx.bumnId) {
-      gagal(KODE_LAPORAN.PERIODE_TIDAK_DITEMUKAN, "Periode laporan tidak ditemukan.");
-    }
-    return p;
-  }
-
-  /** spec 5.6. A missing row is a refusal, never a guessed January. */
-  async function bulanAwalTahunBuku(ctx: LaporanContext): Promise<number> {
-    const { grup, kunci } = KUNCI_KONFIGURASI_LAPORAN.TAHUN_BUKU_MULAI_BULAN;
-    const nilai = await repo.konfigurasi(tx(), ctx.bumnId, grup, kunci);
-    if (nilai === null) {
-      gagal(
-        KODE_LAPORAN.KONFIGURASI_TIDAK_ADA,
-        `Parameter ${grup}.${kunci} belum diatur, sehingga awal tahun buku tidak bisa ditentukan.`,
-        { grup, kunci },
-      );
-    }
-    const bulan = Number.parseInt(nilai, 10);
-    if (!Number.isInteger(bulan) || bulan < 1 || bulan > 12) {
-      gagal(
-        KODE_LAPORAN.KONFIGURASI_TIDAK_VALID,
-        `Parameter ${grup}.${kunci} bukan bulan yang sah.`,
-        { grup, kunci, nilai },
-      );
-    }
-    return bulan;
-  }
+  // THE FIVE PRE-FIGURE DECISIONS ARE NOT MADE HERE, THEY ARE IMPORTED.
+  // `laporan.view`, branch scope, the period lookup, the start of the
+  // financial year, spec 10's two paths and the printed header all live in
+  // ./dasar.ts, shared with the operational reports of spec 10.1, 10.2 and
+  // 10.4. A second copy of any of them would be a second answer to a question
+  // this system is only allowed one answer to; the branch-scope one is the
+  // dangerous one, because an over-narrow report balances perfectly.
+  const dasar = buatDasarLaporan(deps);
+  const {
+    repo,
+    tx,
+    jam,
+    pastikanIzin,
+    pastikanCabang,
+    ambilPeriode,
+    bulanAwalTahunBuku,
+    sumberUntuk,
+    buatHeader,
+  } = dasar;
 
   // --- spec 10's two paths ------------------------------------------------
-
-  /**
-   * Which path this period is read through, and the one refusal spec 10 has no
-   * other answer for.
-   *
-   * A CLOSED period with no frozen rows AND a ledger that carries lines up to
-   * its end is a REFUSAL: recomputing would produce a plausible page that
-   * violates invariant 14 and that nothing downstream could detect. A period
-   * that closed with an empty ledger legitimately freezes nothing, and
-   * refusing on that would make the first months of any go-live unreportable.
-   */
-  async function sumberUntuk(p: PeriodeRow): Promise<SumberData> {
-    if (p.status !== "CLOSED") return "LEDGER_LIVE";
-    if ((await repo.jumlahSaldoBeku(tx(), p.id)) > 0) return "SNAPSHOT_PERIODE";
-    if (await repo.adaLedgerSampai(tx(), p.bumn_id, p.tanggal_akhir)) {
-      gagal(
-        KODE_LAPORAN.SALDO_PERIODE_BELUM_DIBEKUKAN,
-        `Periode ${NAMA_BULAN[p.bulan - 1]} ${p.tahun} sudah ditutup tetapi saldo periodenya belum dibekukan, ` +
-          "sehingga laporan tidak bisa dicetak tanpa menghitung ulang riwayat.",
-        { periodeId: p.id, tahun: p.tahun, bulan: p.bulan },
-      );
-    }
-    return "SNAPSHOT_PERIODE";
-  }
 
   /**
    * Debit-positive balance per account at each of several cut-offs, from
@@ -368,45 +209,6 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
       `Laporan tidak balance: total debit dan kredit ${konteks} berselisih ${sen(selisih)}.`,
       { konteks, selisih: sen(selisih) },
     );
-  }
-
-  // --- the report header spec 10's preamble requires -----------------------
-
-  async function buatHeader(
-    ctx: LaporanContext,
-    opsi: {
-      namaLaporan: string;
-      periode: PeriodeRow | null;
-      periodeLabel: string;
-      dariTanggal: TanggalIso | null;
-      sampaiTanggal: TanggalIso | null;
-      cabangId: string | null;
-      namaCabang: string;
-      sumberData: SumberData;
-      templat: Templat | null;
-    },
-  ): Promise<HeaderLaporan> {
-    const bumn = await repo.bumn(tx(), ctx.bumnId);
-    const pengguna = await repo.pengguna(tx(), ctx.userId);
-    return {
-      namaBumn: bumn?.nama ?? "",
-      namaLaporan: opsi.namaLaporan,
-      periodeLabel: opsi.periodeLabel,
-      periodeId: opsi.periode?.id ?? null,
-      statusPeriode: (opsi.periode?.status ?? null) as StatusPeriode | null,
-      dariTanggal: opsi.dariTanggal,
-      sampaiTanggal: opsi.sampaiTanggal,
-      cabangId: opsi.cabangId,
-      namaCabang: opsi.namaCabang,
-      tanggalCetak: jam().toISOString().slice(0, 10),
-      dicetakOleh: pengguna?.nama ?? "",
-      sumberData: opsi.sumberData,
-      // A report with no layout template says so rather than naming one it did
-      // not print from: Buku Besar and Neraca Lajur are per ACCOUNT, so no
-      // `baris_laporan` row is involved in what they show.
-      templateLaporanId: opsi.templat?.templateId ?? null,
-      sumberTemplate: opsi.templat?.sumberTemplate ?? "TANPA_TEMPLATE",
-    };
   }
 
   // --- the template, and the lines that ARE the layout ---------------------

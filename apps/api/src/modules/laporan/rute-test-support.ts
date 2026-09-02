@@ -229,6 +229,15 @@ export interface DuniaRuteLaporan {
   akun: Record<KunciAkun, string>;
   /** The reporting period: `TAHUN_INI`-`BULAN_LAPORAN`, still OPEN. */
   periodeLaporan: PeriodeUji;
+  /**
+   * ONE PARTNER IN CABANG A, WITH NO AKAD AT ALL. Report 9 is the only report
+   * keyed on a partner, so without one there is no way to call its route with
+   * valid parameters and the "every catalogue path answers" check would have a
+   * hole exactly where the catalogue's only per-entity report is. It holds no
+   * contract on purpose: the FIGURES are proven in ./laporan-pumk.test.ts
+   * against the operational world, and what this file proves is the WIRING.
+   */
+  mitraKosong: string;
   periode(tahun: number, bulan: number): PeriodeUji;
   /** Closes a period AND freezes its balances the way modules/closing does. */
   bekukanDanTutup(p: PeriodeUji): Promise<void>;
@@ -291,6 +300,13 @@ export async function buatDuniaRuteLaporan(): Promise<DuniaRuteLaporan> {
     if (!id) throw new Error(`fixture rute laporan: akun ${kode} tidak ada setelah seedCoaInti`);
     akun[nama] = id;
   }
+
+  const rowsMitra = await db.query<{ id: string }>(
+    `INSERT INTO mitra (cabang_id, kode_mitra, nama_lengkap, status, created_by, updated_by)
+     VALUES ($1, $2, $3, 'CALON', $4, $4) RETURNING id::text AS id`,
+    [f.cabangA.id, `MTR-RUTE-${f.suffix}`, `Mitra rute laporan ${f.suffix}`, f.users.ADMIN_PUSAT.id],
+  );
+  const mitraKosong = rowsMitra[0]!.id;
 
   const sesi = new Map<string, string>();
   for (const role of ROLE_UNTUK_SESI) {
@@ -412,6 +428,7 @@ export async function buatDuniaRuteLaporan(): Promise<DuniaRuteLaporan> {
     akun,
     periodeLaporan: periode(TAHUN_INI, BULAN_LAPORAN),
     periode,
+    mitraKosong,
     bekukanDanTutup,
     tutupTanpaMembekukan,
     panggil,
