@@ -369,26 +369,46 @@ describe("dunia terisolasi: dua run tanpa reset menghasilkan hasil yang sama", (
   });
 });
 
-describe("apa yang TIDAK dikirim oleh seed (temuan, dipatok di sini supaya tidak terlupa)", () => {
-  test("seed inti tidak punya akun ASET_NETO yang postable, jadi fixture menambahkannya", async () => {
+describe("apa yang dikirim seed, dan apa yang tetap ditambahkan fixture ini", () => {
+  test("akun ASET_NETO yang postable ada, satu dari seed dan satu dari fixture", async () => {
     const baris = await d.db.query<{ kode: string }>(
       `select kode from akun
         where bumn_id = $1 and tipe = 'ASET_NETO' and is_postable and deleted_at is null
         order by kode`,
       [d.bumnId],
     );
-    // Both come from AKUN_TAMBAHAN in ./test-support.ts, none from the seed.
+    // RE-PINNED, and the list is unchanged on purpose. This used to read
+    // "seed inti tidak punya akun ASET_NETO yang postable, jadi fixture
+    // menambahkannya", with the note "both come from AKUN_TAMBAHAN, none from
+    // the seed". The seed now ships `3.1.01` as ONE undivided net-asset
+    // category, so `AKUN_TAMBAHAN` adopts that row (renaming and
+    // re-classifying it) instead of inserting a duplicate, and adds `3.2.01`
+    // as the other half of the split. Same two codes, different provenance.
     expect(baris.map((b) => b.kode)).toEqual(["3.1.01", "3.2.01"]);
   });
 
-  test("seed inti tidak punya baris laporan ARUS_KAS atau PERUBAHAN_ASET_NETO", async () => {
+  test("seed inti KINI mengirim baris laporan ARUS_KAS dan PERUBAHAN_ASET_NETO", async () => {
+    // RE-PINNED. This test used to assert
+    //   (await d.bacaBarisLaporan("ARUS_KAS")).length === 0
+    //   (await d.bacaBarisLaporan("PERUBAHAN_ASET_NETO")).length === 0
+    // as a finding: two of the four statements had no template to print from,
+    // so both refused out of the box. Closing that gap in
+    // apps/api/src/seed/coa-inti.ts is exactly what made the old assertion
+    // false, so it asserts the sections that now exist instead of a count of
+    // zero.
     const arus = await d.bacaBarisLaporan("ARUS_KAS");
-    const perubahan = await d.bacaBarisLaporan("PERUBAHAN_ASET_NETO");
-    expect(arus).toHaveLength(0);
-    expect(perubahan).toHaveLength(0);
-    // Which is why ./contract.ts derives report 18 from
+    expect(arus.map((b) => b.seksi).sort()).toEqual(["INVESTASI", "OPERASI", "PENDANAAN"]);
+    // One line per net-asset category, which is one line until the client
+    // splits the category. This world splits it in the POSISI_KEUANGAN
+    // template only, so the count here stays the seed's.
+    expect(await d.bacaBarisLaporan("PERUBAHAN_ASET_NETO")).toHaveLength(1);
+
+    // UNCHANGED, AND STILL THE POINT: ./contract.ts derives report 18 from
     // `akun.klasifikasi_arus_kas` and report 20 from the ASET_NETO section of
-    // the POSISI_KEUANGAN template: those are the only mappings that exist.
+    // the POSISI_KEUANGAN template. migrations/0028 makes a per statement
+    // mapping possible, but re-expressing either report on it is a change to
+    // the contract and its tests together, so the sections below are still
+    // what those two reports read.
     const seksiAsetNeto = (await d.bacaBarisLaporan("POSISI_KEUANGAN")).filter(
       (b) => b.seksi === "ASET_NETO",
     );

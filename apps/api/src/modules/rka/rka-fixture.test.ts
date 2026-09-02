@@ -50,10 +50,10 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// FINDING 1 and 2: the permission catalogue
+// FINDING 1 and 2: the permission catalogue. BOTH CLOSED, re-pinned positive.
 // ---------------------------------------------------------------------------
 
-describe("TEMUAN: katalog izin tidak punya kode yang spec 9.3 butuhkan", () => {
+describe("katalog izin: kode yang spec 9.3 butuhkan, dan penjaga untuk yang belum ada", () => {
   test("admin.rka ADA dan hanya dipegang Admin Pusat, jadi input RKA memang terkatalog", async () => {
     // The positive half, first, so the two findings below cannot be read as
     // "RKA has no permissions at all". The input side is covered.
@@ -73,38 +73,81 @@ describe("TEMUAN: katalog izin tidak punya kode yang spec 9.3 butuhkan", () => {
     expect(pemegang).toEqual(["ADMIN_PUSAT"]);
   });
 
-  test("TEMUAN: admin.rka.approve tidak ada, jadi penyusun RKA juga yang menyetujuinya", () => {
-    // The whole system measures itself against the DISETUJUI baseline: report
-    // 24 here, "versus RKA" in reports 2 and 13, and the dashboard on top of
-    // both. With one code covering input and approval, the record contains no
-    // second party for that document, ever.
-    //
-    // This test goes RED the day the code is added, which is the signal to
-    // delete it and turn ./rka-otorisasi.test.ts's fail-closed pin into a
-    // positive assertion.
-    expect(canonicalPermission(PERMISSION_RKA.SETUJUI)).toBeNull();
-    expect(PERMISSIONS as readonly string[]).not.toContain(PERMISSION_RKA.SETUJUI);
+  test("admin.rka.approve ADA, jadi persetujuan RKA punya kode sendiri", () => {
+    // RE-PINNED. This test used to assert
+    //   canonicalPermission(PERMISSION_RKA.SETUJUI) === null
+    //   PERMISSIONS does not contain "admin.rka.approve"
+    //   PERMISSIONS.filter(includes "rka") === ["admin.rka"]
+    // as a finding: with ONE code covering input and approval, the record
+    // contained no second party for the document the whole system measures
+    // itself against (report 24 here, "versus RKA" in reports 2 and 13, and
+    // the dashboard on top of both). The catalogue now carries the code, so
+    // the finding is discharged and this asserts the positive instead.
+    expect(canonicalPermission(PERMISSION_RKA.SETUJUI)).toBe(PERMISSION_RKA.SETUJUI);
+    expect(PERMISSIONS as readonly string[]).toContain(PERMISSION_RKA.SETUJUI);
+    expect(PERMISSIONS.filter((p) => p.includes("rka")).sort()).toEqual([
+      "admin.rka",
+      "admin.rka.approve",
+      "admin.rka.view",
+    ]);
 
-    // And it is not reachable under another spelling: no shipped code contains
-    // both "rka" and an approval verb.
-    const mirip = PERMISSIONS.filter((p) => p.includes("rka"));
-    expect(mirip).toEqual(["admin.rka"]);
+    // WHAT THE CODE DOES NOT BY ITSELF SETTLE, and the reason FINDING 3 below
+    // still matters: ADMIN_PUSAT holds BOTH `admin.rka` and
+    // `admin.rka.approve`, so on the shipped matrix one person can still draft
+    // and approve the same budget. Separating those two acts is now a
+    // CONFIGURATION question (`rka.pemisahan_tugas_persetujuan`) rather than a
+    // missing code, which is what makes it the client's decision to make.
+    const pemegangSetujui = (
+      Object.keys(PERMISSIONS_BY_ROLE) as Array<keyof typeof PERMISSIONS_BY_ROLE>
+    )
+      .filter((r) => PERMISSIONS_BY_ROLE[r].includes(PERMISSION_RKA.SETUJUI))
+      .sort();
+    expect(pemegangSetujui).toEqual(["ADMIN_PUSAT"]);
   });
 
-  test("TEMUAN: admin.rka.view tidak ada, jadi Auditor tidak bisa melihat versi mana yang jadi baseline", () => {
-    expect(canonicalPermission(PERMISSION_RKA.LIHAT)).toBeNull();
+  test("admin.rka.view ADA dan Auditor memegangnya, tanpa memegang kode tulis", () => {
+    // RE-PINNED. This test used to assert
+    //   canonicalPermission(PERMISSION_RKA.LIHAT) === null
+    // as a finding: spec 2 gives the Auditor "read only penuh termasuk semua
+    // laporan dan audit trail", and without a read code for the budgets it
+    // could open report 24 but not see which version the report was measured
+    // against. The catalogue now carries the code, along exactly the precedent
+    // the old test named (`admin.closing.view`), so this asserts the positive.
+    expect(canonicalPermission(PERMISSION_RKA.LIHAT)).toBe(PERMISSION_RKA.LIHAT);
 
-    // The shape of the gap, stated as data rather than as prose: the Auditor
-    // holds the report code, so report 24 opens for it, but holds nothing that
-    // reaches the budget versions the report compares against.
+    // The shape of the CLOSE, stated as data rather than as prose: the Auditor
+    // now reaches the budget versions report 24 compares against, and still
+    // holds no code that writes one.
     const auditor = PERMISSIONS_BY_ROLE.AUDITOR as readonly string[];
     expect(auditor).toContain(PERMISSION_RKA.LAPORAN);
+    expect(auditor).toContain(PERMISSION_RKA.LIHAT);
     expect(auditor).not.toContain(PERMISSION_RKA.KELOLA);
+    expect(auditor).not.toContain(PERMISSION_RKA.SETUJUI);
 
-    // The precedent this follows, and the proof it is a precedent and not an
-    // analogy: the closing module hit exactly this and the catalogue now
-    // carries a read-only evidence code for it.
+    // The precedent it followed, kept because it is what made the case: the
+    // closing module hit exactly this and the catalogue carries a read-only
+    // evidence code for it.
     expect(auditor).toContain("admin.closing.view");
+  });
+
+  test("penjaga IZIN_BELUM_TERDAFTAR masih hidup, karena kode yang tidak dikirim masih ada", () => {
+    // THE GUARD THE TWO DISCHARGES ABOVE COULD HAVE KILLED. The engine fails
+    // closed on a permission the catalogue does not carry
+    // (`IZIN_BELUM_TERDAFTAR`) rather than treating it as granted. Now that
+    // both RKA codes ship, nothing in this folder would notice if
+    // `canonicalPermission` started answering for anything at all, and the
+    // fail-closed path would become dead code that still looks alive.
+    //
+    // So this pins the MECHANISM on strings the catalogue genuinely lacks,
+    // rather than on the two it gained. It must keep passing after every
+    // future code is added.
+    for (const belumAda of ["admin.rka.delete", "admin.rka.export", "rka.approve"]) {
+      expect(canonicalPermission(belumAda)).toBeNull();
+      expect(PERMISSIONS as readonly string[]).not.toContain(belumAda);
+    }
+    // And a code that DOES ship still resolves, so the check above is about
+    // the catalogue and not about `canonicalPermission` being broken.
+    expect(canonicalPermission(PERMISSION_RKA.KELOLA)).toBe(PERMISSION_RKA.KELOLA);
   });
 
   test("laporan.view memang cukup untuk laporan 24, jadi hanya SATU kode baca yang kurang", () => {
@@ -121,10 +164,10 @@ describe("TEMUAN: katalog izin tidak punya kode yang spec 9.3 butuhkan", () => {
 });
 
 // ---------------------------------------------------------------------------
-// FINDING 3: the parameter catalogue
+// FINDING 3: the parameter catalogue. CLOSED, re-pinned positive.
 // ---------------------------------------------------------------------------
 
-describe("TEMUAN: katalog parameter tidak punya kunci kebijakan pemisahan tugas RKA", () => {
+describe("katalog parameter: kunci kebijakan pemisahan tugas RKA, dan penjaganya", () => {
   test("akuntansi.tahun_buku_mulai_bulan ADA, jadi jendela kumulatif punya sumber yang sah", async () => {
     const { grup, kunci } = KUNCI_KONFIGURASI_RKA.TAHUN_BUKU_MULAI_BULAN;
     const entri = KATALOG[`${grup}.${kunci}`];
@@ -135,26 +178,51 @@ describe("TEMUAN: katalog parameter tidak punya kunci kebijakan pemisahan tugas 
     expect(await d.bacaKonfigurasi("akuntansi", "tahun_buku_mulai_bulan")).toBe("1");
   });
 
-  test("TEMUAN: rka.pemisahan_tugas_persetujuan tidak ada di katalog", () => {
+  test("rka.pemisahan_tugas_persetujuan ADA di katalog, sebagai ASUMSI yang dinyatakan", () => {
+    // RE-PINNED. This test used to assert
+    //   KATALOG["rka.pemisahan_tugas_persetujuan"] === undefined
+    //   Object.keys(KATALOG).filter(startsWith "rka.") === []
+    // as a finding: whether one Admin Pusat may draft AND approve the annual
+    // budget alone is a control decision belonging to the client, spec 2
+    // scopes its two segregation rules to "dua modul (PUMK dan Non PUMK)", and
+    // a default invented in a fixture would have shipped as policy.
+    //
+    // THE FINDING WAS DISCHARGED THE RIGHT WAY ROUND, which is why this test
+    // asserts the PROVENANCE and not just the presence: the key exists, its
+    // default is labelled `asalNilaiDefault: "ASUMSI"`, and its description
+    // says in as many words that it is waiting on the client. A key that
+    // shipped as `KEBIJAKAN` or `SPEC` would be the system asserting a control
+    // the client never chose, and would be a worse state than the gap was.
     const { grup, kunci } = KUNCI_KONFIGURASI_RKA.PEMISAHAN_TUGAS_PERSETUJUAN;
-    expect(KATALOG[`${grup}.${kunci}`]).toBeUndefined();
-    expect(Object.keys(KATALOG).filter((k) => k.startsWith("rka."))).toEqual([]);
-
-    // WHY IT IS A FINDING RATHER THAN A KEY WE ADD IN A FIXTURE.
-    // Spec 2 scopes its two segregation rules to "dua modul (PUMK dan Non
-    // PUMK)". The RKA has an approval and no Checker stage, so neither rule
-    // reaches it verbatim, and whether one Admin Pusat may draft AND approve
-    // the annual budget alone is a control decision belonging to the client.
-    // A default invented here would ship as policy.
+    const entri = KATALOG[`${grup}.${kunci}`];
+    expect(entri).toBeDefined();
+    expect(entri?.bentuk).toBe("BOOLEAN");
+    expect(entri?.asalNilaiDefault).toBe("ASUMSI");
+    expect(entri?.deskripsi).toContain("menunggu keputusan klien");
+    // And it is the only `rka.` key, so nothing else arrived unannounced.
+    expect(Object.keys(KATALOG).filter((k) => k.startsWith("rka."))).toEqual([
+      "rka.pemisahan_tugas_persetujuan",
+    ]);
   });
 
-  test("fixture menolak menulis kunci yang tidak terkatalog, jadi temuan di atas tidak bisa ditutup diam diam", async () => {
-    // The guard that makes the previous test durable. Without it, the first
-    // person to make ./rka-otorisasi.test.ts green would add the row to
-    // KONFIGURASI_AWAL and the gap would vanish from the record.
+  test("penjaga fixture masih hidup: kunci yang benar benar tidak terkatalog tetap ditolak", async () => {
+    // THE GUARD THE DISCHARGE ABOVE COULD HAVE KILLED, and the reason it was
+    // written: without it, the first person to make ./rka-otorisasi.test.ts
+    // green would have added the row to KONFIGURASI_AWAL and the gap would
+    // have vanished from the record instead of being closed on purpose.
+    //
+    // It is now pinned on a key the catalogue GENUINELY lacks, so the refusal
+    // stays exercised after the one it used to name started shipping. A
+    // fixture that will write any key at all is a fixture that can invent a
+    // parameter, and an invented parameter is policy nobody decided.
     await expect(
-      d.setelKonfigurasi("rka", "pemisahan_tugas_persetujuan", "true"),
+      d.setelKonfigurasi("rka", "batas_revisi_per_tahun", "3"),
     ).rejects.toThrow(/tidak ada di katalog konfigurasi terkirim/);
+
+    // And the catalogued key IS writable, so the refusal above is about the
+    // catalogue rather than about `setelKonfigurasi` refusing everything.
+    await d.setelKonfigurasi("rka", "pemisahan_tugas_persetujuan", "false");
+    expect(await d.bacaKonfigurasi("rka", "pemisahan_tugas_persetujuan")).toBe("false");
   });
 });
 
@@ -193,6 +261,29 @@ describe("TEMUAN: dekomposisi beku per sektor dan per bidang", () => {
     // PUMK (per sektor) and RKA Non PUMK (per bidang) still have nothing
     // frozen to read, so the report must refuse rather than recompute.
   });
+
+  // -------------------------------------------------------------------------
+  // THE TWO TESTS BELOW ARE PINS ON AN OPEN GAP, AND GOING RED IS THE GOAL.
+  //
+  // They assert that `PENCAIRAN_PUMK` writes NO `sektorId` into
+  // `jurnal_baris.dimensi_json`, and they demonstrate the consequence: a
+  // per-sector figure derived from `pumk_akad -> pumk_proposal.sektor_id`
+  // moves when somebody reclassifies a proposal, for a month that has already
+  // been reported.
+  //
+  // ADR 0016 section 2 hands the fix to modules/pumk: pass
+  // `dimensi: { sektorId }` on the receivable leg, the way
+  // `PENYALURAN_NON_PUMK` already passes `bidangId`. THE DAY THAT LANDS, BOTH
+  // TESTS GO RED. That is the signal that the gap is closed, not a regression
+  // to debug and not a reason to revert the PUMK change: delete both tests and
+  // replace them with the positive assertion that the disbursement carries its
+  // sector, next to the Non PUMK one it is contrasted with here.
+  //
+  // What the fix cannot reach, so nobody looks for it: `jurnal_baris` is
+  // immutable (ADR 0005), so already-posted disbursements never gain the
+  // dimension, and periods closed before it lands can only be derived from the
+  // mutable join.
+  // -------------------------------------------------------------------------
 
   test("jurnal PENCAIRAN_PUMK tidak membawa sektorId, jadi sektor hanya bisa dijoin dari master yang bisa berubah", async () => {
     d.setelJam("2026-02-15");

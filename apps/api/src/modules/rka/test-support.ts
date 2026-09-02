@@ -292,11 +292,18 @@ export interface AkunFixture {
  * folder asserts that any of these numbers is correct; the tests assert that
  * changing the row changes the behaviour.
  *
- * `rka.pemisahan_tugas_persetujuan` IS DELIBERATELY ABSENT. It is not in the
- * shipped catalogue, so seeding it here would be this fixture inventing a
- * parameter and would hide the finding ./rka-otorisasi.test.ts files. The
- * loader below refuses any key the catalogue does not carry, which is what
- * makes that impossible rather than merely discouraged.
+ * `rka.pemisahan_tugas_persetujuan` IS STILL DELIBERATELY ABSENT FROM THIS
+ * LIST, for a reason that OUTLIVED the finding it was written for. It is now
+ * in the shipped catalogue (as an ASUMSI awaiting the client), so seeding it
+ * here would no longer be inventing a parameter; but ./rka-otorisasi.test.ts
+ * asserts what the engine does when the key has no row at all, and a fixture
+ * value would take that state off the table. Tests that want the policy on or
+ * off write it themselves with `setelKonfigurasi`.
+ *
+ * The loader below still refuses any key the catalogue does not carry, and
+ * ./rka-fixture.test.ts keeps that refusal pinned on a key the catalogue
+ * genuinely lacks, so the guard cannot quietly become dead code now that the
+ * key it was written about ships.
  */
 const KONFIGURASI_AWAL: ReadonlyArray<[string, string, string]> = [
   // spec 5.6. Report 24's cumulative column counts from this month.

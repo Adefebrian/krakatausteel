@@ -462,8 +462,29 @@ describe("permission catalogue integrity", () => {
     ).text();
     const blok = /export const PERMISSIONS = \[([\s\S]*?)\] as const;/.exec(web);
     expect(blok).not.toBeNull();
-    const kodeSpa = [...blok![1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+
+    // COMMENTS OUT FIRST, THEN READ THE LITERALS. The SPA's list is commented
+    // as heavily as the server's, and a comment quoting a phrase ("versus
+    // anggaran", explaining why `admin.rka.approve` is a separate code) was
+    // being read as a permission the server does not ship. That is a defect in
+    // this scanner, not in the web code: the failure it reported was prose.
+    const isiBlok = blok![1]!.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const kodeSpa = [...isiBlok.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
     expect(kodeSpa.length).toBeGreaterThan(30);
+
+    // AND EVERY SURVIVING LITERAL MUST LOOK LIKE A PERMISSION CODE: dotted,
+    // lowercase, at least two segments, which is the shape of all 47 server
+    // codes and all 43 SPA ones.
+    //
+    // This is a SEPARATE assertion and not a filter, deliberately. Filtering
+    // the scan by this pattern would make a MALFORMED code in the SPA
+    // invisible ("Admin.RKA", "pumk view") instead of failing, and invisible
+    // is the exact failure mode this whole test exists to prevent: a
+    // permission string the SPA gates on that no role can ever hold. So a
+    // literal that is neither a comment nor a well-formed code is reported
+    // here rather than skipped.
+    const POLA_KODE_IZIN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/;
+    expect(kodeSpa.filter((kode) => !POLA_KODE_IZIN.test(kode))).toEqual([]);
 
     const dikenal = new Set<string>(PERMISSIONS);
     const tidakDikenal = kodeSpa.filter((kode) => !dikenal.has(kode));
