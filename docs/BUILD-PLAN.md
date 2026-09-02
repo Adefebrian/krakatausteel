@@ -94,19 +94,28 @@ Batas kepercayaan temuan: riset dilakukan tanpa bisa membuka dokumen primer seca
 
 ## Integrasi Accurate Online, dan dampaknya ke posisi sistem ini
 
-Keputusan pemilik repo: produk yang dituju adalah **Accurate Online** (bukan Accurate 5 desktop), sehingga API resmi tersedia. Tetapi **siapa pemegang buku resmi TJSL belum diputuskan.** Jangan membangun seolah sudah diputuskan.
+Dua keputusan pemilik repo, keduanya sudah diambil:
 
-Sampai ada keputusan, yang berlaku:
+1. Produk yang dituju **Accurate Online** (bukan Accurate 5 desktop), sehingga API resmi tersedia.
+2. **Sistem ini yang memegang buku resmi TJSL.** Diputuskan 31 Agustus 2026. Accurate hanya menerima jurnal ringkas untuk konsolidasi induk.
 
-- **Default mengikuti spesifikasi Bagian 1**: unit TJSL adalah entitas pelaporan tersendiri, jadi sistem ini yang memegang buku dan menghasilkan laporan Bagian 10.3 secara penuh.
-- **Integrasi Accurate dibangun sebagai lapisan opsional yang inert** kalau tidak ada target yang dikonfigurasi. Tujuannya menjaga keputusan tetap bisa dibalik tanpa bongkar skema.
+Dua alasan yang memutuskannya, dicatat supaya bisa ditinjau ulang kalau premisnya berubah:
 
-Dua kemungkinan dan konsekuensinya, supaya keputusan nanti diambil dengan sadar:
+- Unit TJSL adalah entitas pelaporan tersendiri menurut spesifikasi Bagian 1, dan PER-1/MBU/03/2023 Pasal 33 ayat 3 mewajibkan laporan PUMK diaudit KAP secara terpisah. Mendorong detail TJSL ke buku korporat induk mencampur dua entitas yang justru wajib terpisah.
+- Permukaan integrasi Accurate lemah untuk memegang buku resmi: tidak ditemukan mekanisme idempotensi, jurnalnya bisa diedit dan dihapus dari sana, dan ada kasus terdokumentasi baris jurnal piutang dengan jenis pihak salah yang hilang diam-diam dari buku pembantu. Lihat `docs/INTEGRASI-ACCURATE.md`.
 
-| Kalau diputuskan | Konsekuensi |
+Yang membatalkan keputusan ini kalau ternyata benar: instance Accurate yang dimaksud adalah company file milik unit TJSL sendiri, bukan buku induk, **dan** laporan PUMK yang diaudit KAP selama ini memang dicetak dari Accurate. Kalau keduanya benar, pola buku pembantu memberi umpan ke buku besar adalah yang baku dan keputusan ini harus ditinjau. Pertanyaan yang menjawabnya dalam satu kalimat: laporan PUMK yang diaudit tahun lalu dicetak dari mana.
+
+Konsekuensi yang berlaku sekarang:
+
+| Hal | Berlaku |
 |---|---|
-| Sistem ini tetap pemegang buku | Accurate hanya menerima jurnal ringkas untuk konsolidasi induk. Laporan Bagian 10.3 tetap laporan resmi. Perubahan paling kecil |
-| Accurate jadi pemegang buku | COA kita wajib mencerminkan COA Accurate persis, laporan 17 sampai 20 turun status jadi laporan manajemen dan alat rekonsiliasi, dan scope Fase 6 berubah cukup besar |
+| Laporan 17 sampai 20 | Tetap laporan resmi, tidak diturunkan statusnya |
+| COA | Bebas mengikuti struktur Bagian 10.3, tidak diikat ke COA Accurate |
+| Granularitas push | Ringkasan per periode, bukan per jurnal |
+| Status kirim | Bukan prasyarat closing |
+| Laporan rekonsiliasi terhadap Accurate | Tetap dibangun, tapi bukan penghalang Fase 6 |
+| Lapisan integrasi | Tetap satu arah, opsional, dan inert kalau tidak dikonfigurasi |
 
 Yang dibangun sekarang, karena murah, aditif, dan justru yang membuat keputusan tetap terbuka:
 

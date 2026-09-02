@@ -152,9 +152,24 @@ diambil, dan kemampuan API yang belum terverifikasi. Yang kedua hanya bisa dijaw
 deskriptor API memakai akun developer Accurate Online; `docs/INTEGRASI-ACCURATE.md` bagian 0
 menjelaskan batas metodologinya.
 
-## 11. Siapa pemegang buku resmi TJSL? (fork scope terbesar di proyek ini)
+## 11. Siapa pemegang buku resmi TJSL? SUDAH DIPUTUSKAN 2026-08-31
 
-**Belum diputuskan.** Ini bukan detail teknis, ini menentukan bentuk beberapa fase berikutnya.
+**Keputusan pemilik repo: sistem ini yang memegang buku.** Accurate Online hanya menerima jurnal ringkas untuk konsolidasi induk. Laporan 17 sampai 20 tetap laporan resmi, COA bebas mengikuti struktur Bagian 10.3, dan lapisan integrasi tetap satu arah dan opsional.
+
+Dasar keputusan, dicatat supaya bisa ditinjau ulang kalau premisnya berubah:
+
+1. Spesifikasi Bagian 1 menyebut unit TJSL sebagai entitas pelaporan tersendiri, dan PER-1/MBU/03/2023 Pasal 33 ayat 3 mewajibkan laporan PUMK diaudit KAP **secara terpisah**. Mendorong detail TJSL ke buku korporat induk berarti mencampur dua entitas yang justru wajib terpisah.
+2. Permukaan integrasi Accurate lemah untuk dijadikan buku resmi, menurut `docs/INTEGRASI-ACCURATE.md`: tidak ditemukan mekanisme idempotensi, jurnalnya bisa diedit dan dihapus dari sisi sana, dan ada kasus terdokumentasi baris jurnal ke akun piutang dengan jenis pihak salah yang hilang diam-diam dari buku pembantu. Memindahkan buku resmi ke sana berarti memindahkan kebenaran angka ke sistem yang lebih sulit dijamin.
+
+**Yang membatalkan keputusan ini** kalau ternyata benar: instance Accurate yang dimaksud adalah company file milik unit TJSL sendiri, bukan buku korporat induk, DAN laporan PUMK yang diaudit KAP selama ini memang dicetak dari Accurate. Kalau keduanya benar, pola buku pembantu memberi umpan ke buku besar adalah yang baku dan keputusan ini harus ditinjau.
+
+**Yang berubah karena keputusan ini:** tidak ada laporan diturunkan statusnya, granularitas push tetap ringkasan per periode, status kirim tetap bukan prasyarat closing, dan laporan rekonsiliasi terhadap Accurate tetap dibangun tapi bukan penghalang Fase 6.
+
+Konteks aslinya dipertahankan di bawah karena menjelaskan apa yang dipertaruhkan.
+
+---
+
+**Konteks saat pertanyaan masih terbuka:**
 
 - **Kalau sistem ini tetap pemegang buku** (default sekarang, sesuai spesifikasi Bagian 1: unit
   TJSL adalah entitas pelaporan tersendiri): Accurate hanya menerima jurnal ringkas untuk

@@ -570,10 +570,13 @@ export const KATALOG: Readonly<Record<string, KatalogEntri>> = Object.freeze({
     bentuk: "ENUM",
     pilihan: ["SISTEM_INI", "EKSTERNAL"],
     deskripsi:
-      "Siapa pemegang buku resmi. BELUM DIPUTUSKAN; default SISTEM_INI sesuai spec Bagian 1. " +
-      "Mengubah ke EKSTERNAL adalah keputusan pemilik, lihat ADR 0008 dan OPEN-QUESTIONS butir 11",
+      "Siapa pemegang buku resmi. DIPUTUSKAN 2026-08-31: SISTEM_INI. Unit TJSL adalah entitas " +
+      "pelaporan tersendiri (spec Bagian 1) dan laporan PUMK-nya diaudit KAP secara terpisah " +
+      "(PER-1/MBU/03/2023 Pasal 33 ayat 3), jadi laporan 17 sampai 20 tetap laporan resmi dan " +
+      "Accurate hanya menerima jurnal ringkas untuk konsolidasi induk. Mengubah ke EKSTERNAL " +
+      "menurunkan status laporan itu dan mengikat COA kita ke COA Accurate, lihat ADR 0008",
     dariMigrasi: true,
-    asalNilaiDefault: "ASUMSI",
+    asalNilaiDefault: "KEPUTUSAN",
     nilaiDefault: "SISTEM_INI",
   }),
   "integrasi.adapter_ekspor": entri({
