@@ -49,11 +49,16 @@
 // ---------------------------------------------------------------------------
 // TWO THINGS THIS MODULE REFUSES TO INVENT
 // ---------------------------------------------------------------------------
-// 1. PERMISSIONS. `PERMISSION_RKA.SETUJUI` and `PERMISSION_RKA.LIHAT` are not
-//    in the shipped catalogue. They are named here and FAIL CLOSED, the same
-//    mechanism that surfaced `pumk.cluster`, `nonpumk.lpj.verifikasi` and
-//    `admin.closing.view`. See each constant for why neither is a reuse of
-//    `admin.rka`.
+// 1. PERMISSIONS. Every code this module needs is named here and resolved
+//    through `canonicalPermission`, so a code the shipped catalogue does not
+//    carry FAILS CLOSED with `IZIN_BELUM_TERDAFTAR` instead of being treated
+//    as granted. That mechanism surfaced `pumk.cluster`,
+//    `nonpumk.lpj.verifikasi`, `admin.closing.view` and then this module's own
+//    `admin.rka.approve` and `admin.rka.view`, both of which now SHIP. The
+//    guard stays because the next missing code is the one it exists for.
+//    What did NOT go away is the control question: ADMIN_PUSAT holds the input
+//    code and the approval code, so whether one person may do both is read
+//    from `rka.pemisahan_tugas_persetujuan` and decided by nobody here.
 // 2. DIMENSIONS. `saldo_akun_periode` carries (periode, cabang, akun) and
 //    nothing else, so a CLOSED period has no frozen figure per sektor or per
 //    bidang at all. Report 24 for RKA PUMK and RKA Non PUMK over a closed
@@ -132,9 +137,32 @@ export type SumberRealisasi = "SALDO_AKUN_PERIODE" | "V_LEDGER_BARIS";
 // ---------------------------------------------------------------------------
 
 /**
- * `admin.rka` IS in the shipped catalogue (modules/auth/permissions.ts) and is
- * granted to ADMIN_PUSAT only. The other two codes below are NOT, and this
- * module refuses rather than inventing them.
+ * ALL FOUR CODES BELOW ARE NOW IN THE SHIPPED CATALOGUE
+ * (modules/auth/permissions.ts). `admin.rka.approve` and `admin.rka.view` were
+ * findings this module filed and they have since been DISCHARGED, so the
+ * engine checks them like any other code rather than failing closed on them.
+ *
+ * THE FAIL-CLOSED MECHANISM STAYS, and it is not dead code: `wajibIzin` in
+ * ./service.ts still resolves every code through `canonicalPermission` and
+ * raises `IZIN_BELUM_TERDAFTAR` for one the catalogue does not carry, which is
+ * how these two were found and how `pumk.cluster`,
+ * `nonpumk.lpj.verifikasi` and `admin.closing.view` were found before them.
+ * ./rka-fixture.test.ts keeps it pinned on codes the catalogue genuinely lacks.
+ *
+ * THE PART OF THE OLD INSTRUCTION THAT STILL HOLDS: never put a permission
+ * string into a fixture's permission list to make a test green. Every context
+ * in this folder gets its codes from `permissionsForRole`, which reads the
+ * shipped grant matrix out of the database; a fixture that grants itself the
+ * code it wants proves only that the fixture agrees with itself.
+ *
+ * WHERE THE GAP WENT, because it moved rather than disappeared: ADMIN_PUSAT
+ * holds BOTH `admin.rka` and `admin.rka.approve`, so on the shipped matrix one
+ * person can still draft a budget and approve it. Separating those two acts is
+ * now a CONFIGURATION question, `rka.pemisahan_tugas_persetujuan`, which ships
+ * as a BOOLEAN whose provenance is marked `ASUMSI` because spec 2 scopes its
+ * segregation rules to the two proposal modules and the RKA has no Checker
+ * stage. `setujuiRka` READS that key in both directions and assumes neither
+ * answer; see `KUNCI_KONFIGURASI_RKA.PEMISAHAN_TUGAS_PERSETUJUAN`.
  */
 export const PERMISSION_RKA = {
   /**
@@ -147,7 +175,9 @@ export const PERMISSION_RKA = {
    * APPROVING an RKA, which is what turns it into the baseline every
    * comparison in the system is measured against.
    *
-   * NOT IN THE SHIPPED CATALOGUE. FINDING, pinned by ./rka-otorisasi.test.ts.
+   * SHIPPED, and granted to ADMIN_PUSAT. It began as a finding this module
+   * filed (there was one code for input and approval), and the catalogue now
+   * carries it; ./rka-fixture.test.ts re-pins the discharge as a positive.
    *
    * It is not a reuse of `admin.rka`. Spec 9.3 gives the RKA a status and an
    * approval (`approved_by`, `approved_at`, and `rka_disetujui_ck` in
@@ -163,9 +193,11 @@ export const PERMISSION_RKA = {
    * and gating it there would put budget approval behind the same code as
    * editing the list of provinces.
    *
-   * Until the catalogue carries it, `setujuiRka` fails closed with
-   * `IZIN_BELUM_TERDAFTAR`. DO NOT add this string to a fixture's permission
-   * list to make a test green.
+   * HOLDING THE CODE IS NOT THE WHOLE CONTROL. ADMIN_PUSAT holds this and
+   * `admin.rka`, so whether the drafter may also approve is decided by
+   * `rka.pemisahan_tugas_persetujuan`, not by the catalogue. `setujuiRka`
+   * reads that key and refuses a self-approval with `KONFLIK_MAKER_APPROVER`
+   * when it is on.
    */
   SETUJUI: "admin.rka.approve",
 
@@ -173,8 +205,12 @@ export const PERMISSION_RKA = {
    * READING the budgets: the list, a version's lines, which version is the
    * baseline, who approved it and when. No right to change anything.
    *
-   * NOT IN THE SHIPPED CATALOGUE. FINDING, pinned by ./rka-otorisasi.test.ts.
-   * Exactly the shape of `admin.closing.view` before it existed.
+   * SHIPPED, and granted to AUDITOR (and so to ADMIN_PUSAT, which is the whole
+   * catalogue). It began as a finding this module filed, exactly the shape of
+   * `admin.closing.view` before that existed, and it was discharged the same
+   * way: a read-only evidence code, listed in `HANYA_BUKTI` so the operational
+   * roles do not inherit it. The paragraphs below are the argument that made
+   * the case, kept because they are still why the code is its own.
    *
    * Spec 2 gives the Auditor "read only penuh termasuk semua laporan dan audit
    * trail" and spec 16 scenario 23 requires every report and every evidence
@@ -229,8 +265,12 @@ export const KUNCI_KONFIGURASI_RKA = {
   /**
    * Whether the person who created or last edited an RKA may approve it.
    *
-   * NOT IN THE SHIPPED CATALOGUE. FINDING, pinned by ./rka-otorisasi.test.ts,
-   * and a genuine policy question rather than an oversight:
+   * IN THE CATALOGUE (modules/konfigurasi/katalog.ts), as a BOOLEAN whose
+   * `asalNilaiDefault` is `ASUMSI` and whose description says in as many words
+   * that it is waiting on the client. That provenance is the point: the key had
+   * to arrive labelled as an assumption rather than as settled policy, or the
+   * system would be asserting a control nobody chose. It is a genuine policy
+   * question rather than an oversight:
    *
    *   Spec 2's segregation rules are scoped, in the spec's own words, to the
    *   "pola Maker, Checker, Approval yang berlaku di dua modul (PUMK dan Non
@@ -239,10 +279,17 @@ export const KUNCI_KONFIGURASI_RKA = {
    *   Whether a single Admin Pusat may draft and approve the annual budget
    *   alone is a control decision belonging to the client, not to this module.
    *
-   * So the module reads the key and asserts the MECHANIC in both directions,
-   * and the value is nobody's default until the client says so
-   * (OPEN-QUESTIONS.md). Until the key exists, `setujuiRka` refuses with
-   * `KONFIGURASI_TIDAK_ADA` rather than guessing which control applies.
+   * So the module READS the key and assumes neither answer: with it on, the
+   * creator or last editor is refused with `KONFLIK_MAKER_APPROVER`; with it
+   * off, the same person may approve. Both directions are asserted, which is
+   * what makes this a mechanic rather than a smuggled policy, and an engine
+   * with the rule hardcoded either way fails one of the two.
+   *
+   * Resolution is bumn-scoped then global, per this constant group's header, so
+   * a client that has not decided gets the shipped assumption rather than a
+   * literal invented at the call site. `KONFIGURASI_TIDAK_ADA` is still raised
+   * when NEITHER row exists, which is what a database missing its Fase 0 seed
+   * looks like, and refusing there beats guessing which control applies.
    */
   PEMISAHAN_TUGAS_PERSETUJUAN: { grup: "rka", kunci: "pemisahan_tugas_persetujuan" },
 } as const;
@@ -677,8 +724,9 @@ export interface RkaEngine {
    * over status = 'DISETUJUI') means the two cannot both be approved even for
    * an instant, so this ordering is not a preference.
    *
-   * Requires `PERMISSION_RKA.SETUJUI`, which is NOT in the shipped catalogue:
-   * fails closed with `IZIN_BELUM_TERDAFTAR` until it is.
+   * Requires `PERMISSION_RKA.SETUJUI`, which SHIPS and is granted to
+   * ADMIN_PUSAT. Resolved through `canonicalPermission` all the same, so a code
+   * the catalogue stops carrying fails closed rather than passing silently.
    *
    * Reads `KUNCI_KONFIGURASI_RKA.PEMISAHAN_TUGAS_PERSETUJUAN` and, when it is
    * on, refuses an approver who created or last edited the version with

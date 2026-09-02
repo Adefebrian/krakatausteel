@@ -49,6 +49,8 @@ import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
 import { createNonPumkHttpModule } from "../modules/nonpumk";
 import { createPumkHttpModule } from "../modules/pumk";
+import { createRkaModule } from "../modules/rka";
+import { createLaporanModule } from "../modules/laporan";
 import { createOrganisasiModule } from "../modules/organisasi";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
@@ -175,6 +177,33 @@ export function createApp(overrides: AppOverrides = {}) {
   // closing and the login that led to it land in one audit_log stream.
   const closing = createClosingModule({ db, jurnal: jurnal.engine, audit });
 
+  // Fase 6 (spec 9.3 and spec 10.3 report 24), the RKA engine. NO HTTP SURFACE
+  // YET, deliberately: the budget entry screens and the report arrive with
+  // their own routes and the guard set from modules/auth.
+  //
+  // NO JOURNAL PORT, and that is the point rather than an omission: an RKA is a
+  // target, not a transaction, so this is the one business engine in the
+  // composition that cannot reach the ledger at all. It only READS, through the
+  // two shipped artefacts (`v_ledger_baris` for an open period,
+  // `saldo_akun_periode` for a closed one). `audit` is the same instance every
+  // other module uses, so a refused budget approval and the login that led to
+  // it land in one audit_log stream.
+  const rka = createRkaModule({ db, audit });
+
+  // Fase 6 (spec 10.3 reports 16 to 20, 22 and 23), the core accounting
+  // reports. NO HTTP SURFACE YET, deliberately: spec 10's report screens and
+  // its Excel and PDF exports arrive with their own routes and the guard set
+  // from modules/auth.
+  //
+  // NO JOURNAL PORT AND NO AUDIT PORT, and both are the point rather than an
+  // omission. Spec 16 scenario 23 requires an Auditor to open every report and
+  // change nothing, so this engine issues SELECTs and nothing else: invariant
+  // 11 is not merely respected here, it is unreachable. It reads the two
+  // shipped artefacts spec 10 names, `v_ledger_baris` for an OPEN period
+  // (ADR 0010) and `saldo_akun_periode` for a CLOSED one, and says in every
+  // report header which of the two produced the figures.
+  const laporan = createLaporanModule({ db });
+
   // modules/example IS NOT MOUNTED, and must not be.
   //
   // It is the repo template's reference module and it is unauthenticated by
@@ -216,6 +245,8 @@ export function createApp(overrides: AppOverrides = {}) {
     nonpumk: nonpumk.engine,
     nonpumkBaca: nonpumk.baca,
     closing: closing.engine,
+    rka: rka.engine,
+    laporan: laporan.engine,
   };
 }
 
@@ -231,4 +262,6 @@ export const angsuran = instance.angsuran;
 export const pumk = instance.pumk;
 export const nonpumk = instance.nonpumk;
 export const closing = instance.closing;
+export const rka = instance.rka;
+export const laporan = instance.laporan;
 export type AppType = typeof app;
