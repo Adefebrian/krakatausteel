@@ -1,69 +1,70 @@
 # Titik lanjut
 
-Dijeda atas permintaan pemilik repo saat batas pemakaian hampir tercapai. Commit terakhir `318141f`, sudah dipush.
+Diperbarui setelah commit `5f759f9`, "a 24 month demo world replayed through the real engines".
 
-**PENTING: working tree sedang di tengah perubahan yang sengaja memutus.** Jangan anggap kegagalan test sebagai kerusakan sampai membaca bagian berikut.
+Dokumen ini menggambarkan keadaan repo pada saat penulisan, bukan rencana. Kalau isinya berbeda dengan yang di disk, yang di disk benar.
 
-## Kondisi persis saat dijeda
+## Kondisi
 
 | Hal | Keadaan |
 |---|---|
-| Commit terakhir | `318141f`, hijau saat di-commit |
-| Working tree | 6 file dimodifikasi, rename belum selesai |
-| `bun run typecheck` | bersih, 0 error |
-| `bun test` | merah, dan itu memang diharapkan, lihat sebab di bawah |
-| Database `tjsl_test` | masih di migrasi 26, berisi 6234 baris BUMN sisa fixture |
-| Database `tjsl_dev` | di migrasi 26 |
+| Commit terakhir | `5f759f9` |
+| `bun test` | 2215 lulus, 0 gagal, 18740 pemanggilan expect, 101 berkas |
+| `bun run typecheck` | bersih |
+| `bun run check:boundaries` | PASS |
+| Migrasi | 0001 sampai 0029 |
+| Baris implementasi | sekitar 67.300 |
+| Modul API dengan rute | audit, auth, closing, konfigurasi, laporan, nonpumk, organisasi, pumk, rka |
 
-**Kenapa test merah:** migrasi 0027 dan 0028 sudah di-commit tapi **belum diterapkan** ke database mana pun. Kode sudah sebagian di-rename ke nama kolom baru (`akun.klasifikasi_akun`), sementara database masih punya nama lama (`akun.klasifikasi_laporan`). Jadi merahnya karena kode dan database berbeda versi, bukan karena logikanya salah.
+## Yang sudah selesai
 
-## Yang sedang dikerjakan saat berhenti
+Fase 0 sampai 4 selesai penuh: fondasi, engine jurnal, engine angsuran, PUMK (41 endpoint, 17 layar), Non PUMK (18 endpoint, 9 layar).
 
-Mendaratkan migrasi 0027 dan 0028 yang sengaja memutus, memperbaiki 25 titik pemanggilan, lalu mereset database test. Agen berhenti tepat saat menulis badan fungsi `seedCoaInti`.
+Fase 5 closing: engine dan 14 endpoint selesai. Layar sedang dibangun.
 
-File yang sudah tersentuh: `apps/api/src/seed/{coa-inti.ts,event-jurnal.test.ts,index.ts}`, `apps/api/src/modules/jurnal/{test-support.ts,jurnal-event.test.ts}`, `apps/api/src/modules/nonpumk/test-support.ts`.
+Fase 6 RKA dan laporan: engine, rute dan layar untuk RKA dan tujuh laporan inti. Dua puluh empat laporan sisanya sedang dibangun.
 
-Yang **belum** tersentuh dan masih harus di-rename: `apps/api/src/modules/laporan/` (`test-support.ts`, `contract.ts`, `laporan-struktur-data.test.ts`, `laporan-bagan-akun.test.ts`, `laporan-aktivitas.test.ts`, `laporan-perubahan-aset-neto.test.ts`, sekitar 11 titik) dan `apps/api/src/modules/angsuran/test-support.ts` (3 titik).
+Fase 9 dunia demo: selesai. `bun run db:seed:demo` memutar ulang 24 bulan lewat engine yang sama dengan yang dipanggil UI, bukan menyisipkan baris. Rinciannya di SEED.md. Gerbang penerimaan 46 pemeriksaan ikut di dalam seed dan harus tetap lulus.
 
-## Urutan lanjut, jangan diacak
+## Dua cacat modul yang sudah terbukti, bukan dugaan
 
-1. Selesaikan rename di dua modul yang tersisa di atas.
-2. Lengkapi `seedCoaInti` supaya menghasilkan bentuk baru: klasifikasi akun, minimal satu template, dan pemetaan yang membuat keempat laporan digerakkan akun.
-3. Tutup empat celah seed yang difilekan suite laporan sebagai test gagal-tertutup: tidak ada akun aset neto yang bisa diposting, seksi baris laporan diisi nama laporan bukan nama seksi, dua laporan tidak punya baris template sama sekali, dan klasifikasi arus kas hanya diisi di akun kas sehingga setiap lawan akun tidak terklasifikasi.
-4. Re-pin satu test di `modules/rka` yang memakukan ketiadaan kolom `saldo_akun_periode.sektor_id`. Perbaikannya ternyata berbentuk tabel (`saldo_akun_dimensi_periode`), dan pin berbentuk kolom tidak bisa mendeteksinya, jadi celah itu akan terbaca terbuka selamanya. Ganti ke keberadaan tabel barunya, pertahankan catatan asalnya.
-5. Jalankan `bun run db:reset` (aman, tidak ada agen lain), lalu seed ulang, lalu verifikasi dua kali tanpa reset.
+Keduanya ditemukan oleh dunia demo, yang memang gunanya untuk itu. Keduanya sedang dikerjakan.
 
-## Yang sengaja TIDAK dikerjakan di langkah ini
+### 1. Pendapatan Jasa Administrasi kurang catat, Piutang Jasa Administrasi minus
 
-Dua ini punya pemilik sendiri dan test yang memakukannya memang harus tetap merah:
+`modules/angsuran/service.ts` memilih event jasa hanya dari sel konfigurasi `akuntansi.metode_pengakuan_jasa_adm`. Karena selnya ACCRUAL, **setiap** setoran mem-posting `ANGSURAN_JASA_ADM_AKRUAL`, yang **mengkredit** 1.1.04 dengan anggapan piutangnya sudah ada. Sementara `modules/closing` menghitung akrual sebagai `jasa_jatuh_tempo_periode - jasa_diterima_periode`, sehingga angsuran yang dibayar di bulan jatuh temponya tidak menghasilkan akrual sama sekali, jadi tidak ada debit penyeimbang.
 
-- Engine closing menulis `saldo_akun_dimensi_periode` (termasuk baris sisa) dan `periode.template_laporan_id`.
-- Modul PUMK mengirim `dimensi: { sektorId }` saat memposting pencairan, supaya atribusi per sektor tidak lagi bergantung pada master data yang bisa diubah.
+Kreditnya terjadi, debitnya tidak pernah.
 
-## Status fase
+Di dunia demo: piutang jasa sekitar Rp -86.700.000 dan pendapatan jasa hanya sekitar Rp 12,6 juta atas portofolio Rp 2,1 miliar selama dua tahun. Neraca tetap seimbang karena sisi pendapatannya juga hilang, jadi tidak ada satu pun pemeriksaan integritas yang bisa menangkapnya. Yang salah adalah klasifikasinya, bukan aritmetikanya.
 
-| Fase | Status |
-|---|---|
-| 0 sampai 4 | Selesai penuh, engine plus API plus layar |
-| 5 Closing | Engine selesai, 132 test. Belum ada API dan layar |
-| 6 RKA dan laporan | Test selesai ditulis, 104 dan 147 test, keduanya merah sesuai desain. Implementasi belum |
-| 7 sampai 9 | Belum |
+Arah perbaikan yang dipilih: event untuk kaki jasa sebuah setoran mengikuti apakah jasa **itu** benar diakrual, bukan apa kata sel konfigurasi global. Jangan berhenti menetokan setoran dari akrual, karena netonya sendiri sudah benar.
 
-## Menjalankan lokal
+### 2. `saldo_akun_dimensi_periode` tidak pernah ditulis
 
-Port 3000 dipakai project lain (traveldiary), jadi aplikasi ini di **3100**.
+Migrasi 0027 membuat tabel itu untuk dekomposisi beku per sektor dan per bidang, dan `modules/rka/repo.ts` sudah punya `adaSaldoBekuDimensi`. Tidak ada yang mengisinya: engine closing tidak pernah menulis ke sana.
 
-```bash
-PORT=3001 CORS_ORIGINS=http://localhost:3100,http://localhost:3000 bun apps/api/src/index.ts
-WEB_PORT=3100 API_BASE_URL=http://localhost:3001 bun apps/web/server.ts
-```
+Akibatnya `laporanRkaVsRealisasi` (Laporan 24) menolak jenis PUMK dan NON_PUMK begitu jendelanya menyentuh periode CLOSED, dengan `SKEMA_BELUM_LENGKAP`. Penolakan itu disengaja dan sudah didokumentasikan di `modules/rka/service.ts`. Separuh yang hilang ada di sisi closing.
 
-Buka http://localhost:3100, login `adminpusat` dengan kata sandi `TjslDemo#2026`. Kalau muncul "Origin tidak diizinkan", itu karena API dijalankan tanpa `CORS_ORIGINS` yang memuat port 3100.
+## Sisa pekerjaan
 
-## Keputusan yang masih menunggu pemilik repo
+1. Layar closing. Engine dan rutenya siap, tutup buku bulanan belum bisa dijalankan dari browser sama sekali. Ini satu satunya fase yang tidak punya UI.
+2. Dua puluh empat laporan sisa dari katalog 31 laporan di spesifikasi bagian 10.
+3. Ekspor Excel dan PDF untuk setiap laporan. Izin `laporan.export` sengaja belum ada dan sebuah test memakukan bahwa memintanya gagal di perkabelan. Ekspor butuh dependensi baru, dan dependensi baru butuh persetujuan pemilik lebih dulu.
+4. Fase 7: dashboard dengan drill down, portal publik, login mitra, impor massal, alat rekonsiliasi dan integritas.
+5. Fase 8: lapisan AI sebagai asisten, di balik feature flag. Prioritas 1 dan 2 dulu, ekstraksi dokumen dan deteksi anomali jurnal. AI tidak pernah menyetujui, mem-posting, atau menutup.
+6. Menjalankan 24 skenario penerimaan spesifikasi bagian 16 sebagai bukti, bukan sebagai klaim.
+7. Memindahkan test penyapu kelas error dari `modules/closing/` ke `core/`, tempat daftar yang dijaganya berada.
 
-1. Siapa pemegang buku resmi TJSL. Fork scope terbesar, menggigit di Fase 6.
-2. Metode jasa administrasi, flat atau efektif.
-3. Dasar penyisihan, tabel rate atau penurunan nilai kolektif.
-4. Format laporan, PSAK 45 atau ISAK 335. Skema sekarang mendukung keduanya hidup berdampingan lewat template bermasa berlaku.
-5. Butir 1 sampai 28 di `OPEN-QUESTIONS.md`.
+## Keputusan yang menunggu pemilik
+
+`ADMIN_CABANG` saat ini mewarisi `admin.closing.kolektibilitas` dan `admin.closing.periode`, jadi admin cabang bisa menjalankan tutup buku selingkup entitas. Membuka kembali periode tetap hanya Admin Pusat. Pertanyaannya apakah menutup buku memang boleh di tangan cabang, atau harus Admin Pusat saja.
+
+## Aturan yang tidak boleh dilanggar saat melanjutkan
+
+- Jangan pernah `git stash`, `git checkout -- <path>`, atau `git reset --hard` selama ada agen lain hidup di tree yang sama. Dua insiden di proyek ini menghapus ribuan baris kerja agen lain persis dengan cara itu.
+- Jangan pernah `git add <direktori>` atau `git add -A`. Stage berkas yang kamu sentuh saja, per path.
+- Test dibuat hijau dengan memperbaiki kode, tidak pernah dengan melemahkan assertion. Test yang memang salah dibiarkan merah dan dilaporkan.
+- Setiap kelas error yang diekspor modul harus terdaftar di `NAMA_ERROR_BERKODE` di `core/http.ts`. Empat modul pernah mendarat tanpa itu, tiap kali menghasilkan 500 tanpa nama dan tanpa baris audit penolakan. Sekarang ada test penyapu yang menjaganya.
+- Pembacaan saldo lewat `v_ledger_baris`, tidak pernah dengan filter POSTED saja. Lihat ADR 0010.
+- Semua jurnal lewat `postingEvent`. Ada trigger basis data dan pemeriksaan statis yang menjaganya.
