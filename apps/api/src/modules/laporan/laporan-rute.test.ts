@@ -28,16 +28,23 @@
 // and which branch were actually asked for. A route that read `cabangId` from
 // the wrong place would compute a perfectly balanced statement for the wrong
 // branch, and every engine test would still pass.
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   buatDuniaRuteLaporan,
   keSen,
   TAHUN_INI,
   TAHUN_LALU,
+  tutupSemuaFixture,
   type DuniaRuteLaporan,
 } from "./rute-test-support";
 import { NAMA_LAPORAN, POLA_TAMPIL, POLA_UANG } from "./index";
 import { resolveRequiredPermissions } from "../auth";
+
+// Fixture teardown, one call for the whole file. The world built by
+// `buatDunia...` registers its fixture; this marks its `bumn` as no longer
+// live. Nothing else in this file changed. See the FIXTURE LEAK note in
+// apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 let d: DuniaRuteLaporan;
 /** The printed name of each fixture user, read from the database. */
@@ -51,10 +58,6 @@ const SEMUA_ROLE = [
   "ADMIN_PUSAT",
   "AUDITOR",
 ] as const;
-type Role = (typeof SEMUA_ROLE)[number];
-
-/** Roles whose session covers every branch of the entity (spec 2 rule 3). */
-const LINTAS_CABANG: readonly Role[] = ["ADMIN_PUSAT", "AUDITOR"];
 
 interface Angka {
   nilai: string;
@@ -81,12 +84,6 @@ interface Kasus {
   namaLaporan?: string;
   /** Path for a caller scoped to branch A, which is where the ledger is. */
   path: (d: DuniaRuteLaporan) => string;
-  /**
-   * True for a report that is entity-wide BY CONSTRUCTION and therefore needs
-   * the same scope Semua Cabang needs. Only report 16: a chart of accounts
-   * belongs to the entity and has no branch column to filter on.
-   */
-  hanyaLintasCabang?: boolean;
 }
 
 const KASUS: readonly Kasus[] = [
@@ -97,7 +94,6 @@ const KASUS: readonly Kasus[] = [
     nama: "GET /laporan/bagan-akun",
     namaLaporan: NAMA_LAPORAN.BAGAN_AKUN,
     path: () => "/laporan/bagan-akun",
-    hanyaLintasCabang: true,
   },
   {
     nama: "GET /laporan/aktivitas",
@@ -160,25 +156,31 @@ beforeAll(async () => {
   }
 });
 
+// CHANGED, and what it used to say.
+//
+// `Kasus` carried a `hanyaLintasCabang: true` flag on report 16 alone, and
+// this matrix asserted that GET /laporan/bagan-akun answered 403 with
+// kodeDomain CABANG_DILUAR_SCOPE for MAKER, CHECKER, APPROVER and
+// ADMIN_CABANG, and 200 only for ADMIN_PUSAT and AUDITOR. It was pinning the
+// behaviour of `laporanService.baganAkun`, which called
+// `pastikanCabang(ctx, null)` unconditionally.
+//
+// That was reported as a finding and has now been discharged in the service.
+// The chart of accounts is REFERENCE DATA: `akun` is keyed by `bumn_id` and
+// has no `cabang_id`, so there is no other branch's data in it to withhold,
+// and every role that can open a report needs to be able to read the account
+// tree those reports are written in terms of. Report 16 is now readable by any
+// holder of `laporan.view`, which is every role.
+//
+// Nothing about SCOPE was weakened. The scope refusal, its 403 and its
+// kodeDomain are still asserted, on the reports that really are branch data,
+// by "spec 16 skenario 24" below, which is where that assertion belongs.
 describe("matriks izin: setiap endpoint laporan dipanggil oleh setiap peran", () => {
   for (const kasus of KASUS) {
     for (const role of SEMUA_ROLE) {
-      const lintas = LINTAS_CABANG.includes(role);
-      const boleh = !kasus.hanyaLintasCabang || lintas;
-      test(`${kasus.nama} sebagai ${role} -> ${boleh ? "200" : "403 scope"}`, async () => {
+      test(`${kasus.nama} sebagai ${role} -> 200`, async () => {
         const res = await d.panggil(role, kasus.path(d));
-        if (boleh) {
-          expect(res.status).toBe(200);
-          return;
-        }
-        // NOT a permission refusal: every role holds `laporan.view`, which is
-        // spec 2's single reporting privilege. This is a SCOPE refusal, and
-        // the two are told apart by `kodeDomain`, which is exactly why the
-        // engine's error class had to be registered in core/http.ts.
-        expect(res.status).toBe(403);
-        const body = (await res.json()) as { code: string; kodeDomain: string };
-        expect(body.code).toBe("TIDAK_BERWENANG");
-        expect(body.kodeDomain).toBe("CABANG_DILUAR_SCOPE");
+        expect(res.status).toBe(200);
       });
     }
   }

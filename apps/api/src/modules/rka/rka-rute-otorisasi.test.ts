@@ -25,15 +25,22 @@
 // is that the request got PAST authorisation, which "not 403 and not 401" says
 // exactly and a hardcoded 409 would not. The read routes, which have no such
 // state, are asserted on their exact status.
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   ADMIN_PUSAT_2,
   buatDuniaRuteRka,
   rp,
   TAHUN_RKA,
+  tutupSemuaFixture,
   type DuniaRuteRka,
 } from "./rute-test-support";
 import { resolveRequiredPermissions } from "../auth";
+
+// Fixture teardown, one call for the whole file. The world built by
+// `buatDunia...` registers its fixture; this marks its `bumn` as no longer
+// live. Nothing else in this file changed. See the FIXTURE LEAK note in
+// apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 let d: DuniaRuteRka;
 

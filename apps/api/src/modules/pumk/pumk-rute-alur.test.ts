@@ -22,7 +22,7 @@
 // that ends without that assertion proves the screens work and says nothing
 // about whether the books do.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { buatDuniaRute, rp, type DuniaRute } from "./rute-test-support";
+import { buatDuniaRute, rp, tutupSemuaFixture, type DuniaRute } from "./rute-test-support";
 
 let d: DuniaRute;
 
@@ -98,8 +98,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Nothing to tear down: the world is unique and the tables are append-only
-  // by design. Left as a marker that this file owns no shared state.
+  // The world IS unique and the tables ARE append-only, so nothing here is
+  // deleted. What this now does is mark the world's `bumn` as no longer live,
+  // so it stops being swept by seed/event-jurnal.test.ts on every later run.
+  // See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+  await tutupSemuaFixture();
 });
 
 describe("spec 16 scenarios 1 to 6, end to end over HTTP", () => {

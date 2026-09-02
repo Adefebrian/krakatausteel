@@ -36,8 +36,13 @@
 // engine reads it off the termin. Asserted here on the journal lines, because
 // a refund credited to a pooled account balances perfectly and leaves the
 // bidang overstated forever.
-import { beforeAll, describe, expect, test } from "bun:test";
-import { buatDuniaRuteNonPumk, rp, type DuniaRuteNonPumk } from "./rute-test-support";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { buatDuniaRuteNonPumk, rp, type DuniaRuteNonPumk, tutupSemuaFixture } from "./rute-test-support";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 let d: DuniaRuteNonPumk;
 

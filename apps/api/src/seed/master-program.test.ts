@@ -9,11 +9,15 @@
 //
 // The lists are asserted against the SPEC's own wording, transcribed here, so
 // the catalogue is checked against spec 4.1 rather than against itself.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createDbAdapter } from "../core/adapters/db";
+import { tandaiBumnUjiTerhapus } from "../testing/harness";
 import { BIDANG_NON_PUMK, SDG, SEKTOR_PUMK, seedMasterProgram, seedSdg } from "./master-program";
 
 const db = createDbAdapter();
+
+/** Every bumn this file created, so `afterAll` can close them. */
+const bumnDibuat: string[] = [];
 
 /** A fresh, isolated bumn per test: other agents reset this database mid-run. */
 async function bumnBaru(): Promise<string> {
@@ -22,8 +26,18 @@ async function bumnBaru(): Promise<string> {
     "INSERT INTO bumn (kode, nama) VALUES ($1, $2) RETURNING id::text AS id",
     [kode, `BUMN uji master ${kode}`],
   );
+  bumnDibuat.push(rows[0]!.id);
   return rows[0]!.id;
 }
+
+// Marks this file's entities closed once it is done, so seed/event-jurnal's
+// per-bumn sweep stays bounded. See the FIXTURE LEAK note in
+// apps/api/src/testing/harness.ts.
+afterAll(async () => {
+  for (const id of bumnDibuat) {
+    await tandaiBumnUjiTerhapus(db, id).catch(() => {});
+  }
+});
 
 describe("the catalogue is spec 4.1's own list", () => {
   test("the eight sektor PUMK, in the spec's order", () => {

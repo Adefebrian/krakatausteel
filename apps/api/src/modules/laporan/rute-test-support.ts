@@ -48,11 +48,15 @@
 // EVERY FIXTURE IS UNIQUE, for the reason the harness gives: test files share
 // one Postgres and another agent may reset it mid-run. Nothing is cleaned up and
 // nothing depends on rows another file left behind.
-import { createFixture, type Fixture } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture, type Fixture } from "../../testing/harness";
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
 import type { JurnalContext } from "../jurnal/index";
 
 export type { Fixture };
+// Re-exported so a test file that uses this world can close it with one
+// `afterAll(tutupSemuaFixture)` and one import. See the FIXTURE LEAK note in
+// ../../testing/harness.ts.
+export { tutupSemuaFixture };
 
 /** Whole rupiah -> the fixed two-decimal text the ledger takes. */
 export function rp(rupiahBulat: number): string {

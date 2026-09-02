@@ -25,9 +25,14 @@
 // exactly and a hardcoded 409 would not (it would start failing the day the
 // fixture's proposal is carried one step further). The read routes, which have
 // no such state, are asserted on their exact status.
-import { beforeAll, describe, expect, test } from "bun:test";
-import { buatDuniaRuteNonPumk, rp, type DuniaRuteNonPumk } from "./rute-test-support";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { buatDuniaRuteNonPumk, rp, type DuniaRuteNonPumk, tutupSemuaFixture } from "./rute-test-support";
 import { resolveRequiredPermissions } from "../auth";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 let d: DuniaRuteNonPumk;
 

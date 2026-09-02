@@ -5,9 +5,10 @@
 // a TypeScript one. ADR 0002 also makes this load-bearing for later phases,
 // because the journal balance and schedule-total guards are DEFERRED constraint
 // triggers that only fire at COMMIT.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createDbAdapter } from "./adapters/db";
 import type { QueryRunner } from "./ports/db";
+import { tandaiBumnUjiTerhapus } from "../testing/harness";
 
 const db = createDbAdapter();
 
@@ -21,13 +22,35 @@ async function bumnCount(kode: string): Promise<number> {
   return Number(rows[0]?.n ?? "0");
 }
 
+/** Every kode this file inserted under, committed or not. */
+const kodeDibuat: string[] = [];
+
 async function insertBumn(runner: QueryRunner, kode: string): Promise<string> {
+  kodeDibuat.push(kode);
   const rows = await runner.query<{ id: string }>(
     "INSERT INTO bumn (kode, nama) VALUES ($1, $2) RETURNING id::text AS id",
     [kode, `Uji ${kode}`],
   );
   return rows[0]!.id;
 }
+
+// Closes whatever actually committed. Tracked by KODE, not by id, because the
+// rollback tests hand back ids for rows that never landed; resolving kode ->
+// id here means the rolled-back ones simply do not come back, and `bumnCount`
+// above still sees every row while the tests that assert on it are running.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(async () => {
+  if (kodeDibuat.length === 0) return;
+  const rows = await db
+    .query<{ id: string }>(
+      "SELECT id::text AS id FROM bumn WHERE kode = ANY($1::text[]) AND deleted_at IS NULL",
+      [kodeDibuat],
+    )
+    .catch(() => [] as { id: string }[]);
+  for (const row of rows) {
+    await tandaiBumnUjiTerhapus(db, row.id).catch(() => {});
+  }
+});
 
 describe("DbPort.transaction", () => {
   test("commits every statement when the callback resolves", async () => {

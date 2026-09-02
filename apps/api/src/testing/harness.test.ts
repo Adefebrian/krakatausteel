@@ -1,9 +1,14 @@
 // Self-test for the authorisation harness. If this file fails, every other
 // authorisation test in the repo is suspect, so it asserts the properties the
 // harness claims rather than any application behaviour.
-import { describe, expect, test } from "bun:test";
-import { createFixture, createTestClock, TEST_PASSWORD } from "./harness";
+import { afterAll, describe, expect, test } from "bun:test";
+import { createFixture, createTestClock, TEST_PASSWORD, tutupSemuaFixture } from "./harness";
 import { globalRequestDropsCookies, nativeFetchApi } from "./native-fetch";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 describe("harness", () => {
   test("the app under test is built by the real factory and answers over HTTP", async () => {

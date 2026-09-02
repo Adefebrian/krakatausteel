@@ -12,8 +12,9 @@
 // twenty-third event in as "one of the spec's": a new code has to be added to
 // EVENT_KEPUTUSAN_PEMILIK, where it is visibly a decision and not an
 // obligation.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createDbAdapter } from "../core/adapters/db";
+import { tandaiBumnUjiTerhapus } from "../testing/harness";
 import { AKUN_INTI, BARIS_LAPORAN_INTI, HEADER_AKUN_INTI, seedCoaInti } from "./coa-inti";
 import {
   EVENT_KEPUTUSAN_PEMILIK,
@@ -27,6 +28,9 @@ import {
 
 const db = createDbAdapter();
 
+/** Every bumn this file created, so `afterAll` can close them. */
+const bumnDibuat: string[] = [];
+
 /** A fresh, isolated bumn per test: other agents reset this database mid-run. */
 async function bumnBaru(): Promise<string> {
   const kode = `EV${crypto.randomUUID().slice(0, 6)}`;
@@ -34,8 +38,20 @@ async function bumnBaru(): Promise<string> {
     "INSERT INTO bumn (kode, nama) VALUES ($1, $2) RETURNING id::text AS id",
     [kode, `BUMN uji event ${kode}`],
   );
+  bumnDibuat.push(rows[0]!.id);
   return rows[0]!.id;
 }
+
+// This file's own contribution to the leak it is the victim of: the sweep test
+// below is linear in the number of LIVE bumn, and every test here used to add
+// one permanently. Marking them closed once the file is done costs nothing and
+// keeps the sweep bounded. See the FIXTURE LEAK note in
+// apps/api/src/testing/harness.ts.
+afterAll(async () => {
+  for (const id of bumnDibuat) {
+    await tandaiBumnUjiTerhapus(db, id).catch(() => {});
+  }
+});
 
 /**
  * Every event code spec 6.4 lists, in the spec's own order. Transcribed, so the

@@ -25,10 +25,14 @@
 // bumn (from the harness), its own periods, its own chart of accounts, its own
 // sektor and its own bidang. Nothing is cleaned up and nothing depends on rows
 // another file left behind.
-import { createFixture, TEST_PASSWORD, type Fixture } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture, TEST_PASSWORD, type Fixture } from "../../testing/harness";
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
 
 export type { Fixture };
+// Re-exported so a test file that uses this world can close it with one
+// `afterAll(tutupSemuaFixture)` and one import. See the FIXTURE LEAK note in
+// ../../testing/harness.ts.
+export { tutupSemuaFixture };
 
 /** Whole rupiah -> the `Uang` shape the API takes. `rp(12_000_000)` = "12000000.00". */
 export function rp(rupiahBulat: number): string {

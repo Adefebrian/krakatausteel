@@ -92,7 +92,10 @@ export function createApp(overrides: AppOverrides = {}) {
   const audit = overrides.audit ?? createAuditService({ db });
 
   const base = new Hono();
-  applyHardening(base);
+  // The prefix reaches the GLOBAL limiter too, not just the auth and config
+  // ones. Without it every app built in one process shares a bucket per route
+  // per IP; see ApplyHardeningOptions in ./hardening.ts.
+  applyHardening(base, { keyPrefix });
 
   const auth = createAuthModule({
     db,

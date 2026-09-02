@@ -7,11 +7,16 @@
 //   - the database trigger, so the guarantee that survives a bulk import is
 //     proven too, AND so the error it raises is shown to arrive as a clean 409
 //     rather than as a 500 with plpgsql text in it.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createDbAdapter } from "../../core/adapters/db";
 import { AppError, mapDatabaseError } from "../../core/http";
-import { createFixture } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture } from "../../testing/harness";
 import { createSegregationService, konflikPeran } from "./segregation";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 const db = createDbAdapter();
 const sod = createSegregationService({ proposalTable: "pumk_proposal", reviewTable: "pumk_review" });

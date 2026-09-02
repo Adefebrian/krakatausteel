@@ -5,10 +5,15 @@
 // Every test drives the REAL app through HTTP, via the harness in
 // src/testing/harness.ts, so the guard chain, the cookie policy and the error
 // handler are all in the path.
-import { describe, expect, test } from "bun:test";
-import { createFixture, sessionCookieAttributes, TEST_PASSWORD } from "../../testing/harness";
+import { afterAll, describe, expect, test } from "bun:test";
+import { createFixture, sessionCookieAttributes, TEST_PASSWORD, tutupSemuaFixture } from "../../testing/harness";
 import { createMemoryRateLimiter } from "../../core/adapters/ratelimit";
 import { SESSION_COOKIE } from "./guards";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 describe("POST /auth/login", () => {
   test("returns the session payload the SPA expects and sets a cookie", async () => {

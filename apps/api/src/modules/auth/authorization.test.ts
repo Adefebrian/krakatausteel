@@ -10,9 +10,14 @@
 //
 // The matrix is written out as data rather than as prose: when Fase 3 adds
 // `pumk.approve` to a role, the diff shows exactly which cell moved.
-import { beforeAll, describe, expect, test } from "bun:test";
-import { createFixture, type Fixture } from "../../testing/harness";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createFixture, type Fixture, tutupSemuaFixture } from "../../testing/harness";
 import { PERMISSIONS, PERMISSIONS_BY_ROLE, ROLE_CODES, type RoleCode } from "./permissions";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 let f: Fixture;
 const cookies = new Map<RoleCode | "MAKER_B", string>();

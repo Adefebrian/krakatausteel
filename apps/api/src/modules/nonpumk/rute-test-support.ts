@@ -37,11 +37,15 @@
 // writing an override: the amounts these tests use have to be inside the range
 // an operator would really face, and a fixture that widened the range first
 // would hide a shipped bound that is too narrow to use.
-import { createFixture, type Fixture, type TestCabang } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture, type Fixture, type TestCabang } from "../../testing/harness";
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
 import { seedMasterProgram } from "../../seed/master-program";
 
 export type { Fixture };
+// Re-exported so a test file that uses this world can close it with one
+// `afterAll(tutupSemuaFixture)` and one import. See the FIXTURE LEAK note in
+// ../../testing/harness.ts.
+export { tutupSemuaFixture };
 
 /** Whole rupiah -> the `Uang` shape the API takes. `rp(12_000_000)` = "12000000.00". */
 export function rp(rupiahBulat: number): string {

@@ -101,15 +101,55 @@ describe("laporan.view: kode terkirim, dan siapa yang memegangnya", () => {
 });
 
 describe("scope cabang (skenario 24): ditolak, bukan dikosongkan", () => {
+  // CHANGED, and what it used to say.
+  //
+  // This loop ran over ALL SEVEN paths of `semuaJalur`, `baganAkun` included,
+  // and asserted CABANG_DILUAR_SCOPE from every one. `baganAkun` ignores the
+  // `cabangId` argument entirely; it was refusing because
+  // `laporanService.baganAkun` called `pastikanCabang(ctx, null)`
+  // unconditionally, so a branch-bound Maker got 403 on report 16 no matter
+  // what it asked for.
+  //
+  // That was reported as a finding and has now been discharged in the service:
+  // `akun` is keyed by `bumn_id` and carries no `cabang_id`, so the chart of
+  // accounts is entity reference data and there is no other branch's figure in
+  // it to withhold. Report 16 is now open to any holder of `laporan.view`, and
+  // the test directly below pins that.
+  //
+  // The six paths that DO read branch figures are unchanged, and this is still
+  // the test that proves they refuse rather than return an empty, balancing
+  // report.
   test("maker cabang A meminta cabang B: CABANG_DILUAR_SCOPE, bukan halaman kosong", async () => {
     // THE FAILURE MODE THIS EXISTS FOR: a WHERE clause that scopes the query
     // instead of refusing produces an EMPTY balance sheet, and an empty
     // balance sheet balances. It passes every test in
     // ./laporan-posisi-keuangan.test.ts.
-    for (const [nama, panggil] of Object.entries(semuaJalur(d.ctx.maker, d.cabangLainId))) {
+    const { baganAkun: _entitas, ...jalurCabang } = semuaJalur(d.ctx.maker, d.cabangLainId);
+    for (const [nama, panggil] of Object.entries(jalurCabang)) {
       await tolakDengan(panggil, KODE_LAPORAN.CABANG_DILUAR_SCOPE);
       expect(nama.length).toBeGreaterThan(0);
     }
+    // NON-VACUOUS: six branch-scoped paths were actually exercised, not zero.
+    expect(Object.keys(jalurCabang)).toHaveLength(6);
+  });
+
+  test("bagan akun terbuka untuk setiap peran yang memegang laporan.view, termasuk yang terikat cabang", async () => {
+    // Report 16 is reference data, not branch data. A Maker who can open the
+    // reports for their own branch must be able to read the account tree those
+    // reports are written in terms of.
+    for (const nama of ["maker", "checker", "approver", "adminCabang", "adminPusat", "auditor"] as const) {
+      const l = await d.engine.baganAkun({}, d.ctx[nama]);
+      // NON-VACUOUS: a real chart came back, not an empty, permitted shell.
+      expect(l.baris.length, nama).toBeGreaterThan(0);
+      expect(l.header.cabangId, nama).toBeNull();
+      expect(l.header.namaCabang, nama).toBe("Semua Cabang");
+      expect(l.header.dicetakOleh, nama).toBe(d.namaUser[nama]);
+    }
+  });
+
+  test("dan tetap ditolak tanpa laporan.view: izin, bukan scope, yang menjaganya", async () => {
+    const buta = d.ctxTanpaIzin(d.ctx.maker, PERMISSION_LAPORAN.LIHAT);
+    await tolakDengan(() => d.engine.baganAkun({}, buta), KODE_LAPORAN.TIDAK_BERWENANG);
   });
 
   test("maker cabang A meminta Semua Cabang juga ditolak", async () => {

@@ -37,10 +37,13 @@ import {
   type DuniaNonPumk,
   type PorterJurnalUji,
 } from "./test-support";
+import { tandaiBumnUjiTerhapus } from "../../testing/harness";
 
 let d: DuniaNonPumk;
 let engine: NonPumkEngine;
 let jurnal: PorterJurnalUji;
+/** Extra entities inserted inline by the cross-tenant tests. */
+const bumnLain: string[] = [];
 
 beforeAll(async () => {
   d = await buatDunia();
@@ -53,6 +56,12 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  // `bumnLain` holds the extra entities the cross-tenant tests insert directly;
+  // without this they stay live forever and inflate seed/event-jurnal's
+  // per-bumn sweep. See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+  for (const id of bumnLain) {
+    await tandaiBumnUjiTerhapus(d.db, id).catch(() => {});
+  }
   if (d) await d.tutup();
 });
 
@@ -167,6 +176,7 @@ describe("pemetaan bidang wajib (spec 9.2)", () => {
       `insert into bumn (kode, nama, tahun_buku_mulai_bulan) values ($1, $2, 1) returning id::text as id`,
       [`BUMN-LAIN-${Date.now()}-${Math.floor(Math.random() * 100000)}`, "BUMN lain (uji bidang)"],
     );
+    bumnLain.push(lain[0].id);
     const bidangAsing = await d.db.query<{ id: string }>(
       `insert into bidang_non_pumk (bumn_id, kode, nama) values ($1, 'BDG-ASING', 'Bidang BUMN lain')
        returning id::text as id`,

@@ -2,10 +2,11 @@
 // role", so the seed is not a convenience script here, it is the thing that
 // makes that criterion checkable. These tests run it and then log in as every
 // account it claims to create.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createApp } from "../core/app";
 import { createDbAdapter } from "../core/adapters/db";
 import { nativeFetchApi } from "../testing/native-fetch";
+import { tandaiBumnUjiTerhapus } from "../testing/harness";
 import { DEMO_CABANG, DEMO_MITRA, DEMO_PASSWORD, DEMO_USERS, databaseBolehDemo, seedDemo } from "./demo";
 import { seedKonfigurasiTambahan } from "./konfigurasi";
 import { seedRbac } from "./rbac";
@@ -16,6 +17,17 @@ const db = createDbAdapter();
 
 /** argon2 floor, so seeding seven accounts twice does not cost a second. */
 const FAST = { memoryCost: 4096, timeCost: 1 } as const;
+
+/** Entities this file inserted directly, closed once it is done. */
+const bumnDibuat: string[] = [];
+
+// Keeps seed/event-jurnal's per-bumn sweep bounded. See the FIXTURE LEAK note
+// in apps/api/src/testing/harness.ts.
+afterAll(async () => {
+  for (const id of bumnDibuat) {
+    await tandaiBumnUjiTerhapus(db, id).catch(() => {});
+  }
+});
 
 async function seedAll(): Promise<void> {
   await seedRbac(db);
@@ -254,6 +266,7 @@ describe("demo seed refuses anything that is not obviously disposable", () => {
       "INSERT INTO bumn (kode, nama) VALUES ($1, $1) RETURNING id::text AS id",
       [kode],
     );
+    bumnDibuat.push(bumn[0]!.id);
     const cabang = await db.query<{ id: string }>(
       "INSERT INTO cabang (bumn_id, kode, nama) VALUES ($1, '01', 'Cabang Nyata') RETURNING id::text AS id",
       [bumn[0]!.id],

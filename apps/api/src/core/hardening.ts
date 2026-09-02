@@ -227,10 +227,36 @@ export function rateLimit(options: RateLimitOptions = {}): MiddlewareHandler {
 /** Back-compat alias: the global limiter with default settings. */
 export const rateLimitMiddleware: MiddlewareHandler = rateLimit();
 
+export interface ApplyHardeningOptions {
+  /**
+   * Redis namespace for the global rate-limit buckets. Defaults to
+   * DEFAULT_KEY_PREFIX, which is what production uses.
+   *
+   * WHY THIS OPTION EXISTS. `createApp` already takes a `keyPrefix` and
+   * documents it as "so a test run cannot collide with another", but this
+   * function used to register the module-level `rateLimitMiddleware`, which is
+   * built once at import time on the DEFAULT prefix. Every app instance in a
+   * `bun test` process therefore shared ONE bucket per route per IP, against
+   * the same Redis, at 120 requests per 60 seconds. The suite makes far more
+   * than 120 `POST /auth/login` calls, so whether it went green depended on
+   * whether it ran slower than that ceiling. It did, until the test database
+   * was truncated and the suite got roughly twice as fast, at which point
+   * unrelated fixtures started failing to log in with a global 429.
+   *
+   * Threading the prefix through restores the per-fixture isolation the
+   * harness already promises. Production behaviour is unchanged: no caller
+   * there passes this, so the default prefix and the default ceilings apply.
+   */
+  keyPrefix?: string;
+}
+
 /** Registers the full hardening stack, in the order it must run. */
-export function applyHardening(app: {
-  use: (path: string, ...handlers: MiddlewareHandler[]) => unknown;
-}): void {
+export function applyHardening(
+  app: {
+    use: (path: string, ...handlers: MiddlewareHandler[]) => unknown;
+  },
+  options: ApplyHardeningOptions = {},
+): void {
   // First registered = outermost = last to touch the response. Cookies are
   // written there so no middleware downstream can drop them; see ./cookies.ts.
   app.use("*", setCookieFlush);
@@ -240,5 +266,8 @@ export function applyHardening(app: {
   app.use("*", bodySizeGuard);
   // Client IP must be resolved before the limiter keys on it.
   app.use("*", clientIpMiddleware);
-  app.use("*", rateLimitMiddleware);
+  app.use(
+    "*",
+    options.keyPrefix === undefined ? rateLimitMiddleware : rateLimit({ keyPrefix: options.keyPrefix }),
+  );
 }

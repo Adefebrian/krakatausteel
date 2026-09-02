@@ -6,9 +6,9 @@
 //   2. A CHANGE TAKES EFFECT WITHOUT A DEPLOY (spec rule 3), which in practice
 //      means the Redis cache is invalidated on write and the next read sees the
 //      new value.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createMemoryKeyValueStore } from "../../core/adapters/keyvalue";
-import { createFixture } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture } from "../../testing/harness";
 import {
   KATALOG,
   entriPerluKonfirmasiKlien,
@@ -18,6 +18,11 @@ import {
   compareDesimal,
   tipeDataUntuk,
 } from "./katalog";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 /** A fixture plus a konfigurasi service sharing its db, kv and audit. */
 async function setup(options: Parameters<typeof createFixture>[0] = {}) {

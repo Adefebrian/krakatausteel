@@ -695,9 +695,25 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     ctx: LaporanContext,
   ): Promise<LaporanBaganAkun> {
     pastikanIzin(ctx);
-    // The chart belongs to the entity, not to a branch, so this report is
-    // always Semua Cabang and therefore needs the same scope that option needs.
-    const { cabangId, namaCabang } = await pastikanCabang(ctx, null);
+    // NO BRANCH CHECK HERE, DELIBERATELY.
+    //
+    // This used to call `pastikanCabang(ctx, null)`, which demands the scope
+    // that "Semua Cabang" demands, so Maker, Checker, Approver and Admin
+    // Cabang were refused report 16 with CABANG_DILUAR_SCOPE even though they
+    // hold `laporan.view`.
+    //
+    // That was a defect, not a policy. An `akun` row is keyed by `bumn_id` and
+    // has no `cabang_id`: the chart of accounts is REFERENCE DATA belonging to
+    // the entity. Refusing it leaks nothing (there is no other branch's figure
+    // in it to leak, no amounts at all) and costs a branch user the ability to
+    // read the account tree that every other report they CAN open is written
+    // in terms of.
+    //
+    // `pastikanIzin` above is still the gate: `laporan.view` is required, and
+    // every branch-scoped report on this service keeps its own
+    // `pastikanCabang(ctx, filter.cabangId)`. Only this one is entity-level.
+    const cabangId = null;
+    const namaCabang = "Semua Cabang";
     const hariIni = jam().toISOString().slice(0, 10);
     const templat = await muatTemplat(ctx.bumnId, hariIni, null);
 

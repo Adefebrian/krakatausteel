@@ -5,11 +5,16 @@
 // allocations against one counter row must produce 40 distinct numbers with no
 // gaps. A gap in an official document series is a question an auditor asks, so
 // uniqueness alone is not enough.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createDbAdapter } from "../../core/adapters/db";
-import { createFixture } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture } from "../../testing/harness";
 import { DEFAULT_FORMAT_TEMPLATE, bulanRomawi, formatNomor } from "./format";
 import { createNomorService } from "./service";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 const db = createDbAdapter();
 const nomor = createNomorService({ db });

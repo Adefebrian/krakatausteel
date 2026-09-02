@@ -106,6 +106,12 @@ export interface Fixture {
   request(path: string, options?: RequestOptions): Promise<Response>;
   /** Rows the audit trail holds for this fixture's users. */
   auditRows(filter?: { hasil?: "SUKSES" | "DITOLAK"; aksi?: string; userId?: string }): Promise<AuditRowLite[]>;
+  /**
+   * Teardown. Soft-deletes this fixture's bumn so it stops counting as a live
+   * reporting entity. See the FIXTURE LEAK note below for why this exists and
+   * why it is a soft delete rather than a cleanup.
+   */
+  tutup(): Promise<void>;
 }
 
 export interface AuditRowLite {
@@ -118,6 +124,95 @@ export interface AuditRowLite {
   keterangan: string | null;
   nilai_lama_json: unknown;
   nilai_baru_json: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// FIXTURE LEAK: why every fixture must be torn down
+// ---------------------------------------------------------------------------
+//
+// `createFixture` inserts a real `bumn`. Nothing ever removed it, so a suite
+// run left ~1 new live reporting entity behind per fixture, forever, in a
+// database no one truncates between runs.
+//
+// That is not a tidiness problem. `seed/index.ts` seeds the COA, the event
+// mapping and the programme master PER BUMN, and
+// `seed/event-jurnal.test.ts > every bumn present ends up with a full mapping
+// set` sweeps every live entity to prove a deploy brings ALL of them to a
+// postable state. Its cost is therefore linear in the number of live entities,
+// and at ~2400 it crossed the 30s timeout. Narrowing the sweep would delete
+// the only thing that test proves, so the fixtures have to stop leaking
+// instead.
+//
+// The module worlds (modules/jurnal/test-support.ts,
+// modules/nonpumk/test-support.ts) already close their own entity in `tutup()`
+// this way. This is the same move for the harness.
+//
+// WHY SOFT DELETE, NOT CLEANUP. `bumn` is referenced by cabang, app_user,
+// akun, jurnal and the rest; the ledger tables refuse a physical DELETE by
+// design (tjsl_block_delete, migration 0002). Soft-deleting the entity is the
+// system's own convention for "no longer live", it is what `bumnIds()` in
+// seed/index.ts filters on, and it keeps every row available for a post-mortem.
+// No assertion is weakened: a torn-down fixture is one whose tests have
+// already finished.
+//
+// WHY A REGISTRY AND ONE `afterAll` PER FILE, NOT 96 try/finally BLOCKS.
+// Fixtures are created inside individual `test()` bodies here, ~96 call sites.
+// Wrapping each one would mean restructuring tests to fix a leak that is not
+// theirs. Instead every fixture registers itself, and each test file adds a
+// single `afterAll(tutupSemuaFixture)`. That also covers fixtures whose test
+// threw, which a per-test teardown line would not.
+//
+// This is safe because `bun test` runs test files sequentially in one process
+// (no concurrency is configured in bunfig.toml), so when a file's `afterAll`
+// runs, the only fixtures in the registry are ones whose tests are done.
+
+interface FixtureTerdaftar {
+  db: DbPort;
+  bumnId: string;
+}
+
+const fixtureAktif = new Set<FixtureTerdaftar>();
+
+/**
+ * Marks a test `bumn` as no longer live, the way the module worlds do.
+ *
+ * `deleted_by` is required to move with `deleted_at` (bumn_soft_delete_ck), and
+ * it is an FK to app_user, so an actor has to be named. A user of this entity
+ * is preferred; any user at all is accepted as a fallback, for the handful of
+ * tests that insert a bare `bumn` with no users under it. If the database holds
+ * no user whatsoever the statement is a no-op rather than a constraint
+ * violation: teardown must never fail louder than the test it follows.
+ */
+export async function tandaiBumnUjiTerhapus(db: DbPort, bumnId: string): Promise<void> {
+  await db.query(
+    `UPDATE bumn b
+        SET deleted_at = now(), deleted_by = u.id
+       FROM (SELECT au.id
+               FROM app_user au
+               JOIN cabang c ON c.id = au.cabang_id
+              ORDER BY (c.bumn_id = $1::uuid) DESC
+              LIMIT 1) u
+      WHERE b.id = $1::uuid AND b.deleted_at IS NULL`,
+    [bumnId],
+  );
+}
+
+/**
+ * Tears down every fixture built so far in this process. Call it once per test
+ * file: `afterAll(tutupSemuaFixture)`. Idempotent, and it never throws: a
+ * teardown failure must not turn a green file red.
+ */
+export async function tutupSemuaFixture(): Promise<void> {
+  const daftar = [...fixtureAktif];
+  fixtureAktif.clear();
+  for (const f of daftar) {
+    try {
+      await tandaiBumnUjiTerhapus(f.db, f.bumnId);
+    } catch {
+      // Deliberately swallowed. The database may have been truncated under us
+      // by another agent's `db:reset`, in which case there is nothing to close.
+    }
+  }
 }
 
 let rbacSeeded: Promise<void> | undefined;
@@ -244,6 +339,13 @@ export async function createFixture(options: FixtureOptions = {}): Promise<Fixtu
   const karyawanA = await mkKaryawan(cabangA);
   const karyawanB = await mkKaryawan(cabangB);
 
+  const terdaftar: FixtureTerdaftar = { db, bumnId };
+  fixtureAktif.add(terdaftar);
+  const tutup = async (): Promise<void> => {
+    fixtureAktif.delete(terdaftar);
+    await tandaiBumnUjiTerhapus(db, bumnId);
+  };
+
   const request = async (path: string, opts: RequestOptions = {}): Promise<Response> => {
     const headers: Record<string, string> = { ...opts.headers };
     if (opts.cookie) headers.cookie = `${SESSION_COOKIE}=${opts.cookie}`;
@@ -313,6 +415,7 @@ export async function createFixture(options: FixtureOptions = {}): Promise<Fixtu
     tryLogin,
     request,
     auditRows,
+    tutup,
   };
 }
 

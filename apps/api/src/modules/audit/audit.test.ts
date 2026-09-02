@@ -1,12 +1,17 @@
 // Audit trail tests. Spec 4.10 for the shape, spec 2 rule 5 for the reason
 // (every authorisation denial is recorded), spec 10.4 report 31 for the
 // property that nobody can delete it.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { createDbAdapter } from "../../core/adapters/db";
 import type { QueryRunner } from "./ports";
-import { createFixture } from "../../testing/harness";
+import { createFixture, tutupSemuaFixture } from "../../testing/harness";
 import { createAuditService } from "./service";
+
+// Fixture teardown, one call for the whole file. Every `createFixture` in here
+// registers itself; this closes them all. Nothing else in this file changed.
+// See the FIXTURE LEAK note in apps/api/src/testing/harness.ts.
+afterAll(tutupSemuaFixture);
 
 const db = createDbAdapter();
 const audit = createAuditService({ db });
