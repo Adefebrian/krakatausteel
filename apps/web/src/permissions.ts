@@ -23,6 +23,11 @@ export const PERMISSIONS = [
   "pumk.reschedule",
   "pumk.hapusbuku",
   "pumk.penagihan",
+  // Cluster roster administration. Was missing from this mirror while the
+  // server had it, which is the drift this file exists to prevent: the nav
+  // tests assert "what an Admin Cabang sees", and a code absent here makes
+  // them assert a smaller menu than the server actually grants.
+  "pumk.cluster",
 
   "nonpumk.view",
   "nonpumk.create",
@@ -172,7 +177,19 @@ const APPROVER: Permission[] = [
 ];
 
 const ADMIN_CABANG: Permission[] = [
-  ...new Set<Permission>([...MAKER, ...CHECKER, ...APPROVER, "konfigurasi.user", "tools.integritas"]),
+  ...new Set<Permission>([
+    ...MAKER,
+    ...CHECKER,
+    ...APPROVER,
+    "konfigurasi.user",
+    "tools.integritas",
+    "pumk.cluster",
+    // Read only, and scoped to the branch's own budget by the same rule as
+    // every other read. Entering and approving stay with Admin Pusat. See the
+    // server's own note: without a branch-scoped role holding a read code, the
+    // branch-scope check on budget reads can never fire.
+    "admin.rka.view",
+  ]),
 ];
 
 const ADMIN_PUSAT: Permission[] = [...PERMISSIONS];

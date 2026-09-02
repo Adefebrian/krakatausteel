@@ -375,6 +375,21 @@ const ADMIN_CABANG: Permission[] = [
     // with the branch admin rather than with the Maker who files the proposals
     // whose kolektibilitas the cluster report aggregates.
     "pumk.cluster",
+    // DECIDED (OPEN-QUESTIONS 26). A branch admin may READ a budget, scoped to
+    // their own branch by the same rule as every other read here. Entering and
+    // approving one stays with ADMIN_PUSAT: this grant is `admin.rka.view`, not
+    // `admin.rka`.
+    //
+    // Two reasons. A branch whose performance is measured against a budget
+    // (report 24) should be able to read the document it is measured against;
+    // and `rka.cabang_id` is nullable precisely so a branch can have its own,
+    // which would otherwise be a document nobody at that branch may open.
+    //
+    // The second reason is the one that decided it: without a branch-scoped
+    // role holding a read code, the branch-scope check on RKA reads can never
+    // fire. Enforcement that no reachable caller can trigger is not
+    // enforcement, it is unexercised code that looks like a guarantee.
+    "admin.rka.view",
   ]),
 ];
 
