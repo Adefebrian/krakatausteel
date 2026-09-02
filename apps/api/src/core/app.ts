@@ -43,7 +43,7 @@ import type { ObjectStorePort } from "./ports/s3";
 import { createAuditModule, createAuditService, type AuditService } from "../modules/audit";
 import { auditActor, createAuthModule } from "../modules/auth";
 import { createAngsuranModule } from "../modules/angsuran";
-import { createClosingModule } from "../modules/closing";
+import { createClosingHttpModule } from "../modules/closing";
 import { createJurnalModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
@@ -170,15 +170,24 @@ export function createApp(overrides: AppOverrides = {}) {
   // have refused on branch scope.
   const nonpumk = createNonPumkHttpModule({ db, jurnal: jurnal.engine, guards: auth.guards });
 
-  // Fase 5 (spec 8), the closing engine. NO HTTP SURFACE YET, deliberately:
-  // spec 9.3's two closing screens arrive with their own routes. Wired here for
-  // the same reason the ledger engine is, and it matters more here than
-  // anywhere: `jurnal.engine` satisfies `PorterJurnalClosing` structurally, so
-  // there is no path from closing to a `jurnal` row that does not go through
-  // `postingEvent`, and invariant 11 holds by construction rather than by
-  // convention. `audit` is the same instance every other module uses, so a
-  // closing and the login that led to it land in one audit_log stream.
-  const closing = createClosingModule({ db, jurnal: jurnal.engine, audit });
+  // Fase 5 (spec 8), the closing engine, ENGINE AND ROUTES. Spec 9.3's two
+  // closing screens are mounted at /closing below.
+  //
+  // Wired here for the same reason the ledger engine is, and it matters more
+  // here than anywhere: `jurnal.engine` satisfies `PorterJurnalClosing`
+  // structurally, so there is no path from closing to a `jurnal` row that does
+  // not go through `postingEvent`, and invariant 11 holds by construction
+  // rather than by convention. MOUNTING THE ROUTES DOES NOT WIDEN THAT: every
+  // write route below reaches the ledger through this same engine and this same
+  // port, and no route hands the module a second way in. `audit` is the same
+  // instance every other module uses, so a close, a reopen and the login that
+  // led to either land in one audit_log stream.
+  const closing = createClosingHttpModule({
+    db,
+    jurnal: jurnal.engine,
+    audit,
+    guards: auth.guards,
+  });
 
   // Fase 6 (spec 9.3 and spec 10.3 report 24), the RKA module, ENGINE AND
   // ROUTES.
@@ -229,6 +238,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/pumk", pumk.routes)
     .route("/nonpumk", nonpumk.routes)
     .route("/rka", rka.routes)
+    .route("/closing", closing.routes)
     .route("/laporan", laporan.routes)
     .route("/audit", auditModule.routes);
 
@@ -249,6 +259,7 @@ export function createApp(overrides: AppOverrides = {}) {
     nonpumk: nonpumk.engine,
     nonpumkBaca: nonpumk.baca,
     closing: closing.engine,
+    closingBaca: closing.baca,
     rka: rka.engine,
     rkaBaca: rka.baca,
     laporan: laporan.engine,

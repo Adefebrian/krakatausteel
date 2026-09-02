@@ -137,7 +137,7 @@ interface ErrorBerkode extends Error {
   penyebabDb?: string;
 }
 
-const NAMA_ERROR_BERKODE = new Set([
+export const NAMA_ERROR_BERKODE: ReadonlySet<string> = new Set([
   "JurnalError",
   "AngsuranError",
   "PumkError",
@@ -150,6 +150,12 @@ const NAMA_ERROR_BERKODE = new Set([
   // scenario 24 was therefore passing on the engine and unenforced over HTTP.
   "RkaError",
   "LaporanError",
+  // Fase 5's engine, whose routes landed last. THE THIRD TIME this omission
+  // happened, which is why the set is now EXPORTED: three occurrences is a
+  // structural trap, not bad luck. `modules/closing/closing-rute-kesalahan.test.ts`
+  // sweeps every `export class *Error` under apps/api/src/modules and fails if
+  // one is missing from here, so the fourth module cannot repeat it silently.
+  "ClosingError",
 ]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
@@ -269,6 +275,40 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   SEKSI_ASET_NETO_TIDAK_DIKENAL: "KONFLIK",
   SALDO_PERIODE_BELUM_DIBEKUKAN: "KONFLIK",
   LAPORAN_TIDAK_BALANCE: "KONFLIK",
+
+  // --- modules/closing (spec 8) -------------------------------------------
+  //
+  // Same rule as everywhere above: absent means 400, and only the codes where
+  // 400 would be a LIE are listed. `ALASAN_WAJIB`, `NILAI_BUKAN_DESIMAL` and
+  // `TANGGAL_TIDAK_VALID` are deliberately absent -- each of those IS a problem
+  // with the body, and the caller fixes it by rewriting the request.
+  //
+  // Everything below is the opposite: the request was well formed and the
+  // LEDGER'S STATE refuses it, so an identical retry refuses identically. That
+  // difference is what an accountant reads off the status code: 400 means "fix
+  // the form", 409 means "fix the books".
+  PERIODE_SUDAH_CLOSED: "KONFLIK",
+  PERIODE_BELUM_CLOSED: "KONFLIK",
+  URUTAN_PERIODE: "KONFLIK",
+  REOPEN_BUKAN_PERIODE_TERAKHIR: "KONFLIK",
+  REOPEN_TIDAK_DIIZINKAN: "KONFLIK",
+  // The ten-item checklist of spec 8.4 refused the close. `detail.gagal`
+  // carries every failing check with its number and a readable reason, which is
+  // the whole product of the refusal (spec 16 scenario 12).
+  PRASYARAT_GAGAL: "KONFLIK",
+  // Check 8 stands unconfirmed. A 409 rather than a 400 because whether the
+  // confirmation is required at all depends on the cash balance, not on how the
+  // body was typed.
+  KONFIRMASI_KAS_NEGATIF_WAJIB: "KONFLIK",
+  KOLEKTIBILITAS_BELUM_DIJALANKAN: "KONFLIK",
+  // Fail-closed refusals about the SYSTEM's readiness, never about the body: a
+  // day count no configured band covers, two bands that overlap, a class with
+  // no rate, and not enough history for the collective mode. Defaulting any of
+  // them would silently under-provision the whole portfolio.
+  RANGE_KOLEKTIBILITAS_TIDAK_LENGKAP: "KONFLIK",
+  RANGE_KOLEKTIBILITAS_TUMPANG_TINDIH: "KONFLIK",
+  RATE_PENYISIHAN_TIDAK_ADA: "KONFLIK",
+  HISTORI_TIDAK_CUKUP: "KONFLIK",
 
   // Spec 2 rules 1 and 2, ahead of TJSL-SOD-001 / TJSL-SOD-002.
   KONFLIK_MAKER_CHECKER: "SEGREGASI_TUGAS",

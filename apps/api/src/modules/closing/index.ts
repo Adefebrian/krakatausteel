@@ -1,19 +1,23 @@
 // The ONLY file another module or the app entrypoint may import from this
-// module. ./service.ts, ./kesalahan.ts and this folder's ./test-support.ts
-// stay private.
+// module. ./service.ts, ./repo.ts, ./baca.ts, ./kesalahan.ts and this folder's
+// ./test-support.ts stay private.
 //
-// NO HTTP SURFACE YET, deliberately. This is the tests-first contract for
-// Fase 5 (spec 8): kolektibilitas with its preview and its idempotency, the
+// THE HTTP SURFACE IS HERE NOW (./routes.ts), wired with the guard set from
+// modules/auth exactly as every other module's router is. The module was built
+// tests-first: kolektibilitas with its preview and its idempotency, the
 // allowance, the accrual, the ten-item closing checklist, the frozen trial
-// balance and the reopen rules are specified and pinned by failing tests
-// before a line of behaviour is written. ./routes.ts arrives with the
-// implementation, wired with the guard set from modules/auth.
+// balance and the reopen rules were specified and pinned by failing tests
+// before a line of behaviour existed, and the routes were added last, over an
+// engine that already refused everything it had to refuse.
 //
 // The engine reaches the ledger ONLY through `PorterJurnalClosing`, which the
 // object `createJurnalModule` returns already satisfies. Invariant 11 therefore
 // holds by construction: there is no path from this module to a `jurnal` row
 // that does not go through `postingEvent`.
+import { buatClosingBaca, type ClosingBaca } from "./baca";
 import { createClosingEngine, type ClosingEngine, type ClosingEngineDeps } from "./contract";
+import { createClosingRoutes } from "./routes";
+import type { Guards } from "../../core/principal";
 
 export {
   createClosingEngine,
@@ -85,4 +89,33 @@ export type {
  */
 export function createClosingModule(deps: ClosingEngineDeps): { engine: ClosingEngine } {
   return { engine: createClosingEngine(deps) };
+}
+
+export type { ClosingBaca };
+export type {
+  FilterPeriodeClosing,
+  KapabilitasClosing,
+  OpsiCabangClosing,
+  OpsiPeriodeClosing,
+  ReferensiClosing,
+} from "./baca";
+
+export interface ClosingModuleDeps extends ClosingEngineDeps {
+  guards: Guards;
+}
+
+/**
+ * The module WITH its HTTP surface, for the composition root. Kept separate
+ * from `createClosingModule` above so a caller that only needs the engine (a
+ * seed, a batch job, this folder's own fixtures) does not have to invent a
+ * guard set to get one.
+ */
+export function createClosingHttpModule(deps: ClosingModuleDeps): {
+  engine: ClosingEngine;
+  baca: ClosingBaca;
+  routes: ReturnType<typeof createClosingRoutes>;
+} {
+  const engine = createClosingEngine(deps);
+  const baca = buatClosingBaca({ db: deps.db });
+  return { engine, baca, routes: createClosingRoutes({ engine, baca, guards: deps.guards }) };
 }
