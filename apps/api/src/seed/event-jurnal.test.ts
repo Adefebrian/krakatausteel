@@ -270,7 +270,7 @@ describe("seedCoaInti", () => {
     await seedCoaInti(db, bumnId);
     const rows = await db.query<{ tipe: string; saldo_normal: string; is_kontra: boolean; tanda: number }>(
       `SELECT a.tipe, a.saldo_normal, a.is_kontra, b.tanda
-         FROM akun a JOIN baris_laporan b ON b.bumn_id = a.bumn_id AND b.kode = a.klasifikasi_laporan
+         FROM akun a JOIN baris_laporan b ON b.bumn_id = a.bumn_id AND b.kode = a.klasifikasi_akun
         WHERE a.bumn_id = $1 AND a.kode = '1.1.05'`,
       [bumnId],
     );

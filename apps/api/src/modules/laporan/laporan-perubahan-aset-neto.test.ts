@@ -1,18 +1,27 @@
 // LAPORAN PERUBAHAN ASET NETO (spec 10.3 report 20): "Saldo awal, kenaikan
 // atau penurunan, saldo akhir, per kategori aset neto".
 //
-// THE SCHEMA GAP THIS REPORT SITS ON TOP OF, stated plainly because it is a
-// finding and not a design.
+// THE SCHEMA GAP THIS REPORT WAS WRITTEN ON TOP OF, stated plainly because it
+// is the reason for the definition below. IT IS NOW CLOSED; the definition is
+// unchanged, and so is every assertion in this file.
 //
-// `akun.klasifikasi_laporan` is SINGLE-VALUED and every account's one value is
-// already spent: balance-sheet accounts point at POSISI_KEUANGAN lines, result
-// accounts point at AKTIVITAS lines. No account can therefore point at a
-// PERUBAHAN_ASET_NETO line, and `baris_laporan` ships no PERUBAHAN_ASET_NETO
-// rows at all. Laporan Arus Kas has the same problem and the schema solves it
-// with a parallel column (`akun.klasifikasi_arus_kas`); there is no equivalent
-// column for net-asset categories.
+// The gap: `akun.klasifikasi_laporan` was SINGLE-VALUED and every account's one
+// value was already spent: balance-sheet accounts pointed at POSISI_KEUANGAN
+// lines, result accounts at AKTIVITAS lines. No account could therefore point
+// at a PERUBAHAN_ASET_NETO line, and `baris_laporan` shipped no
+// PERUBAHAN_ASET_NETO rows at all. Laporan Arus Kas had the same problem and
+// the schema solved it with a parallel column (`akun.klasifikasi_arus_kas`);
+// there was no equivalent for net-asset categories.
 //
-// So this report is defined on the only mapping that exists:
+// The close: migrations/0028 renamed the column to `akun.klasifikasi_akun` and
+// split the classification vocabulary off the printed line, so one
+// classification can now reach a line in every statement through
+// `pemetaan_baris_laporan`, and the seed ships PERUBAHAN_ASET_NETO rows. A
+// later pass may re-express this report on that mapping; that is a change to
+// ./contract.ts and to these tests together, not one made silently underneath
+// them.
+//
+// So this report is still defined on the mapping the tests below assert:
 //   - the CATEGORIES are the POSISI_KEUANGAN lines whose `seksi` is ASET_NETO;
 //   - a movement from Laporan Aktivitas belongs to the category whose
 //     `baris_laporan.kode` equals that AKTIVITAS line's `seksi`;

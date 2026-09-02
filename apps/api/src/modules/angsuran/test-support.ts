@@ -38,6 +38,7 @@
 import { SQL } from "bun";
 import { expect } from "bun:test";
 import { createJurnalModule } from "../jurnal/index";
+import { seedTemplateLaporan } from "../../seed/coa-inti";
 import {
   AngsuranError,
   KODE_ANGSURAN,
@@ -492,8 +493,12 @@ export async function buatDunia(): Promise<DuniaAngsuran> {
     }
   }
 
-  // akun.klasifikasi_laporan is a real composite FK into baris_laporan
-  // (migrations/0005_coa.sql), so the report layout rows must exist first.
+  // akun.klasifikasi_akun is a real composite FK into klasifikasi_akun
+  // (migrations/0005_coa.sql, split off the printed line by 0028), and a
+  // printed line belongs to a template, so all three have to exist first. The
+  // template is the seed's own `BAWAAN`, resolved rather than invented, so
+  // this world and a seeded database describe the same presentation.
+  const templateId = await seedTemplateLaporan(db, bumn.id);
   const barisLaporan: Array<[string, string, string, number]> = [
     ["ASET", "Aset", "POSISI_KEUANGAN", 10],
     ["LIABILITAS", "Liabilitas", "POSISI_KEUANGAN", 30],
@@ -502,9 +507,24 @@ export async function buatDunia(): Promise<DuniaAngsuran> {
   ];
   for (const [kode, nama, laporan, urutan] of barisLaporan) {
     await db.query(
-      `insert into baris_laporan (bumn_id, laporan, kode, nama, urutan, level, tipe_baris, tanda, seksi)
-       values ($1, $2, $3, $4, $5, 1, 'DETAIL', 1, $2)`,
-      [bumn.id, laporan, kode, nama, urutan],
+      `insert into klasifikasi_akun (bumn_id, kode, nama, urutan)
+       values ($1, $2, $3, $4) on conflict (bumn_id, kode) do nothing`,
+      [bumn.id, kode, nama, urutan],
+    );
+    await db.query(
+      `insert into baris_laporan
+         (bumn_id, template_id, laporan, kode, nama, urutan, level, tipe_baris, tanda, seksi)
+       values ($1, $2, $3, $4, $5, $6, 1, 'DETAIL', 1, $3)`,
+      [bumn.id, templateId, laporan, kode, nama, urutan],
+    );
+    await db.query(
+      `insert into pemetaan_baris_laporan
+         (bumn_id, template_id, klasifikasi_id, baris_laporan_id, laporan)
+       select $1, $2, k.id, b.id, $3
+         from klasifikasi_akun k, baris_laporan b
+        where k.bumn_id = $1 and k.kode = $4
+          and b.bumn_id = $1 and b.template_id = $2 and b.kode = $4`,
+      [bumn.id, templateId, laporan, kode],
     );
   }
 
@@ -518,7 +538,7 @@ export async function buatDunia(): Promise<DuniaAngsuran> {
   for (const [kode, nama, tipe, saldo, klasifikasi] of defHeader) {
     const h = await satu<{ id: string }>(
       db,
-      `insert into akun (bumn_id, kode, nama, level, tipe, saldo_normal, is_postable, klasifikasi_laporan)
+      `insert into akun (bumn_id, kode, nama, level, tipe, saldo_normal, is_postable, klasifikasi_akun)
        values ($1, $2, $3, 1, $4, $5, false, $6) returning id`,
       [bumn.id, kode, nama, tipe, saldo, klasifikasi],
     );
@@ -531,7 +551,7 @@ export async function buatDunia(): Promise<DuniaAngsuran> {
       db,
       `insert into akun
          (bumn_id, kode, nama, parent_id, level, tipe, saldo_normal,
-          is_postable, is_kas, aktif, klasifikasi_laporan)
+          is_postable, is_kas, aktif, klasifikasi_akun)
        values ($1, $2, $3, $4, 2, $5, $6, true, $7, true, $8) returning id`,
       [bumn.id, def.kode, def.nama, header[def.tipe], def.tipe, def.saldoNormal, def.isKas ?? false, def.klasifikasi],
     );

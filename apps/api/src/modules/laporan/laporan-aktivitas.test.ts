@@ -16,7 +16,7 @@
 //
 // WHAT IT ASSERTS INSTEAD IS THE MECHANIC. The lines printed are the
 // `baris_laporan` rows for AKTIVITAS, in that table's order, fed by the
-// accounts whose `klasifikasi_laporan` points at them, grouped by that table's
+// accounts whose `klasifikasi_akun` maps onto them, grouped by that table's
 // `seksi`. Which rows exist is a configuration question with no deploy
 // attached; ./laporan-struktur-data.test.ts proves that by editing them.
 //

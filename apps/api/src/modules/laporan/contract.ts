@@ -78,8 +78,10 @@
 // LAYOUT IS DATA, NOT CODE
 // ---------------------------------------------------------------------------
 // Spec 4.2: "Buat tabel referensi `baris_laporan` agar format laporan bisa
-// diubah tanpa deploy", and `akun.klasifikasi_laporan` is a real composite FK
-// into it (migrations/0005). Laporan Aktivitas and Laporan Posisi Keuangan
+// diubah tanpa deploy", and `akun.klasifikasi_akun` is a real composite FK
+// into the classification vocabulary that reaches those lines through
+// `pemetaan_baris_laporan` (migrations/0005, split by 0028). Laporan Aktivitas
+// and Laporan Posisi Keuangan
 // therefore take their LINE STRUCTURE from `baris_laporan` rows, in `urutan`
 // order, with `tanda` deciding contra presentation and `aktif` deciding
 // whether a line prints at all. There is no list of captions in the
@@ -292,7 +294,7 @@ export const KODE_LAPORAN = {
   /**
    * An account carrying a balance maps onto no ACTIVE line of the statement
    * being printed, so its balance would silently vanish and the statement
-   * would not add up. `akun.klasifikasi_laporan` is NOT NULL and is a real FK,
+   * would not add up. `akun.klasifikasi_akun` is NOT NULL and is a real FK,
    * so this is reachable only by deactivating a line that accounts still point
    * at, which is exactly the operator mistake worth refusing on.
    */
@@ -711,14 +713,19 @@ export interface LaporanPosisiKeuangan {
  * kategori aset neto".
  *
  * WHERE THE CATEGORIES COME FROM, AND THE SCHEMA GAP BEHIND IT.
- * `akun.klasifikasi_laporan` is SINGLE-VALUED, and every account's one value
- * is already spent: balance-sheet accounts point at POSISI_KEUANGAN lines and
- * result accounts point at AKTIVITAS lines. So no account can point at a
- * PERUBAHAN_ASET_NETO line, and this statement has no account mapping of its
- * own. (Arus Kas has the same problem and solves it with the parallel
- * `akun.klasifikasi_arus_kas` column; there is no equivalent column here.)
+ * `akun.klasifikasi_laporan` was SINGLE-VALUED, and every account's one value
+ * was already spent: balance-sheet accounts pointed at POSISI_KEUANGAN lines
+ * and result accounts at AKTIVITAS lines. So no account could point at a
+ * PERUBAHAN_ASET_NETO line, and this statement had no account mapping of its
+ * own. (Arus Kas had the same problem and solves it with the parallel
+ * `akun.klasifikasi_arus_kas` column; there was no equivalent column here.)
  *
- * The only mapping the schema actually offers is `baris_laporan.seksi`, so:
+ * migrations/0028 CLOSED that gap: `akun.klasifikasi_akun` names a
+ * classification, and `pemetaan_baris_laporan` gives that classification a
+ * line in every statement, PERUBAHAN_ASET_NETO included. Re-expressing this
+ * report on that mapping is a change to this contract and to
+ * ./laporan-perubahan-aset-neto.test.ts together; until it is made, the
+ * definition below is the one in force and the one the tests assert:
  *   - the CATEGORIES are the POSISI_KEUANGAN lines whose `seksi` is
  *     `ASET_NETO`, in `urutan` order;
  *   - a movement from Laporan Aktivitas belongs to the category whose
@@ -733,10 +740,12 @@ export interface LaporanPosisiKeuangan {
  * team's decision (docs/REGULASI.md finding 1, OPEN-QUESTIONS.md), and this
  * report reads whichever rows exist.
  *
- * FINDING, filed rather than worked around: the shipped seed
- * (apps/api/src/seed/coa-inti.ts) creates no PERUBAHAN_ASET_NETO rows, no
- * ARUS_KAS rows, no ASET_NETO section lines and no postable ASET_NETO account.
- * ./laporan-struktur-data.test.ts pins that as a fail-closed refusal.
+ * FINDING, NOW CLOSED: the shipped seed (apps/api/src/seed/coa-inti.ts) used
+ * to create no PERUBAHAN_ASET_NETO rows, no ARUS_KAS rows, no ASET_NETO
+ * section lines and no postable ASET_NETO account. It creates all four now.
+ * ./laporan-struktur-data.test.ts still pins each of those states as a
+ * fail-closed refusal, reached by editing the rows rather than by relying on
+ * the seed being short.
  */
 export interface BarisPerubahanAsetNeto {
   /** `baris_laporan.kode` of the POSISI_KEUANGAN line for this category. */

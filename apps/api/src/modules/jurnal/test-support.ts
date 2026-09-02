@@ -481,7 +481,7 @@ export async function buatDunia(): Promise<DuniaJurnal> {
       db,
       `insert into akun
          (bumn_id, kode, nama, parent_id, level, tipe, saldo_normal,
-          is_postable, is_kas, is_kontra, aktif, klasifikasi_laporan)
+          is_postable, is_kas, is_kontra, aktif, klasifikasi_akun)
        values ($1, $2, $3, $4::uuid, 2, $5, $6, true, false, false, $7, $8) returning id`,
       [bumn.id, def.kode, def.nama, parentId, def.tipe, def.saldoNormal, def.aktif, def.klasifikasi],
     );
@@ -499,9 +499,9 @@ export async function buatDunia(): Promise<DuniaJurnal> {
     saldo_normal: "D" | "K";
     is_kas: boolean;
     is_kontra: boolean;
-    klasifikasi_laporan: string;
+    klasifikasi_akun: string;
   }>(
-    `select kode, id, nama, tipe, saldo_normal, is_kas, is_kontra, klasifikasi_laporan
+    `select kode, id, nama, tipe, saldo_normal, is_kas, is_kontra, klasifikasi_akun
        from akun where bumn_id = $1 and deleted_at is null`,
     [bumn.id],
   );
@@ -524,7 +524,7 @@ export async function buatDunia(): Promise<DuniaJurnal> {
       saldoNormal: row.saldo_normal,
       isKas: row.is_kas,
       isKontra: row.is_kontra,
-      klasifikasi: row.klasifikasi_laporan,
+      klasifikasi: row.klasifikasi_akun,
     };
   }
 

@@ -159,23 +159,39 @@ describe("TEMUAN: katalog parameter tidak punya kunci kebijakan pemisahan tugas 
 });
 
 // ---------------------------------------------------------------------------
-// FINDING 4: the schema cannot carry a frozen figure per sector or per bidang
+// FINDING 4: where a frozen figure per sector or per bidang lives.
+// THE SCHEMA HALF IS CLOSED (migrations/0027, ADR 0016); the WRITE is not.
 // ---------------------------------------------------------------------------
 
-describe("TEMUAN: saldo_akun_periode tidak punya dimensi sektor atau bidang", () => {
-  test("kolom yang ada hanya (periode, cabang, akun), jadi periode CLOSED tidak punya angka per sektor", async () => {
+describe("TEMUAN: dekomposisi beku per sektor dan per bidang", () => {
+  test("dekomposisinya adalah tabel anak saldo_akun_dimensi_periode, bukan kolom di saldo_akun_periode", async () => {
+    // RE-PINNED. This test used to assert
+    //   kolomAda("saldo_akun_periode", "sektor_id") === false
+    //   kolomAda("saldo_akun_periode", "bidang_id") === false
+    // as the gap: a closed period had nowhere to hold a per-sektor or
+    // per-bidang figure. The fix turned out to be table shaped, not column
+    // shaped (ADR 0016: dimensioned rows in the parent table would inflate
+    // every existing unfiltered reader of it), so a column-shaped pin would
+    // stay green forever and record the gap as open after it was closed.
     expect(await d.kolomAda("saldo_akun_periode", "akun_id")).toBe(true);
     expect(await d.kolomAda("saldo_akun_periode", "cabang_id")).toBe(true);
-    // THE GAP.
+    // The parent still carries NO dimension, deliberately, and that is now the
+    // design rather than the gap.
     expect(await d.kolomAda("saldo_akun_periode", "sektor_id")).toBe(false);
     expect(await d.kolomAda("saldo_akun_periode", "bidang_id")).toBe(false);
+    // The child that does carry it.
+    expect(await d.tabelAda("saldo_akun_dimensi_periode")).toBe(true);
+    expect(await d.kolomAda("saldo_akun_dimensi_periode", "saldo_akun_periode_id")).toBe(true);
+    expect(await d.kolomAda("saldo_akun_dimensi_periode", "sumbu")).toBe(true);
+    expect(await d.kolomAda("saldo_akun_dimensi_periode", "sektor_id")).toBe(true);
+    expect(await d.kolomAda("saldo_akun_dimensi_periode", "bidang_id")).toBe(true);
 
-    // Consequence, spelled out because the column list on its own does not say
-    // it: spec 10 requires a closed period's figures to come from the frozen
-    // snapshot (invariant 14). RKA Keuangan is per akun and survives. RKA PUMK
-    // (per sektor) and RKA Non PUMK (per bidang) have nowhere frozen to read
-    // from at all, so ./rka-realisasi-sumber.test.ts pins the report REFUSING
-    // for those two rather than recomputing.
+    // WHAT IS STILL OPEN, and it is the reason ./rka-realisasi-sumber.test.ts
+    // keeps pinning the refusal: spec 10 requires a closed period's figures to
+    // come from the frozen snapshot (invariant 14), and modules/closing does
+    // not yet WRITE this table. RKA Keuangan is per akun and survives. RKA
+    // PUMK (per sektor) and RKA Non PUMK (per bidang) still have nothing
+    // frozen to read, so the report must refuse rather than recompute.
   });
 
   test("jurnal PENCAIRAN_PUMK tidak membawa sektorId, jadi sektor hanya bisa dijoin dari master yang bisa berubah", async () => {

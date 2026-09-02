@@ -677,6 +677,14 @@ export interface DuniaRka {
   /** Does `tabel.kolom` exist? Used to pin a schema gap as a finding. */
   kolomAda(tabel: string, kolom: string): Promise<boolean>;
 
+  /**
+   * Does `tabel` exist? A column-shaped pin cannot detect a table-shaped fix,
+   * which is exactly what happened to the frozen-dimension finding: the answer
+   * turned out to be the child table `saldo_akun_dimensi_periode`
+   * (migrations/0027, ADR 0016) rather than columns on `saldo_akun_periode`.
+   */
+  tabelAda(tabel: string): Promise<boolean>;
+
   tutup(): Promise<void>;
 }
 
@@ -1652,6 +1660,15 @@ export async function buatDunia(): Promise<DuniaRka> {
         `select count(*)::text as n from information_schema.columns
           where table_name = $1 and column_name = $2`,
         [tabel, kolom],
+      );
+      return Number.parseInt(baris[0]?.n ?? "0", 10) > 0;
+    },
+
+    async tabelAda(tabel) {
+      const baris = await db.query<{ n: string }>(
+        `select count(*)::text as n from information_schema.tables
+          where table_schema = 'public' and table_name = $1`,
+        [tabel],
       );
       return Number.parseInt(baris[0]?.n ?? "0", 10) > 0;
     },

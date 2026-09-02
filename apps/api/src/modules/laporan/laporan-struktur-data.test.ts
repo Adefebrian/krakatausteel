@@ -2,10 +2,12 @@
 //
 // Spec 4.2, verbatim: "`klasifikasi_laporan` adalah kunci pemetaan ke format
 // laporan. Buat tabel referensi `baris_laporan` agar format laporan bisa
-// diubah tanpa deploy." migrations/0005 implements it as a real composite
-// foreign key, `akun.klasifikasi_laporan -> baris_laporan(bumn_id, kode)`, for
-// the same reason `event_jurnal_mapping` exists (ADR 0004): an accountant must
-// be able to correct a statement without a release.
+// diubah tanpa deploy." migrations/0005 implemented it as a real composite
+// foreign key straight into the printed line; migrations/0028 split the
+// vocabulary off that line, so it is now `akun.klasifikasi_akun ->
+// klasifikasi_akun(bumn_id, kode)` plus a `pemetaan_baris_laporan` row per
+// statement. Same reason `event_jurnal_mapping` exists (ADR 0004): an
+// accountant must be able to correct a statement without a release.
 //
 // WHY THIS FILE IS THE ONE THAT MAKES THE PSAK 45 / ISAK 335 QUESTION SAFE TO
 // LEAVE OPEN. docs/REGULASI.md finding 1: PSAK 45 was withdrawn, ISAK 335
@@ -261,7 +263,7 @@ describe("celah di seed terkirim: gagal tertutup, bukan format karangan", () => 
 
   test("akun bersaldo yang barisnya dinonaktifkan ditolak, bukan hilang diam diam", async () => {
     // Deactivating a line that accounts still point at would make their
-    // balances vanish and the statement stop adding up. `klasifikasi_laporan`
+    // balances vanish and the statement stop adding up. `klasifikasi_akun`
     // is NOT NULL and a real FK, so this is the only way to reach that state,
     // and it is exactly the operator mistake worth refusing on.
     await d.setelBarisLaporan(KODE_BARIS.liabilitas, { aktif: false });
@@ -270,11 +272,12 @@ describe("celah di seed terkirim: gagal tertutup, bukan format karangan", () => 
   });
 
   test("seksi baris aktivitas yang tidak dikenal ditolak (celah seksi di seed)", async () => {
-    // THE SHIPPED SEED IS IN EXACTLY THIS STATE: apps/api/src/seed/coa-inti.ts
-    // writes `seksi = laporan`, i.e. 'AKTIVITAS', which names no net-asset
-    // category. Report 20 cannot attribute a movement to a category that does
-    // not exist, and dropping it would break saldoAwal + perubahan =
-    // saldoAkhir. So this is what an unseeded system does today.
+    // THE SHIPPED SEED USED TO BE IN EXACTLY THIS STATE:
+    // apps/api/src/seed/coa-inti.ts wrote `seksi = laporan`, i.e. 'AKTIVITAS',
+    // which names no net-asset category. It now writes a real section name, so
+    // this test WRITES the bad value itself rather than inheriting it. Report
+    // 20 cannot attribute a movement to a category that does not exist, and
+    // dropping it would break saldoAwal + perubahan = saldoAkhir.
     await d.setelBarisLaporan(KODE_BARIS.pendapatan, { seksi: "AKTIVITAS" });
     const err = await tolakDengan(
       () =>

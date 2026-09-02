@@ -3,7 +3,7 @@
 //
 // The simplest of the seven, and the one every other report depends on being
 // right: `is_kas` is the definition of Kas Akhir (report 18),
-// `klasifikasi_laporan` is the definition of every line of reports 17 and 19,
+// `klasifikasi_akun` is the definition of every line of reports 17 and 19,
 // `is_postable` is the definition of which accounts appear on the Neraca
 // Lajur, and `is_kontra` plus the `tanda` on the line it points at are the
 // definition of how the allowance is presented. So this report is not just a
@@ -159,7 +159,7 @@ describe("bagan akun mengikuti data, bukan kode", () => {
     await d.db.query(
       `insert into akun
          (bumn_id, kode, nama, parent_id, level, tipe, saldo_normal, is_postable,
-          klasifikasi_laporan, created_by, updated_by)
+          klasifikasi_akun, created_by, updated_by)
        values ($1, $2, 'Beban Bunga (ditambahkan runtime)', $3, 2, 'BEBAN', 'D', true, $4, $5, $5)`,
       [d.bumnId, kode, parent[0].id, KODE_BARIS.beban, d.userId.adminPusat],
     );

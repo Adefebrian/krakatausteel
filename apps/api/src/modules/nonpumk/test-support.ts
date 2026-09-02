@@ -751,7 +751,7 @@ export async function buatDunia(): Promise<DuniaNonPumk> {
       db,
       `insert into akun
          (bumn_id, kode, nama, parent_id, level, tipe, saldo_normal, is_postable,
-          klasifikasi_laporan, created_by, updated_by)
+          klasifikasi_akun, created_by, updated_by)
        values ($1, $2, $3, $4, 2, 'BEBAN', 'D', true, 'BEBAN', $5, $5)
        returning id::text as id`,
       [bumn.id, kode, nama, akunBebanRoot, userId.adminPusat],

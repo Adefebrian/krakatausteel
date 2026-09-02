@@ -13,10 +13,11 @@
 //   - `saldo_akun_periode` and its `saldo_akun_periode_identitas_ck`
 //     (migrations/0011) ARE the frozen figures spec 10 requires a CLOSED
 //     period to be read from;
-//   - `baris_laporan` and the composite FK `akun.klasifikasi_laporan ->
-//     baris_laporan(bumn_id, kode)` (migrations/0005) ARE the report layout,
-//     and "editing a row changes the report with no deploy" is only testable
-//     against the real table;
+//   - `baris_laporan`, `klasifikasi_akun`, `pemetaan_baris_laporan` and the
+//     composite FK `akun.klasifikasi_akun -> klasifikasi_akun(bumn_id, kode)`
+//     (migrations/0005, split by 0028) ARE the report layout, and "editing a
+//     row changes the report with no deploy" is only testable against the real
+//     tables;
 //   - `akun.is_kas`, `akun.klasifikasi_arus_kas` and the
 //     `akun_is_kas_hanya_aset_ck` CHECK ARE the definition of Kas Akhir.
 // So every fixture below writes to `tjsl_test`, which tools/test-env.ts
@@ -50,20 +51,24 @@
 // `permissions: ["laporan.view"]` asserts against its own opinion; that is how
 // `jurnal.update` / `jurnal.delete` being grantable to nobody stayed invisible.
 //
-// WHAT THIS FIXTURE ADDS ON TOP OF THE SEED, AND WHY THAT IS A FINDING
-// The shipped seed is explicitly the MINIMUM the journal engine needed
-// (apps/api/src/seed/coa-inti.ts header). For the accounting statements it is
-// short of four things, all of which this fixture supplies for its own bumn
-// and all of which are reported as gaps rather than quietly papered over:
-//   1. no postable ASET_NETO account exists, only the level-1 header, so no
-//      journal can ever touch net assets;
-//   2. no `baris_laporan` row carries a section name a statement can group by:
-//      the seed sets `seksi = laporan`, i.e. 'POSISI_KEUANGAN' / 'AKTIVITAS';
-//   3. `klasifikasi_arus_kas` is set only on the five 1.1.x accounts, so most
-//      counter-accounts of a cash movement cannot be classified;
-//   4. there are no ARUS_KAS or PERUBAHAN_ASET_NETO template rows at all.
-// ./laporan-struktur-data.test.ts pins each of these as a fail-closed refusal
-// rather than letting an implementation invent a default.
+// WHAT THIS FIXTURE ADDS ON TOP OF THE SEED
+// The shipped seed used to be short of four things for the accounting
+// statements, all of which this fixture supplied for its own bumn:
+//   1. no postable ASET_NETO account existed, only the level-1 header, so no
+//      journal could ever touch net assets;
+//   2. no `baris_laporan` row carried a section name a statement can group by:
+//      the seed set `seksi = laporan`, i.e. 'POSISI_KEUANGAN' / 'AKTIVITAS';
+//   3. `klasifikasi_arus_kas` was set only on the five 1.1.x accounts, so most
+//      counter-accounts of a cash movement could not be classified;
+//   4. there were no ARUS_KAS or PERUBAHAN_ASET_NETO template rows at all.
+// ALL FOUR ARE NOW CLOSED IN apps/api/src/seed/coa-inti.ts. What this fixture
+// still adds is its own, larger, world: the PSAK 45 style SPLIT of net assets
+// into two categories (the seed ships one undivided category, because dividing
+// it is the client's decision), the accounts that make each report's sections
+// non-empty, and an inactive account so report 16 has a status to print.
+// ./laporan-struktur-data.test.ts still pins each of the four states as a
+// fail-closed refusal, reached by editing the rows rather than by relying on
+// the seed being short, so an implementation can never invent a default.
 //
 // NO TEST MAY DEPEND ON ANOTHER TEST'S DATA. `bun run db:reset` is run
 // periodically by other agents and nothing here is cleaned up afterwards, so
@@ -84,6 +89,7 @@ import { createJurnalModule, type Jurnal, type JurnalContext } from "../jurnal/i
 import { createDbAdapter } from "../../core/adapters/db";
 import { KATALOG, tipeDataUntuk } from "../konfigurasi/index";
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
+import { seedTemplateLaporan } from "../../seed/coa-inti";
 import { seedKonfigurasiTambahan } from "../../seed/konfigurasi";
 import { permissionsForRole, seedRbac } from "../../seed/rbac";
 import {
@@ -303,15 +309,88 @@ async function satu<T>(db: LaporanTx, sql: string, params: unknown[] = []): Prom
   return baris[0];
 }
 
+/**
+ * Adds a printed line AND the classification that reaches it, in one call.
+ *
+ * WHY THE TWO ARE ONE OPERATION HERE. Before migrations/0028 a line's `kode`
+ * was simultaneously the printed line and the vocabulary an account was
+ * classified with, so `insert into baris_laporan` was the whole of "add a line
+ * an account can point at". 0028 split them, so the same intent is now three
+ * rows: the classification, the line, and the `(template, klasifikasi,
+ * laporan)` mapping between them.
+ *
+ * The classification's code is deliberately the SAME STRING as the line's,
+ * which is the identity mapping 0028's own backfill writes. It is what lets
+ * `petakanAkun(akunId, "ASET_TETAP")` keep meaning "put this account on the
+ * ASET_TETAP line" without every caller learning about a second vocabulary.
+ */
+async function tambahBarisDanKlasifikasi(
+  db: LaporanTx,
+  bumnId: string,
+  templateId: string,
+  penulis: string,
+  b: {
+    kode: string;
+    nama: string;
+    laporan: string;
+    urutan: number;
+    level: number;
+    tipeBaris: TipeBaris;
+    tanda: 1 | -1;
+    seksi: string | null;
+    parentId?: string | null;
+  },
+): Promise<string> {
+  await db.query(
+    `insert into klasifikasi_akun (bumn_id, kode, nama, urutan, created_by, updated_by)
+     values ($1, $2, $3, $4, $5, $5)
+     on conflict (bumn_id, kode) do nothing`,
+    [bumnId, b.kode, b.nama, b.urutan, penulis],
+  );
+  const baris = await satu<{ id: string }>(
+    db,
+    `insert into baris_laporan
+       (bumn_id, template_id, laporan, kode, nama, parent_id, urutan, level, tipe_baris, tanda,
+        seksi, created_by, updated_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+     returning id::text as id`,
+    [
+      bumnId,
+      templateId,
+      b.laporan,
+      b.kode,
+      b.nama,
+      b.parentId ?? null,
+      b.urutan,
+      b.level,
+      b.tipeBaris,
+      b.tanda,
+      b.seksi,
+      penulis,
+    ],
+  );
+  await db.query(
+    `insert into pemetaan_baris_laporan
+       (bumn_id, template_id, klasifikasi_id, baris_laporan_id, laporan, created_by, updated_by)
+     select $1, $2, k.id, $3, $4, $6, $6
+       from klasifikasi_akun k
+      where k.bumn_id = $1 and k.kode = $5
+     on conflict (template_id, klasifikasi_id, laporan) where deleted_at is null do nothing`,
+    [bumnId, templateId, baris.id, b.laporan, b.kode, penulis],
+  );
+  return baris.id;
+}
+
 // ---------------------------------------------------------------------------
 // Accounts, by the friendly name the tests use
 // ---------------------------------------------------------------------------
 
 /**
  * Codes from apps/api/src/seed/coa-inti.ts, which is also what seeds them,
- * plus the five this fixture has to add because the shipped seed is the
- * journal engine's minimum and not a chart of accounts a statement can be
- * printed from (see the file header, finding 1).
+ * plus the ones this fixture adds so every section of every statement has
+ * something in it. `3.1.01` is now SHIPPED by the seed as one undivided
+ * net-asset category; this fixture takes it over as the "tidak terikat" half
+ * of the split, and adds `3.2.01` as the other (see the file header).
  *
  * Deliberately a lookup onto the SHIPPED codes rather than a second chart of
  * accounts: a fixture COA that drifts from the seeded one is not a failing
@@ -372,9 +451,10 @@ export const SEKSI = {
 } as const;
 
 /**
- * `baris_laporan` rows this fixture adds. The seed ships six lines and none of
- * them is an ASET_NETO category, so report 20 has nothing to report on and
- * report 19 has nothing to put a net-asset balance against.
+ * `baris_laporan` rows this fixture adds, each with the classification that
+ * reaches it. The seed ships ONE undivided net-asset category, because
+ * splitting it is the client's decision; these are the two halves of the
+ * PSAK 45 split the specification's own scenarios are written in.
  *
  * NOT A CLAIM THAT THESE ARE THE RIGHT CAPTIONS. docs/REGULASI.md finding 1
  * records that the specification's PSAK 45 wording ("Tidak Terikat", "Terikat
@@ -430,11 +510,12 @@ const BARIS_TAMBAHAN: ReadonlyArray<{
 ];
 
 /**
- * `seksi` corrections to the SHIPPED rows. The seed writes `seksi = laporan`
- * ('POSISI_KEUANGAN' / 'AKTIVITAS'), which names no section of any statement.
- * See the file header, finding 2: this is the fixture supplying what the seed
- * lacks, and ./laporan-struktur-data.test.ts pins the uncorrected state as a
- * refusal so the gap cannot be forgotten.
+ * `seksi` re-pointing on the SHIPPED rows. The seed now writes real section
+ * names (finding 2, closed), but it writes the ONE net-asset category it
+ * ships; this world has two, so the revenue and expense lines have to name the
+ * half they belong to. ./laporan-struktur-data.test.ts still pins the
+ * uncorrected state as a refusal, by writing `seksi = 'AKTIVITAS'` itself, so
+ * the gap cannot be forgotten.
  */
 const SEKSI_BARIS_TERKIRIM: ReadonlyArray<[string, string]> = [
   [KODE_BARIS.aset, SEKSI.aset],
@@ -481,6 +562,9 @@ const AKUN_TAMBAHAN: ReadonlyArray<{
     aktif: true,
   },
   {
+    // SHIPPED BY THE SEED under this exact code, as the single undivided
+    // category "Aset Neto". This world splits the category in two, so the
+    // seeded row is renamed and re-classified rather than duplicated.
     kode: KODE_AKUN.asetNetoTidakTerikat,
     nama: "Aset Neto Tidak Terikat",
     tipe: "ASET_NETO",
@@ -525,10 +609,11 @@ const AKUN_TAMBAHAN: ReadonlyArray<{
 ];
 
 /**
- * `klasifikasi_arus_kas` the seed leaves NULL on accounts that are in fact the
- * counter-side of ordinary cash movements. See the file header, finding 3: an
- * unclassified counter-account makes report 18 refuse, which is correct
- * behaviour and useless as a default.
+ * `klasifikasi_arus_kas` on the counter-accounts of ordinary cash movements.
+ * The seed now sets these itself (finding 3, closed); this restates the same
+ * values so the fixture's world is stated in one place rather than half here
+ * and half in the seed, and so a seed that regressed would be caught by the
+ * report rather than by nothing.
  *
  * DELIBERATELY LEFT NULL: 1.1.05 Penyisihan and 5.1.01 Beban Penyisihan. Both
  * are non-cash by construction (the allowance journal never touches cash), so
@@ -1148,9 +1233,16 @@ export async function buatDunia(): Promise<DuniaLaporan> {
   // `bun run db:seed` uses.
   const { akun: akunIdByKode } = await seedCoaDanEventMapping(db, bumn.id, userId.adminPusat);
 
+  // The template every line of this world belongs to. The seed created it;
+  // this resolves the same row rather than making a second one, because two
+  // templates would be two statements, not one statement with extra lines
+  // (migrations/0028).
+  const templateId = await seedTemplateLaporan(db, bumn.id, userId.adminPusat);
+
   // What the seed does not ship (see the file header). Report lines first: the
-  // composite FK `akun.klasifikasi_laporan -> baris_laporan(bumn_id, kode)`
-  // means a line has to exist before an account can point at it.
+  // composite FK `akun.klasifikasi_akun -> klasifikasi_akun(bumn_id, kode)`
+  // means a classification has to exist before an account can point at it, and
+  // `pemetaan_baris_laporan` has to exist before that classification prints.
   for (const [kode, seksi] of SEKSI_BARIS_TERKIRIM) {
     await db.query(
       `update baris_laporan set seksi = $3, updated_by = $4 where bumn_id = $1 and kode = $2`,
@@ -1169,40 +1261,42 @@ export async function buatDunia(): Promise<DuniaLaporan> {
     if (b.parentKode) {
       const induk = await satu<{ id: string }>(
         db,
-        `select id::text as id from baris_laporan where bumn_id = $1 and kode = $2`,
-        [bumn.id, b.parentKode],
+        `select id::text as id from baris_laporan where bumn_id = $1 and template_id = $2 and kode = $3`,
+        [bumn.id, templateId, b.parentKode],
       );
       parentId = induk.id;
     }
-    await db.query(
-      `insert into baris_laporan
-         (bumn_id, laporan, kode, nama, parent_id, urutan, level, tipe_baris, tanda, seksi,
-          created_by, updated_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
-      [
-        bumn.id,
-        b.laporan,
-        b.kode,
-        b.nama,
-        parentId,
-        b.urutan,
-        b.level ?? 1,
-        b.tipeBaris,
-        b.tanda,
-        b.seksi,
-        userId.adminPusat,
-      ],
-    );
+    await tambahBarisDanKlasifikasi(db, bumn.id, templateId, userId.adminPusat, {
+      kode: b.kode,
+      nama: b.nama,
+      laporan: b.laporan,
+      urutan: b.urutan,
+      level: b.level ?? 1,
+      tipeBaris: b.tipeBaris,
+      tanda: b.tanda,
+      seksi: b.seksi,
+      parentId,
+    });
   }
   for (const a of AKUN_TAMBAHAN) {
     const parentId = akunIdByKode.get(a.parentKode);
     if (!parentId) throw new Error(`fixture laporan: parent akun ${a.parentKode} tidak ada`);
+    // ON CONFLICT DO UPDATE, not a plain INSERT: since the seed grew a postable
+    // net-asset account of its own (finding 1, now closed), one of these codes
+    // already exists. Adopting the seeded row rather than duplicating it is
+    // what keeps "the chart this world reports on" a single set of accounts.
     const baru = await satu<{ id: string }>(
       db,
       `insert into akun
          (bumn_id, kode, nama, parent_id, level, tipe, saldo_normal, is_postable, is_kas,
-          is_kontra, klasifikasi_arus_kas, klasifikasi_laporan, aktif, created_by, updated_by)
+          is_kontra, klasifikasi_arus_kas, klasifikasi_akun, aktif, created_by, updated_by)
        values ($1, $2, $3, $4, 2, $5, $6, true, false, false, $7, $8, $9, $10, $10)
+       on conflict (bumn_id, kode) where deleted_at is null do update
+         set nama = excluded.nama,
+             klasifikasi_arus_kas = excluded.klasifikasi_arus_kas,
+             klasifikasi_akun = excluded.klasifikasi_akun,
+             aktif = excluded.aktif,
+             updated_by = excluded.updated_by
        returning id::text as id`,
       [
         bumn.id,
@@ -1536,26 +1630,16 @@ export async function buatDunia(): Promise<DuniaLaporan> {
       );
     },
     async tambahBarisLaporan(b) {
-      const row = await satu<{ id: string }>(
-        db,
-        `insert into baris_laporan
-           (bumn_id, laporan, kode, nama, urutan, level, tipe_baris, tanda, seksi, created_by, updated_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-         returning id::text as id`,
-        [
-          bumn.id,
-          b.laporan,
-          b.kode,
-          b.nama,
-          b.urutan,
-          b.level ?? 1,
-          b.tipeBaris ?? "DETAIL",
-          b.tanda ?? 1,
-          b.seksi ?? null,
-          userId.adminPusat,
-        ],
-      );
-      return row.id;
+      return tambahBarisDanKlasifikasi(db, bumn.id, templateId, userId.adminPusat, {
+        kode: b.kode,
+        nama: b.nama,
+        laporan: b.laporan,
+        urutan: b.urutan,
+        level: b.level ?? 1,
+        tipeBaris: b.tipeBaris ?? "DETAIL",
+        tanda: b.tanda ?? 1,
+        seksi: b.seksi ?? null,
+      });
     },
     async setelBarisLaporan(kode, ubah) {
       const set: string[] = [];
@@ -1573,10 +1657,15 @@ export async function buatDunia(): Promise<DuniaLaporan> {
       );
     },
     async petakanAkun(akunId, kodeBaris) {
-      await db.query(
-        `update akun set klasifikasi_laporan = $2, updated_by = $3 where id = $1`,
-        [akunId, kodeBaris, userId.adminPusat],
-      );
+      // The account points at a CLASSIFICATION now, not at a printed line
+      // (migrations/0028). `tambahBarisDanKlasifikasi` gives every line a
+      // classification with the same code, so the argument still names the
+      // line the caller means.
+      await db.query(`update akun set klasifikasi_akun = $2, updated_by = $3 where id = $1`, [
+        akunId,
+        kodeBaris,
+        userId.adminPusat,
+      ]);
     },
     async setelKlasifikasiArusKas(akunId, nilai) {
       await db.query(

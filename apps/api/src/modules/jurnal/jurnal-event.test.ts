@@ -186,9 +186,9 @@ describe("spec 6.4 postingEvent membaca event_jurnal_mapping", () => {
       tipe: string;
       saldo_normal: string;
       is_kontra: boolean;
-      klasifikasi_laporan: string;
+      klasifikasi_akun: string;
     }>(
-      `select tipe, saldo_normal, is_kontra, klasifikasi_laporan from akun where id = $1`,
+      `select tipe, saldo_normal, is_kontra, klasifikasi_akun from akun where id = $1`,
       [d.akun.penyisihan.id],
     );
     expect(akun[0].tipe).toBe("ASET");
@@ -199,7 +199,7 @@ describe("spec 6.4 postingEvent membaca event_jurnal_mapping", () => {
     // what produces the "Piutang Pinjaman Mitra Binaan - Bersih" line.
     const baris = await d.db.query<{ tanda: number }>(
       `select tanda from baris_laporan where bumn_id = $1 and kode = $2`,
-      [d.bumnId, akun[0].klasifikasi_laporan],
+      [d.bumnId, akun[0].klasifikasi_akun],
     );
     expect(baris[0].tanda).toBe(-1);
 
