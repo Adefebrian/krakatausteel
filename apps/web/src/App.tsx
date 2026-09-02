@@ -17,6 +17,9 @@ import { NeracaLajurPage } from "./pages/laporan/NeracaLajur";
 import { PerubahanAsetNetoPage } from "./pages/laporan/PerubahanAsetNeto";
 import { PosisiKeuanganPage } from "./pages/laporan/PosisiKeuangan";
 import { RkaVsRealisasiPage } from "./pages/laporan/RkaVsRealisasi";
+import { ClosingKolektibilitas } from "./pages/closing/ClosingKolektibilitas";
+import { ClosingPeriode } from "./pages/closing/ClosingPeriode";
+import { PeriodeAkuntansi } from "./pages/closing/PeriodeAkuntansi";
 import { RkaPage } from "./pages/rka/RkaPage";
 import { Lpj } from "./pages/nonpumk/Lpj";
 import { MonitoringLpj } from "./pages/nonpumk/MonitoringLpj";
@@ -128,6 +131,14 @@ const HALAMAN: Record<
   "/nonpumk/monitoring-lpj": (route) => <MonitoringLpj route={route} />,
 
   "/konfigurasi/parameter": (route) => <Parameter route={route} />,
+
+  // Spec 8 and spec 9.3. The monthly close: the classification, the checklist
+  // and the close itself, and the period register the reopen is performed from.
+  // All three open on `admin.closing.view` alone, which is what puts the
+  // evidence in an Auditor's hands without putting a write code there too.
+  "/admin/closing-kolektibilitas": (route) => <ClosingKolektibilitas route={route} />,
+  "/admin/closing-periode": (route) => <ClosingPeriode route={route} />,
+  "/admin/periode": (route) => <PeriodeAkuntansi route={route} />,
 
   // Spec 9.3. One page per budget type, all three sharing one implementation:
   // the dimension a line is filed against is the only thing that differs, and

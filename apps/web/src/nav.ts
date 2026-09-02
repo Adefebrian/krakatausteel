@@ -612,46 +612,57 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Admin",
     icon: "admin",
     items: [
+      // THE THREE CLOSING SCREENS ARE GATED ON `admin.closing.view`, NOT ON THE
+      // CODES THAT RUN THINGS. That is deliberate and it mirrors the server:
+      // the checklist, the run history, the stored snapshot and the frozen
+      // balances are all registered under `admin.closing.view` in
+      // modules/closing/routes.ts, which is the read only code an Auditor holds
+      // and which can execute nothing. Gating the PAGE on
+      // `admin.closing.periode` would have meant either handing a write code to
+      // a role that must never write, or locking the Auditor out of the evidence
+      // that spec 16 scenario 23 makes their primary object. The run controls
+      // inside each page are gated separately, and the server checks every one
+      // of them again.
       {
         path: "/admin/closing-kolektibilitas",
         label: "Closing Kolektibilitas",
         title: "Closing Kolektibilitas",
-        permission: "admin.closing.kolektibilitas",
+        permission: "admin.closing.view",
         summary:
           "Penetapan klasifikasi kualitas piutang per periode beserta perhitungan penyisihannya.",
         willContain: [
           "Pratinjau hasil sebelum commit, termasuk ringkasan perpindahan klasifikasi",
           "Riwayat closing kolektibilitas per periode dan per cabang",
-          "Idempoten, menjalankan dua kali untuk periode yang sama tidak menghasilkan jurnal ganda",
-          "Tautan ke jurnal penyisihan yang terbentuk dan ke Laporan Perhitungan Penyisihan",
+          "Rate dan dasar perhitungan yang benar benar dipakai, dibaca dari barisnya sendiri",
+          "Menjalankan butuh admin.closing.kolektibilitas, membacanya cukup admin.closing.view",
         ],
       },
       {
         path: "/admin/closing-periode",
         label: "Closing Periode",
         title: "Closing Periode",
-        permission: "admin.closing.periode",
+        permission: "admin.closing.view",
         summary:
           "Penutupan periode akuntansi dengan checklist prasyarat yang harus hijau sebelum eksekusi.",
         willContain: [
-          "Checklist prasyarat, termasuk tidak boleh ada jurnal DRAFT yang tersisa",
+          "Checklist prasyarat lengkap sepuluh butir, dengan alasan dan angka di baliknya",
           "Penolakan closing dengan alasan yang jelas bila satu prasyarat gagal",
-          "Periode wajib ditutup berurutan, tidak bisa melompati periode sebelumnya",
-          "Snapshot saldo akun periode yang menjadi sumber laporan periode CLOSED",
+          "Penyisihan dan akrual beserta jurnal yang terbentuk dari keduanya",
+          "Eksekusi closing butuh admin.closing.periode dan konfirmasi tertulis lebih dulu",
         ],
       },
       {
         path: "/admin/periode",
         label: "Periode Akuntansi",
         title: "Periode Akuntansi",
-        permission: "admin.closing.periode",
+        permission: "admin.closing.view",
         summary:
           "Daftar periode beserta statusnya, dan tempat reopen dilakukan bila memang diperlukan.",
         willContain: [
           "Daftar periode per tahun buku dengan status OPEN, CLOSING_IN_PROGRESS, atau CLOSED",
-          "Reopen periode oleh Admin Pusat dengan alasan wajib",
+          "Reopen periode oleh Admin Pusat dengan alasan wajib dan konfirmasi tertulis",
           "Riwayat siapa menutup dan siapa membuka kembali beserta waktunya",
-          "Tautan ke checklist closing periode yang bersangkutan",
+          "Saldo akun beku periode tertutup, terbaca sebagai bukti tanpa hak menulis apa pun",
         ],
       },
       {

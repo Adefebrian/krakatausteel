@@ -73,7 +73,11 @@ export function Modal({
   return (
     <div className="modal-scrim" onMouseDown={onClose}>
       <div
-        className={`modal modal-${size}`}
+        // `modal-panel` names the panel itself, next to the size class that
+        // styles it. Purely a hook: nothing styles it, and it exists so a
+        // caller or a test can address the dialog body without depending on
+        // which size a screen happened to ask for.
+        className={`modal modal-panel modal-${size}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

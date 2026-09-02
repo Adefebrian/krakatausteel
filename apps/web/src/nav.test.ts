@@ -78,11 +78,15 @@ describe("visibleNav hides what the permission set lacks", () => {
   test("Auditor is read only: reports yes, every input page no", () => {
     const ids = groupIds(PERMISSIONS_BY_ROLE.AUDITOR);
     expect(ids).toContain("laporan");
-    expect(ids).not.toContain("admin");
     expect(ids).not.toContain("tools");
     expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "pumk")).not.toContain("Input Proposal");
     expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "pumk")).not.toContain("Pencairan");
     expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "jurnal")).toEqual(["Daftar Jurnal"]);
+    // The Admin group IS visible to an Auditor, and holds exactly the three
+    // closing evidence screens and nothing else. See the closing block below:
+    // that is `admin.closing.view` doing its job, not a leak.
+    expect(ids).toContain("admin");
+    expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "admin")).not.toContain("RKA Pendanaan UMK");
   });
 
   test("Admin Pusat sees every group", () => {
@@ -91,6 +95,86 @@ describe("visibleNav hides what the permission set lacks", () => {
 
   test("a group with no permitted item disappears instead of showing an empty heading", () => {
     expect(groupIds(["dashboard.view"])).toEqual(["dashboard"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The closing screens, spec 8 and spec 9.3
+// ---------------------------------------------------------------------------
+//
+// The theme of this block is that the READ side of the monthly close and its
+// WRITE side are two different authorities, and that the nav reflects the
+// server's own split rather than a second opinion about it. Gating the pages on
+// `admin.closing.periode` would have meant either handing a write code to a
+// role that must never write, or locking the Auditor out of the evidence that
+// spec 16 scenario 23 makes their primary object.
+
+const HALAMAN_CLOSING = ["Closing Kolektibilitas", "Closing Periode", "Periode Akuntansi"];
+
+describe("closing screens are gated on the read code, not on the run codes", () => {
+  test("all three closing pages carry admin.closing.view", () => {
+    for (const path of [
+      "/admin/closing-kolektibilitas",
+      "/admin/closing-periode",
+      "/admin/periode",
+    ]) {
+      expect(findRoute(path)?.permission).toBe("admin.closing.view");
+    }
+  });
+
+  test("an Auditor holding only the evidence codes reaches every closing screen", () => {
+    expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "admin")).toEqual(HALAMAN_CLOSING);
+    for (const path of [
+      "/admin/closing-kolektibilitas",
+      "/admin/closing-periode",
+      "/admin/periode",
+    ]) {
+      expect(canOpen(PERMISSIONS_BY_ROLE.AUDITOR, path)).toBe(true);
+    }
+  });
+
+  test("admin.closing.view alone is enough, and no run code is needed to read", () => {
+    expect(canOpen(["admin.closing.view"], "/admin/closing-periode")).toBe(true);
+    expect(canOpen(["admin.closing.view"], "/admin/closing-kolektibilitas")).toBe(true);
+    expect(canOpen(["admin.closing.view"], "/admin/periode")).toBe(true);
+  });
+
+  test("a run code without the read code does not open a closing screen", () => {
+    // The server registers every closing READ under `admin.closing.view`, so a
+    // session holding only a run code would open a page whose every panel is a
+    // 403. The nav agrees with the server instead of guessing.
+    expect(canOpen(["admin.closing.kolektibilitas"], "/admin/closing-kolektibilitas")).toBe(false);
+    expect(canOpen(["admin.closing.periode"], "/admin/closing-periode")).toBe(false);
+    expect(canOpen(["admin.periode.reopen"], "/admin/periode")).toBe(false);
+  });
+
+  test("the Approver sees all three, because closing is the Approver's act", () => {
+    expect(labels(PERMISSIONS_BY_ROLE.APPROVER, "admin")).toEqual(HALAMAN_CLOSING);
+  });
+
+  test("a Maker and a Checker see no closing screen at all", () => {
+    expect(labels(PERMISSIONS_BY_ROLE.MAKER, "admin")).toEqual([]);
+    expect(labels(PERMISSIONS_BY_ROLE.CHECKER, "admin")).toEqual([]);
+    expect(canOpen(PERMISSIONS_BY_ROLE.MAKER, "/admin/closing-periode")).toBe(false);
+    expect(canOpen(PERMISSIONS_BY_ROLE.CHECKER, "/admin/periode")).toBe(false);
+  });
+
+  test("Admin Cabang inherits the closing screens, Admin Pusat has them plus RKA", () => {
+    const cabang = labels(PERMISSIONS_BY_ROLE.ADMIN_CABANG, "admin");
+    for (const label of HALAMAN_CLOSING) expect(cabang).toContain(label);
+    expect(labels(PERMISSIONS_BY_ROLE.ADMIN_PUSAT, "admin")).toContain("RKA Pendanaan UMK");
+  });
+
+  test("reopen is Admin Pusat only, and the Approver who may close does not hold it", () => {
+    // The nav does not gate on this code, the page does. Asserted here because
+    // the mirror in ./permissions.ts is what the page reads, and a drift would
+    // light up a control the server refuses.
+    expect(PERMISSIONS_BY_ROLE.ADMIN_PUSAT).toContain("admin.periode.reopen");
+    expect(PERMISSIONS_BY_ROLE.APPROVER).not.toContain("admin.periode.reopen");
+    expect(PERMISSIONS_BY_ROLE.AUDITOR).not.toContain("admin.periode.reopen");
+    expect(PERMISSIONS_BY_ROLE.AUDITOR).not.toContain("admin.closing.periode");
+    expect(PERMISSIONS_BY_ROLE.AUDITOR).not.toContain("admin.closing.kolektibilitas");
+    expect(PERMISSIONS_BY_ROLE.AUDITOR).toContain("admin.closing.view");
   });
 });
 

@@ -2333,7 +2333,8 @@ h3 {
 
 .mutasi-kartu,
 .varian-kartu,
-.lajur-kartu {
+.lajur-kartu,
+.closing-kartu {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -2342,7 +2343,8 @@ h3 {
 
 .mutasi-angka,
 .varian-grid,
-.lajur-grid {
+.lajur-grid,
+.closing-angka {
   display: grid;
   gap: var(--space-2) var(--space-3);
   margin: 0;
@@ -2353,7 +2355,8 @@ h3 {
 }
 
 .mutasi-angka-sel,
-.varian-sel {
+.varian-sel,
+.closing-sel {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -2362,15 +2365,18 @@ h3 {
 }
 
 .mutasi-angka-key,
-.varian-sel dt {
+.varian-sel dt,
+.closing-sel dt {
   color: var(--color-text-subtle);
 }
 
-.varian-sel dd {
+.varian-sel dd,
+.closing-sel dd {
   margin: 0;
 }
 
-.varian-grid {
+.varian-grid,
+.closing-angka {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -2719,4 +2725,353 @@ h3 {
 
 .anggaran-kartu .kartu-judul {
   margin: 0;
+}
+
+/* ============================================================== closing */
+/*
+ * The monthly close, spec 8. Three screens share this block, so the checklist,
+ * the run history and the two action rows keep one rhythm across all of them:
+ * one padding value, one radius, one border weight, and figures on the same
+ * right hand baseline whatever the panel around them is.
+ *
+ * State is never carried by colour alone. A failed prerequisite carries its
+ * own StatusBadge with the word "Gagal" in it, and the tint below is a second,
+ * quieter signal rather than the only one.
+ */
+
+.closing-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.closing-bar-teks {
+  margin: 0;
+  max-width: 68ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/*
+ * A bento cell holding more than one panel, stacked.
+ *
+ * Two panels of very different natural height side by side in one grid row
+ * stretch the shorter card and leave a void inside its border, which reads as
+ * a broken card rather than as spare page. Stacking each side instead lets the
+ * two columns flow independently: the panels keep their own heights, the gap
+ * between them is the same gap the bento uses everywhere, and any leftover
+ * space falls outside the cards at the bottom of the shorter column.
+ */
+.closing-kolom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.closing-aksi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-4);
+}
+
+.closing-aksi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.closing-aksi-note {
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* -------------------------------------------------- the ten prerequisites */
+
+.prasyarat-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: prasyarat;
+}
+
+.prasyarat-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.prasyarat-item.is-pass {
+  border-color: var(--color-success-border);
+  background: var(--color-success-weak);
+}
+
+.prasyarat-item.is-gagal {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-weak);
+}
+
+.prasyarat-item.is-peringatan {
+  border-color: var(--color-caution-border);
+  background: var(--color-caution-weak);
+}
+
+.prasyarat-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.prasyarat-nomor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: var(--border-weight) solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.prasyarat-judul {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.prasyarat-alasan {
+  margin: 0;
+  max-width: 82ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.prasyarat-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: var(--border-weight) solid var(--color-border);
+  font-size: var(--text-caption);
+}
+
+.prasyarat-angka-label {
+  color: var(--color-text-subtle);
+}
+
+.prasyarat-angka-val {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.prasyarat-rincian {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  list-style: none;
+}
+
+.prasyarat-rincian-item {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------- rate provenance, runs */
+
+.rate-list,
+.riwayat-list,
+.jurnal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rate-item,
+.riwayat-item,
+.jurnal-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.rate-head,
+.riwayat-head,
+.jurnal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.rate-nilai {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.rate-teks,
+.riwayat-teks {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.rate-meta,
+.riwayat-meta {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.riwayat-tanggal,
+.jurnal-nama {
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.jurnal-tautan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jurnal-tautan li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+}
+
+/* --------------------------------------------- the two confirmation steps */
+
+.konfirmasi-kas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-caution-border);
+  border-radius: var(--radius-md);
+  background: var(--color-caution-weak);
+}
+
+.konfirmasi-kas-judul {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.konfirmasi-kas-teks {
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.konfirmasi-catatan {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .closing-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .closing-aksi-row .btn,
+  .closing-bar .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .closing-angka {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /*
+   * ONE SHAPE FOR ALL TEN, WHATEVER THE TITLE LENGTH. Wrapping a flex row
+   * gave a short title ("Neraca lajur seimbang") a badge on the same line and
+   * a long one ("Closing kolektibilitas sudah dijalankan") a badge on the next
+   * one, so a checklist of ten read as two different card designs on a phone.
+   * A fixed grid puts the number, the title and the badge in the same place in
+   * every item.
+   */
+  .prasyarat-head {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    grid-template-areas:
+      "nomor judul"
+      ".     nada";
+    align-items: start;
+    gap: var(--space-2) var(--space-3);
+  }
+  .prasyarat-nomor {
+    grid-area: nomor;
+  }
+  .prasyarat-judul {
+    grid-area: judul;
+  }
+  .prasyarat-head > .badge {
+    grid-area: nada;
+    justify-self: start;
+  }
+  .prasyarat-foot {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
 }
