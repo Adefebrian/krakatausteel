@@ -20,6 +20,7 @@ import {
   Icon,
   Modal,
   Panel,
+  Select,
   StatusBadge,
   type Column,
   type IconName,
@@ -27,6 +28,7 @@ import {
 import type { HasilApi } from "../../api/useApi";
 import { groupOfPath, type PageRoute } from "../../nav";
 import { Link, useRouter } from "../../router";
+import { useActiveSession } from "../../session";
 
 /** A DataTable column, re-exported so a page imports one module for a list. */
 export type ColumnSpec<Row> = Column<Row>;
@@ -352,12 +354,17 @@ export function DaftarDokumen<Row>({
               const key = rowKey(row);
               return (
                 <li className="kartu-item" key={key}>
-                  <button
-                    type="button"
-                    className="kartu-btn"
-                    onClick={onPilih ? () => onPilih(row) : undefined}
-                    disabled={!onPilih}
-                  >
+                  {/*
+                    A LIST WITHOUT A DESTINATION IS NOT A DISABLED BUTTON.
+                    It used to render `<button disabled>`, and Chrome greys a
+                    disabled button's whole subtree: on the reconciliation
+                    screen every akad number, mitra name and figure came out in
+                    the disabled ink, so a perfectly good read only list read as
+                    "unavailable". Caught by screenshot at 390, not by a test. A
+                    record that is not a destination is a plain card, in the
+                    same shape, and it is not in the tab order either.
+                  */}
+                  <Kartu onClick={onPilih ? () => onPilih(row) : undefined}>
                     <span className="kartu-head">
                       <span className="kartu-judul">{isi.judul}</span>
                       {isi.status}
@@ -372,7 +379,7 @@ export function DaftarDokumen<Row>({
                         </span>
                       )}
                     </span>
-                  </button>
+                  </Kartu>
                 </li>
               );
             })}
@@ -380,6 +387,85 @@ export function DaftarDokumen<Row>({
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * The branch narrowing control, for the screens whose API has no branch
+ * reference endpoint of its own (the dashboard and the two diagnostic tools).
+ *
+ * THREE THINGS THIS KEEPS TRUE, and each of them is a rule the server enforces
+ * again rather than a convenience of this control:
+ *
+ *   THE BRANCH IS A FILTER, NEVER AUTHORITY. The options are the branches the
+ *   SESSION resolved (`cabangTersedia`), so the picker cannot even name a
+ *   branch outside the caller's scope. A branch outside it is REFUSED by the
+ *   engine, not answered with an empty page.
+ *
+ *   ABSENT IS "EVERY BRANCH IN SCOPE", which for a branch bound role is
+ *   exactly one branch. So the default sends no `cabangId` at all and the
+ *   answer is already correctly narrowed by the session.
+ *
+ *   THE CHOICE LIVES IN THE QUERY STRING, so a screen a colleague is asked to
+ *   look at opens on the same scope when the link is pasted.
+ */
+export const SEMUA_CABANG = "SEMUA";
+
+export interface LingkupCabang {
+  /** Null means every branch the session resolved. Not "no branch". */
+  cabangId: string | null;
+  nama: string;
+  kontrol: ReactNode;
+  ringkas: string;
+}
+
+export function useLingkupCabang(label = "Cabang"): LingkupCabang {
+  const session = useActiveSession();
+  const { query, setQuery } = useRouter();
+  const daftar = session.cabangTersedia;
+  const bolehSemua = daftar.length > 1;
+
+  const dariUrl = query.get("cabang");
+  const pilihan =
+    dariUrl && daftar.some((c) => c.id === dariUrl)
+      ? dariUrl
+      : bolehSemua
+        ? SEMUA_CABANG
+        : (daftar[0]?.id ?? SEMUA_CABANG);
+  const cabangId = pilihan === SEMUA_CABANG ? null : pilihan;
+  const nama =
+    pilihan === SEMUA_CABANG
+      ? "Seluruh cabang dalam wewenang Anda"
+      : (daftar.find((c) => c.id === pilihan)?.nama ?? session.cabang.nama);
+
+  const kontrol = (
+    <label className="filter-laporan-group">
+      <span className="filter-laporan-label">{label}</span>
+      <Select
+        aria-label={label}
+        value={pilihan}
+        onChange={(event) => setQuery("cabang", event.currentTarget.value)}
+        options={[
+          ...(bolehSemua
+            ? [{ value: SEMUA_CABANG, label: "Semua cabang dalam wewenang" }]
+            : []),
+          ...daftar.map((c) => ({ value: c.id, label: `${c.kode} ${c.nama}` })),
+        ]}
+      />
+    </label>
+  );
+
+  return { cabangId, nama, kontrol, ringkas: nama };
+}
+
+/** The phone card body: a button when it leads somewhere, a plain card when
+ *  it does not. One shape either way. */
+function Kartu({ onClick, children }: { onClick?: () => void; children: ReactNode }) {
+  if (!onClick) return <div className="kartu-btn is-statis">{children}</div>;
+  return (
+    <button type="button" className="kartu-btn" onClick={onClick}>
+      {children}
+    </button>
   );
 }
 

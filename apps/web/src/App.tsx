@@ -3,7 +3,7 @@
 import { ToastProvider } from "@krakatausteel/ui";
 import { matchRoute, type PageRoute } from "./nav";
 import { hasPermission } from "./permissions";
-import { Dashboard } from "./pages/Dashboard";
+import { Dashboard } from "./pages/dashboard/Dashboard";
 import { Forbidden, NotFound, SessionLoading, SessionUnreachable } from "./pages/Fallbacks";
 import { Login } from "./pages/Login";
 import { Placeholder } from "./pages/Placeholder";
@@ -21,6 +21,8 @@ import { ClosingKolektibilitas } from "./pages/closing/ClosingKolektibilitas";
 import { ClosingPeriode } from "./pages/closing/ClosingPeriode";
 import { PeriodeAkuntansi } from "./pages/closing/PeriodeAkuntansi";
 import { RkaPage } from "./pages/rka/RkaPage";
+import { Integritas } from "./pages/tools/Integritas";
+import { Rekonsiliasi } from "./pages/tools/Rekonsiliasi";
 import { Lpj } from "./pages/nonpumk/Lpj";
 import { MonitoringLpj } from "./pages/nonpumk/MonitoringLpj";
 import { Penilaian } from "./pages/nonpumk/Penilaian";
@@ -131,6 +133,13 @@ const HALAMAN: Record<
   "/nonpumk/monitoring-lpj": (route) => <MonitoringLpj route={route} />,
 
   "/konfigurasi/parameter": (route) => <Parameter route={route} />,
+
+  // Spec 9.6, the two diagnostic screens. Both READ ONLY, both behind their own
+  // permission, and neither carries a control that repairs anything: a finding
+  // is corrected in the module that owns the record, so the ledger keeps one
+  // way in.
+  "/tools/integritas": (route) => <Integritas route={route} />,
+  "/tools/rekonsiliasi": (route) => <Rekonsiliasi route={route} />,
 
   // Spec 8 and spec 9.3. The monthly close: the classification, the checklist
   // and the close itself, and the period register the reopen is performed from.

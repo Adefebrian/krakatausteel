@@ -3075,3 +3075,199 @@ h3 {
     gap: var(--space-1);
   }
 }
+
+/* ------------------------------------------- dashboard and diagnostic KPI */
+
+/*
+ * ONE CARD SHAPE FOR EVERY HEADLINE FIGURE IN THE PRODUCT.
+ *
+ * The dashboard's eleven metrics, the integrity page's four counters and the
+ * reconciliation's four totals all use this body, so a row of cards is one
+ * system rather than a pile of boxes. Three rules do the work:
+ *
+ *   the figure occupies a FIXED height whether it is a number or the sentence
+ *   that explains why there is no number, so a card that cannot answer is the
+ *   same height as one that can;
+ *   the note under it is clamped AND floored to three lines, so a long
+ *   provenance sentence cannot push one card's foot below its neighbour's;
+ *   the foot is one 44px row in both of its states, the drill down control and
+ *   the plain "nothing to trace" line, so the whole row rests on one baseline.
+ */
+.metrik-nilai {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--text-h4) * var(--leading-h4));
+  margin: 0;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-h4);
+  line-height: var(--leading-h4);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+/* An absent figure is a sentence, and it must not look like a figure. */
+.metrik-nilai.is-kosong {
+  font-family: var(--font-sans);
+  font-variant-numeric: normal;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.metrik-catatan {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The three line floor only matters where cards sit side by side. */
+@media (min-width: 641px) {
+  .metrik-catatan {
+    min-height: calc(3 * var(--leading-caption) * 1em);
+  }
+}
+
+.metrik-drill,
+.metrik-tanpa-rincian {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--touch-target);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  text-align: left;
+}
+
+.metrik-drill {
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-accent);
+  font-family: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.metrik-drill:hover {
+  color: var(--color-accent-hover);
+}
+
+.metrik-drill:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.metrik-drill:active {
+  color: var(--color-text);
+}
+
+.metrik-drill:disabled {
+  color: var(--color-text-subtle);
+  cursor: not-allowed;
+}
+
+.metrik-tanpa-rincian {
+  color: var(--color-text-subtle);
+}
+
+/* ------------------------------------------------ the drill down dialog */
+
+.rincian-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.rincian-fakta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.rincian-fakta-baris {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.rincian-fakta-baris dt {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.rincian-fakta-baris dd {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.rincian-jelas,
+.rincian-potong {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+/* The phone card body inside a static list item, at the same rhythm as the
+   ledger cards the report screens already use. */
+.rincian-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+/* ------------------------------------------------ checklist item, desktop */
+
+/*
+ * The verdict badge never shrinks and never wraps under a long title, so nine
+ * integrity checks and ten closing prerequisites read as one list at every
+ * width. The phone layout already pins the same three parts to a grid.
+ */
+.prasyarat-head > .badge {
+  flex: 0 0 auto;
+}
+
+/* A note ABOUT a check rather than the check's own summary: same rhythm, one
+   step quieter, so it cannot be mistaken for the engine's own sentence. */
+.prasyarat-alasan.is-catatan {
+  color: var(--color-text-subtle);
+}
+
+@media (max-width: 640px) {
+  .rincian-fakta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * THE WIDE VARIANT OF THAT CELL, FOR A TABLE WITH FEW COLUMNS.
+ *
+ * The 180px cap above exists so a NINE column list stays inside its shell. A
+ * three column drill-down dialog and a five column reconciliation have room to
+ * spare, and there the cap actively destroys the point of the cell: it clipped
+ * the record id to "3f2b1c88-1111-..." on the one dialog whose whole job is to
+ * let a reader follow a figure to the row behind it. Caught by screenshot, not
+ * by a test.
+ */
+.sel-utama.is-lebar {
+  max-width: 360px;
+}
