@@ -580,3 +580,36 @@ angka). Keduanya sah secara akuntansi; yang tidak sah adalah yang berjalan sekar
 **Pemilik:** pemilik `modules/closing`, dengan konfirmasi tim akuntansi untuk pilihan reversal
 versus selisih. **Batas waktu:** sebelum operator dilatih membuka dan mengulang periode, karena
 sesudah itu cacat ini bisa masuk ke data produksi.
+
+---
+
+## 29. Siapa boleh menutup buku bulanan? DIPUTUSKAN 2026-09-02, TAPI PELAKSANAANNYA LEBIH LUAS DARI YANG DIPUTUSKAN
+
+**Keputusan pemilik repo:** menutup periode jadi wewenang **Admin Pusat saja**. Cabang tetap
+membaca checklist dan menjalankan penilaian kolektibilitas.
+
+**Keadaan sekarang:** `ADMIN_CABANG` mewarisi `admin.closing.periode` dari `APPROVER`, jadi
+admin cabang bisa menjalankan tutup buku selingkup entitas. Membuka kembali sudah hanya Admin
+Pusat (`admin.periode.reopen`).
+
+**Kenapa belum dikerjakan.** Saat mencoba menerapkannya, `admin.closing.periode` ternyata bukan
+hanya menjaga tutup buku. Kode yang sama menjaga **jalankan penyisihan** dan **jalankan akrual
+jasa administrasi** (`modules/closing/service.ts`, tiga `wajibIzin` yang sama). Mencabutnya dari
+cabang, apa adanya, ikut memindahkan kedua perhitungan bulanan itu ke pusat, dan itu bukan yang
+diputuskan: yang mau dipusatkan adalah **pernyataan bahwa bulannya selesai**, bukan aritmetikanya.
+
+Mencabutnya apa adanya bikin 108 test merah, dan semuanya merah karena alasan yang sama:
+fixture menjalankan penyisihan dan akrual sebagai Approver.
+
+**Yang perlu dikerjakan:** pisahkan kodenya. `admin.closing.periode` hanya untuk `tutupPeriode`,
+dan satu kode baru (usulan `admin.closing.hitung`) untuk penyisihan dan akrual, dipegang
+APPROVER dan ADMIN_CABANG. Kolektibilitas sudah punya kodenya sendiri dan tidak berubah.
+
+Perubahan ini menyentuh `modules/auth/permissions.ts`, `modules/closing/service.ts`,
+`apps/web/src/permissions.ts`, seed RBAC, dan fixture closing. Ditunda karena ada agen lain yang
+sedang bekerja di dalam `modules/closing` saat keputusan ini masuk, dan mengubah katalog izin di
+bawah kaki agen yang sedang menulis di modul yang sama adalah cara termurah untuk merusak
+dua pekerjaan sekaligus.
+
+**Pemilik:** pemilik `modules/closing`. **Batas waktu:** sebelum role dibagikan ke pengguna nyata,
+karena mencabut izin yang sudah dipakai orang jauh lebih mahal daripada tidak pernah memberikannya.
