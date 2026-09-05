@@ -47,6 +47,13 @@ export const LOGIN_WINDOW_SECONDS = 300;
 
 const MAX_USERNAME_LENGTH = 64;
 const MAX_PASSWORD_LENGTH = 200;
+
+/**
+ * Minimum length of a password its OWNER chose. Twelve, the same floor
+ * `modules/mitra` uses for a borrower's, because there is no argument for
+ * holding staff to a weaker rule than the people they serve.
+ */
+export const MIN_PANJANG_SANDI = 12;
 /** Same wording for every failure mode. See note 1 in the file header. */
 const KREDENSIAL_SALAH = "Nama pengguna atau kata sandi salah";
 
@@ -74,6 +81,20 @@ export interface SessionPayload {
   roles: readonly string[];
   readOnly: boolean;
   lintasCabang: boolean;
+  /**
+   * True while this account still holds the password an administrator handed
+   * over. The SPA reads it to route straight to the change-password screen;
+   * the SERVER does not trust it for anything, because the enforcement is in
+   * `requireSession` against the principal, not against this payload.
+   */
+  harusGantiSandi: boolean;
+}
+
+export interface GantiSandiInput {
+  sandiLama: string;
+  sandiBaru: string;
+  ip: string | null;
+  userAgent: string | null;
 }
 
 export interface LoginInput {
@@ -110,6 +131,8 @@ export interface AuthService {
   /** Resolves a cookie value into a Principal, or null. Slides the session. */
   resolveSession(sessionId: string): Promise<{ principal: Principal; record: SessionRecord } | null>;
   payloadFor(principal: Principal): Promise<SessionPayload>;
+  /** Replaces the caller's OWN password. The only act a forced-change session may do. */
+  gantiSandi(principal: Principal, input: GantiSandiInput): Promise<void>;
   hashPassword(plain: string): Promise<string>;
   readonly sessions: SessionStore;
 }
@@ -230,6 +253,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       lintasCabang,
       readOnly,
       cabangTersedia,
+      harusGantiSandi: row.harus_ganti_sandi === true,
     };
   }
 
@@ -249,6 +273,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       roles: principal.roles,
       readOnly: principal.readOnly,
       lintasCabang: principal.lintasCabang,
+      harusGantiSandi: principal.harusGantiSandi,
     };
   }
 
@@ -258,6 +283,79 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
     async hashPassword(plain: string): Promise<string> {
       return Bun.password.hash(plain, { algorithm: "argon2id", ...passwordOptions });
+    },
+
+    /**
+     * CHANGE MY OWN PASSWORD. The one write a forced-change session may make,
+     * and the way out of the state an issued account starts in.
+     *
+     * Four properties, each of which is the reason a line is there:
+     *
+     *   * THE OLD PASSWORD IS VERIFIED. Otherwise a stolen session becomes a
+     *     stolen account, permanently, with no second factor in the way.
+     *   * A WRONG OLD PASSWORD COSTS THE ACCOUNT'S LOGIN BUDGET. This endpoint
+     *     verifies the same secret `login` does, so leaving it uncounted would
+     *     make it an unmetered oracle for guessing the current password from
+     *     inside any session. Same reasoning as modules/mitra.
+     *   * THE NEW PASSWORD IS NOT THE OLD ONE AND NOT THE USERNAME. A forced
+     *     change that accepts the same value changes nothing while reporting
+     *     success, which is worse than refusing.
+     *   * BOTH OUTCOMES ARE AUDITED, and neither row carries either password.
+     */
+    async gantiSandi(principal, input) {
+      const lama = typeof input.sandiLama === "string" ? input.sandiLama : "";
+      const baru = typeof input.sandiBaru === "string" ? input.sandiBaru : "";
+      if (baru.length > MAX_PASSWORD_LENGTH || lama.length > MAX_PASSWORD_LENGTH) {
+        throw badRequest("Kata sandi terlalu panjang", {
+          sandiBaru: [`maksimal ${MAX_PASSWORD_LENGTH} karakter`],
+        });
+      }
+
+      const credential = await repo.findCredentialById(db, principal.userId);
+      if (!credential || !credential.aktif) {
+        throw unauthenticated("Sesi tidak valid atau sudah berakhir");
+      }
+
+      const cocok = await Bun.password.verify(lama, credential.password_hash).catch(() => false);
+      if (!cocok) {
+        await loginLimiter.consume(usernameKey(credential.username), perUsername, windowSeconds);
+        await audit.recordFor(
+          { userId: principal.userId, ip: input.ip, userAgent: input.userAgent },
+          {
+            aksi: "auth.ganti_sandi",
+            entitas: "app_user",
+            entitasId: principal.userId,
+            hasil: "DITOLAK",
+            keterangan: "kata sandi lama salah",
+          },
+        );
+        throw badRequest("Kata sandi lama salah", { sandiLama: ["tidak cocok"] });
+      }
+
+      const masalah: string[] = [];
+      if (baru.length < MIN_PANJANG_SANDI) masalah.push(`minimal ${MIN_PANJANG_SANDI} karakter`);
+      if (baru === lama) masalah.push("harus berbeda dari kata sandi lama");
+      if (baru.toLowerCase() === credential.username.toLowerCase()) {
+        masalah.push("tidak boleh sama dengan nama pengguna");
+      }
+      if (masalah.length > 0) {
+        throw badRequest("Kata sandi baru belum memenuhi syarat", { sandiBaru: masalah });
+      }
+
+      const hash = await Bun.password.hash(baru, { algorithm: "argon2id", ...passwordOptions });
+      const n = await repo.simpanSandiSendiri(db, principal.userId, hash);
+      if (n === 0) throw unauthenticated("Sesi tidak valid atau sudah berakhir");
+
+      await audit.recordFor(
+        { userId: principal.userId, ip: input.ip, userAgent: input.userAgent },
+        {
+          aksi: "auth.ganti_sandi",
+          entitas: "app_user",
+          entitasId: principal.userId,
+          hasil: "SUKSES",
+          keterangan: "kata sandi diganti oleh pemiliknya",
+        },
+      );
     },
 
     async login(rawInput: LoginInput): Promise<LoginResult> {

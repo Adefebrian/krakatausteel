@@ -170,7 +170,18 @@ export function createApp(overrides: AppOverrides = {}) {
     keyPrefix: `${keyPrefix}:cfg:`,
   });
   const auditModule = createAuditModule({ db, guards: auth.guards });
-  const organisasi = createOrganisasiModule({ db, guards: auth.guards });
+  // Fase 0's read module, NOW WITH ITS ADMINISTRATION WRITE PATHS (spec 9.4:
+  // Manajemen User, Master Cabang, Master Karyawan). It takes the same `audit`
+  // instance as everything else, so an account being created and the login it
+  // later performs land in one stream; and it takes NO journal port, because
+  // it posts nothing and the cleanest way to keep a module out of the ledger is
+  // to give it no way in.
+  const organisasi = createOrganisasiModule({
+    db,
+    audit,
+    guards: auth.guards,
+    ...(overrides.passwordOptions ? { passwordOptions: overrides.passwordOptions } : {}),
+  });
   // No HTTP surface by design (see modules/nomor/index.ts); exposed here so
   // later phases and the tests get the same instance.
   const nomor = createNomorService({ db });
@@ -193,7 +204,15 @@ export function createApp(overrides: AppOverrides = {}) {
   // login that led to it land in one audit_log stream. The engine writes its
   // rows on the transaction that changed the ledger, so a rolled back posting
   // leaves no row claiming it happened.
-  const jurnal = createJurnalHttpModule({ db, audit, guards: auth.guards });
+  const jurnal = createJurnalHttpModule({
+    db,
+    audit,
+    // The mapping editor writes through the same audit stream; it is a separate
+    // dep only because the engine's own audit port is optional and this one is
+    // not (see modules/jurnal/index.ts).
+    auditMapping: audit,
+    guards: auth.guards,
+  });
   // The installment engine reaches the ledger ONLY through the journal engine
   // instance above, never by writing jurnal rows itself. That is invariant 11,
   // and migration 0020's posting-path trigger refuses any other route.

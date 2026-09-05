@@ -117,10 +117,13 @@ import {
   type StatusJurnal,
 } from "./contract";
 import type { FilterJurnal, JurnalBaca } from "./baca";
+import { PERMISSION_MAPPING, type MappingService } from "./mapping";
 
 export interface JurnalRoutesDeps {
   engine: JurnalEngine;
   baca: JurnalBaca;
+  /** The event-to-journal mapping administration surface (ADR 0004). */
+  mapping: MappingService;
   guards: Guards;
 }
 
@@ -456,7 +459,7 @@ function bacaBodyJurnal(b: Record<string, unknown>): BuatJurnalInput {
 // The router
 // ---------------------------------------------------------------------------
 
-export function createJurnalRoutes({ engine, baca, guards }: JurnalRoutesDeps) {
+export function createJurnalRoutes({ engine, baca, mapping, guards }: JurnalRoutesDeps) {
   const { requireSession, requirePermission, rejectReadOnlyMutation } = guards;
 
   /** The read guard. `jurnal.view` and nothing else; every route on it is a SELECT. */
@@ -478,7 +481,64 @@ export function createJurnalRoutes({ engine, baca, guards }: JurnalRoutesDeps) {
     return id;
   };
 
+  /**
+   * THE MAPPING SURFACE, registered FIRST.
+   *
+   * `/mapping` and `/mapping/usulan/:id/...` would otherwise be swallowed by
+   * `/:id` and by the `/*` catch-all at the bottom of this router, both of
+   * which match anything. Hono resolves in registration order, so a literal
+   * prefix goes above the parameter routes, never below.
+   */
+  const mappingRoutes = new Hono()
+    .get("/", requireSession, requirePermission(PERMISSION_MAPPING), async (c) => {
+      return c.json(await mapping.daftarBerlaku(requirePrincipal(c)));
+    })
+    .get("/usulan", requireSession, requirePermission(PERMISSION_MAPPING), async (c) => {
+      const status = c.req.query("status");
+      return c.json({ data: await mapping.daftarUsulan(requirePrincipal(c), status) });
+    })
+    .post("/usulan", ...ubah(PERMISSION_MAPPING), async (c) => {
+      const b = await tubuh(c);
+      return c.json(
+        await mapping.ajukan(requirePrincipal(c), {
+          eventCode: typeof b.eventCode === "string" ? b.eventCode : "",
+          akunDebitId: typeof b.akunDebitId === "string" ? b.akunDebitId : null,
+          akunKreditId: typeof b.akunKreditId === "string" ? b.akunKreditId : null,
+          debitDariPayload: b.debitDariPayload === true,
+          kreditDariPayload: b.kreditDariPayload === true,
+          jenisJurnal: typeof b.jenisJurnal === "string" ? b.jenisJurnal : "OTOMATIS",
+          keterangan: typeof b.keterangan === "string" ? b.keterangan : null,
+          alasan: typeof b.alasan === "string" ? b.alasan : "",
+        }),
+        201,
+      );
+    })
+    .post("/usulan/:id/setujui", ...ubah(PERMISSION_MAPPING), async (c) => {
+      const b = await tubuh(c);
+      return c.json(
+        await mapping.setujui(
+          requirePrincipal(c),
+          c.req.param("id"),
+          typeof b.catatan === "string" ? b.catatan.slice(0, 500) : null,
+        ),
+      );
+    })
+    .post("/usulan/:id/tolak", ...ubah(PERMISSION_MAPPING), async (c) => {
+      const b = await tubuh(c);
+      return c.json(
+        await mapping.tolak(
+          requirePrincipal(c),
+          c.req.param("id"),
+          typeof b.catatan === "string" ? b.catatan.slice(0, 500) : null,
+        ),
+      );
+    })
+    .post("/usulan/:id/batal", ...ubah(PERMISSION_MAPPING), async (c) => {
+      return c.json(await mapping.batal(requirePrincipal(c), c.req.param("id")));
+    });
+
   return new Hono()
+    .route("/mapping", mappingRoutes)
     // --------------------------------------------------------------- daftar
     //
     // spec 9.4 "Daftar Jurnal": every document with its status, from DRAFT

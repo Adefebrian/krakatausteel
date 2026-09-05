@@ -83,6 +83,31 @@ export function createAuthRoutes(service: AuthService, guards: Guards) {
       return c.body(null, 204);
     })
 
+    /**
+     * CHANGE MY OWN PASSWORD, and the way out of a forced change.
+     *
+     * Behind `requireSession` and NOTHING else: it needs no permission, since
+     * every account owns its own credential, and it must remain reachable to
+     * an account that `requireSession` has otherwise fenced in (see the
+     * forced-change exemption in ./guards.ts). It is also reachable by a
+     * read-only role, for the same reason logging out is: replacing your own
+     * password is not a change to the entity's data.
+     */
+    .post("/ganti-sandi", guards.requireSession, async (c) => {
+      const principal = requirePrincipal(c);
+      const body = await c.req
+        .json<{ sandiLama?: unknown; sandiBaru?: unknown }>()
+        .catch((): Record<string, unknown> => ({}));
+      await service.gantiSandi(principal, {
+        sandiLama: typeof body.sandiLama === "string" ? body.sandiLama : "",
+        sandiBaru: typeof body.sandiBaru === "string" ? body.sandiBaru : "",
+        ip: clientIp(c),
+        userAgent: (c.req.header("user-agent") ?? null)?.slice(0, 512) ?? null,
+      });
+      c.header("Cache-Control", "no-store");
+      return c.json({ ok: true, harusGantiSandi: false }, 200);
+    })
+
     .get("/session", guards.requireSession, async (c) => {
       const principal = requirePrincipal(c);
       return c.json(await service.payloadFor(principal), 200);

@@ -49,6 +49,16 @@ export interface Principal {
   readOnly: boolean;
   /** Branches this principal may act in. One entry unless lintasCabang. */
   cabangTersedia: readonly PrincipalCabang[];
+  /**
+   * True while the account still holds a password an administrator handed
+   * over. Such a session reaches "change my own password", "who am I" and
+   * "log out" and NOTHING else, because the secret it authenticated with is
+   * one two people know. Enforced in `requireSession` (modules/auth/guards.ts)
+   * so it covers every route that needs a session, including ones nobody has
+   * written yet. Same rule `modules/mitra` applies to a borrower's first
+   * password; deliberately not a second scheme.
+   */
+  harusGantiSandi: boolean;
 }
 
 /** The principal for this request, or null when unauthenticated. */

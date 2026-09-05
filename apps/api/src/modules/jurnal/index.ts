@@ -25,6 +25,7 @@
 // decides who gets it.
 import { buatJurnalBaca, type JurnalBaca } from "./baca";
 import { createJurnalEngine, type JurnalEngine, type JurnalEngineDeps } from "./contract";
+import { createMappingService, type AuditMapping, type MappingService } from "./mapping";
 import { createJurnalRoutes } from "./routes";
 import type { Guards } from "../../core/principal";
 
@@ -78,6 +79,9 @@ export function createJurnalModule(deps: JurnalEngineDeps): { engine: JurnalEngi
   return { engine: createJurnalEngine(deps) };
 }
 
+export { createMappingService, PERMISSION_MAPPING } from "./mapping";
+export type { AuditMapping, MappingService, MappingTampil, UsulanTampil } from "./mapping";
+
 export type { JurnalBaca };
 export type {
   BarisJurnalTampil,
@@ -88,6 +92,13 @@ export type {
 
 export interface JurnalModuleDeps extends JurnalEngineDeps {
   guards: Guards;
+  /**
+   * The audit port the MAPPING surface writes through. Separate from the
+   * engine's `PencatatAudit` only because the engine's is optional and this one
+   * is not: a re-mapping with no audit row is precisely the change nobody would
+   * ever be able to explain afterwards.
+   */
+  auditMapping: AuditMapping;
 }
 
 /**
@@ -104,9 +115,15 @@ export interface JurnalModuleDeps extends JurnalEngineDeps {
 export function createJurnalHttpModule(deps: JurnalModuleDeps): {
   engine: JurnalEngine;
   baca: JurnalBaca;
+  mapping: MappingService;
   routes: ReturnType<typeof createJurnalRoutes>;
 } {
   const engine = createJurnalEngine(deps);
   const baca = buatJurnalBaca({ db: deps.db });
-  return { engine, baca, routes: createJurnalRoutes({ engine, baca, guards: deps.guards }) };
+  // The mapping administration surface (ADR 0004, migration 0036). It is built
+  // HERE, next to the engine, because the table it edits is the one the engine
+  // resolves every automatic journal through: the module that owns the mapping
+  // and the module that depends on it must not be two modules.
+  const mapping = createMappingService({ db: deps.db, audit: deps.auditMapping });
+  return { engine, baca, mapping, routes: createJurnalRoutes({ engine, baca, mapping, guards: deps.guards }) };
 }

@@ -21,6 +21,28 @@ export const SESSION_COOKIE = "tjsl_sid";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+/**
+ * The whole surface an account that still holds an administrator-issued
+ * password may reach (migrations/0035). Everything else is refused by
+ * `requireSession` below.
+ *
+ * WHY THESE FOUR. `/auth/ganti-sandi` is the way out; `/auth/logout` must never
+ * be fenced off, or a browser has no exit from a state it cannot leave;
+ * `/auth/session` and `/auth/me` are what the SPA renders the change-password
+ * screen from, and refusing them would leave the user staring at a shell with
+ * no identity and no explanation.
+ *
+ * Nothing that reads or writes entity data belongs here, ever. The password
+ * that opened this session is one two people know, so any act under it is
+ * deniable, and a deniable act on financial data is worse than no act.
+ */
+const WAJIB_GANTI_SANDI_EXEMPT = new Set([
+  "/auth/ganti-sandi",
+  "/auth/logout",
+  "/auth/session",
+  "/auth/me",
+]);
+
 export interface GuardDeps {
   auth: AuthService;
   audit: AuditService;
@@ -58,10 +80,41 @@ export function createGuards({ auth, audit }: GuardDeps): Guards {
     throw error;
   }
 
+  /**
+   * Refuses every path outside `WAJIB_GANTI_SANDI_EXEMPT` for an account that
+   * still holds an administrator-issued password. Throws, or returns.
+   *
+   * Called on BOTH branches of `requireSession`, and that matters: the global
+   * `enforceReadOnlyRoles` resolves the session for every mutating request, so
+   * the "already resolved" branch is the one a POST takes. Checking only after
+   * a fresh resolve would have left exactly the writes unguarded.
+   */
+  async function tolakKalauWajibGantiSandi(c: Context, principal: Principal): Promise<void> {
+    if (!principal.harusGantiSandi) return;
+    if (WAJIB_GANTI_SANDI_EXEMPT.has(c.req.path)) return;
+    await denied(
+      c,
+      forbidden(
+        "Ganti kata sandi Anda dulu. Akun ini masih memakai kata sandi sementara yang " +
+          "diberikan administrator.",
+      ),
+      {
+        aksi: "auth.otorisasi",
+        entitas: "sesi",
+        entitasId: principal.userId,
+        keterangan: `akun masih wajib ganti sandi, menolak ${c.req.method} ${c.req.path}`,
+      },
+    );
+  }
+
   const requireSession: MiddlewareHandler = async (c: Context, next: Next) => {
     // Already resolved by an outer guard on this route: do not pay for a
     // second Redis read plus principal query.
-    if (getPrincipal(c)) return next();
+    const sudahAda = getPrincipal(c);
+    if (sudahAda) {
+      await tolakKalauWajibGantiSandi(c, sudahAda);
+      return next();
+    }
 
     const cookie = getCookie(c, SESSION_COOKIE);
     if (!cookie) {
@@ -80,6 +133,17 @@ export function createGuards({ auth, audit }: GuardDeps): Guards {
       });
     }
     setPrincipal(c, resolved.principal);
+
+    // FORCED PASSWORD CHANGE, enforced in `requireSession` rather than in a
+    // global middleware or per route.
+    //
+    // Here, because this is the one door every route that needs an identity
+    // goes through: a route written in a later phase inherits the rule before
+    // its author thinks about it, exactly like the read-only guard. A global
+    // middleware would have to resolve the session again on public routes and
+    // would slide their TTL as a side effect; a per-route check would be a line
+    // somebody forgets on the one endpoint where forgetting it matters.
+    await tolakKalauWajibGantiSandi(c, resolved.principal);
     return next();
   };
 
@@ -112,7 +176,14 @@ export function createGuards({ auth, audit }: GuardDeps): Guards {
    * session is not a data change, and logging in cannot be gated on the roles
    * of a session that does not exist yet.
    */
-  const READ_ONLY_EXEMPT = new Set(["/auth/login", "/auth/logout"]);
+  const READ_ONLY_EXEMPT = new Set([
+    "/auth/login",
+    "/auth/logout",
+    // Replacing your own credential is not a change to the entity's data, and
+    // an Auditor issued an account like everybody else has to be able to leave
+    // the forced-change state.
+    "/auth/ganti-sandi",
+  ]);
 
   const enforceReadOnlyRoles: MiddlewareHandler = async (c: Context, next: Next) => {
     if (SAFE_METHODS.has(c.req.method)) return next();

@@ -26,6 +26,8 @@ export interface PrincipalRow {
   bumn_id: string;
   roles: string[] | null;
   permissions: string[] | null;
+  /** migrations/0035: still holding the password an administrator issued. */
+  harus_ganti_sandi: boolean;
   /** Extra branches granted through user_role.scope_cabang_id. */
   scope_cabang_ids: string[] | null;
 }
@@ -49,6 +51,18 @@ export interface AuthRepo {
   findCabangByIds(runner: QueryRunner, ids: readonly string[]): Promise<CabangRow[]>;
   currentPeriode(runner: QueryRunner, bumnId: string): Promise<PeriodeRow | null>;
   touchLastLogin(runner: QueryRunner, userId: string): Promise<void>;
+  /**
+   * The hash and the forced-change flag for one user id, for "change my own
+   * password". Separate from `findCredentialByUsername` because that one is
+   * the LOGIN path and is written for a constant-time username lookup.
+   */
+  findCredentialById(runner: QueryRunner, userId: string): Promise<UserCredentialRow | null>;
+  /**
+   * Replaces a password with one the OWNER chose: the forced-change flag drops
+   * and `sandi_diubah_at` moves. An administrator's reset takes the other path
+   * (modules/organisasi), where the timestamp deliberately does not move.
+   */
+  simpanSandiSendiri(runner: QueryRunner, userId: string, passwordHash: string): Promise<number>;
 }
 
 export function createAuthRepo(): AuthRepo {
@@ -74,6 +88,7 @@ export function createAuthRepo(): AuthRepo {
         `SELECT u.id::text        AS user_id,
                 u.username        AS username,
                 u.nama            AS nama,
+                u.harus_ganti_sandi AS harus_ganti_sandi,
                 c.id::text        AS cabang_id,
                 c.kode            AS cabang_kode,
                 c.nama            AS cabang_nama,
@@ -145,6 +160,31 @@ export function createAuthRepo(): AuthRepo {
         [bumnId],
       );
       return rows[0] ?? null;
+    },
+
+    async findCredentialById(runner, userId) {
+      const rows = await runner.query<UserCredentialRow>(
+        `SELECT id::text AS id, username, nama, password_hash, aktif
+           FROM app_user
+          WHERE id = $1 AND deleted_at IS NULL
+          LIMIT 1`,
+        [userId],
+      );
+      return rows[0] ?? null;
+    },
+
+    async simpanSandiSendiri(runner, userId, passwordHash) {
+      const rows = await runner.query<{ id: string }>(
+        `UPDATE app_user
+            SET password_hash = $2,
+                harus_ganti_sandi = false,
+                sandi_diubah_at = now(),
+                updated_by = $1
+          WHERE id = $1 AND deleted_at IS NULL AND aktif
+        RETURNING id::text AS id`,
+        [userId, passwordHash],
+      );
+      return rows.length;
     },
 
     async touchLastLogin(runner, userId) {

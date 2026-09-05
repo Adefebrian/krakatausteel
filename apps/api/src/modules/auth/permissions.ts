@@ -241,6 +241,21 @@ export const PERMISSIONS = [
   // they were separate when they were not.
   "konfigurasi.parameter",
   "konfigurasi.update",
+  // THE EVENT TO JOURNAL MAPPING (ADR 0004, migration 0036), and it is its own
+  // code rather than part of `konfigurasi.master` on purpose.
+  //
+  // `konfigurasi.master` also gates sector names, provinces and the SDG list,
+  // which head office edits as routine data entry. Sharing one code would mean
+  // that granting somebody the right to rename a sector granted them the right
+  // to decide what every future PENCAIRAN_PUMK debits. Separate, for the same
+  // reason `jurnal.reversal` is not `jurnal.post`: the heavier act gets its own
+  // grant, so a future decision to widen one does not silently widen the other.
+  //
+  // Holding it is NOT enough to change a mapping. The change is a maker-checker
+  // (modules/jurnal/mapping.ts): the person who proposes and the person who
+  // approves must be different people, mirrored in the service and enforced by
+  // `trg_ejm_usulan_10_sod`. This code says who may take part at all.
+  "konfigurasi.mapping",
 
   "portal.view",
   "portal.konversi",
