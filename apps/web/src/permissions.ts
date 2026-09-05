@@ -50,6 +50,13 @@ export const PERMISSIONS = [
   "jurnal.reversal",
 
   "laporan.view",
+  // Taking a report OUT of the system, as a file. Its own code, and narrower
+  // than `laporan.view` on the server: a screen is bounded and scoped, a file
+  // is a bulk extract of names, addresses and outstanding per named person
+  // that leaves with no scope check on the far side. Held by AUDITOR and
+  // APPROVER there, so the nav tests must mirror it here or they assert a
+  // different product than the one that ships.
+  "laporan.export",
 
   // Reading the closing evidence (prerequisite checklist, run history, frozen
   // balances) without the right to run anything. Mirrors the server's own code:
@@ -121,6 +128,9 @@ const READ_ONLY: Permission[] = [
   "audit.view",
   "admin.closing.view",
   "admin.rka.view",
+  // Taking the evidence away. An auditor who may read every report but never
+  // export one cannot produce a working paper.
+  "laporan.export",
 ];
 
 /**
@@ -134,6 +144,7 @@ const HANYA_BUKTI: readonly Permission[] = [
   "audit.view",
   "admin.closing.view",
   "admin.rka.view",
+  "laporan.export",
 ];
 
 const LIHAT: Permission[] = READ_ONLY.filter(
@@ -187,6 +198,9 @@ const APPROVER: Permission[] = [
   // is deliberately absent, so a screen that offers "Tutup Periode" to an
   // Approver would be offering a button the server refuses.
   "admin.closing.hitung",
+  // The officer who signs what the entity reports is the officer who produces
+  // the signed artefact. ADMIN_CABANG and ADMIN_PUSAT inherit it from here.
+  "laporan.export",
 ];
 
 const ADMIN_CABANG: Permission[] = [

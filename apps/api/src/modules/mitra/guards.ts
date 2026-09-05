@@ -29,8 +29,23 @@ import { KODE_MITRA, MitraError, type MitraEngine, type MitraPrincipal, type Por
 export const MITRA_COOKIE = "tjsl_mitra";
 /** DIFFERENT CONTEXT KEY FROM `PRINCIPAL_VAR`. Separation 4. */
 export const MITRA_PRINCIPAL_VAR = "mitraPrincipal";
-/** Separation 2: the browser scopes this cookie to the mitra routes alone. */
-export const MITRA_COOKIE_PATH = "/mitra";
+/**
+ * Separation 2: the browser scopes this cookie to the mitra routes alone.
+ *
+ * `/api/mitra`, NOT `/mitra`, and the prefix is load-bearing. A cookie path is
+ * matched by the browser against the URL IT REQUESTED, and the browser never
+ * requests this API at its own mount point: both `apps/web/server.ts` and
+ * `infra/Caddyfile` serve the API under `/api/*` and strip the prefix on the
+ * way in, so the path the browser knows is `/api/mitra/...`.
+ *
+ * Scoped to `/mitra` the cookie is therefore never sent at all: login succeeds,
+ * returns a Set-Cookie the browser stores and never replays, and every request
+ * after it is a 401 forever. Nothing on the server can see that happen, because
+ * from here the request simply arrives without a session. The staff cookie is
+ * `Path=/` and so was never affected, which is exactly why this could ship
+ * unnoticed.
+ */
+export const MITRA_COOKIE_PATH = "/api/mitra";
 
 const POLA_NILAI_COOKIE = /^[A-Za-z0-9!#$%&'*+\-.^_`|~/=:]*$/;
 

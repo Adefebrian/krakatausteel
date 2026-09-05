@@ -385,7 +385,7 @@ describe("mitra: isolasi principal kedua", () => {
     expect((await mintaSebagaiMitra("/mitra/saya", { cookie })).status).toBe(401);
   });
 
-  test("cookie mitra dikirim dengan HttpOnly, SameSite=Lax dan Path=/mitra", async () => {
+  test("cookie mitra dikirim dengan HttpOnly, SameSite=Lax dan Path=/api/mitra", async () => {
     const email = `cookie.${f.suffix}@contoh.local`;
     const m = await buatMitraUji(f.db, { cabangId: f.cabangA.id, nama: "Mitra Cookie", suffix: f.suffix });
     const buat = await f.request("/mitra/akun", {
@@ -399,7 +399,13 @@ describe("mitra: isolasi principal kedua", () => {
     expect(raw).toContain(`${MITRA_COOKIE}=`);
     expect(raw).toContain("HttpOnly");
     expect(raw).toContain("SameSite=Lax");
-    expect(raw).toContain("Path=/mitra");
+    // `/api/mitra`, the path the BROWSER requests, not `/mitra`, the path this
+    // app is mounted at. The proxy strips `/api` on the way in, so a cookie
+    // scoped to the mount point is stored and never replayed, and every request
+    // after a successful login is a 401. Asserted as the exact segment rather
+    // than a substring, because "Path=/api/mitra" contains neither more nor
+    // less than it should and a loose check would pass on either value.
+    expect(raw).toContain("Path=/api/mitra");
     // The staff cookie is never issued by this route.
     expect(raw).not.toContain("tjsl_sid=");
   });

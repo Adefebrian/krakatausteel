@@ -107,7 +107,15 @@ const SESSION_PUSAT = {
   ],
 };
 
-/** Approver: closes a month, and may NOT reopen one. Spec 2's asymmetry. */
+/**
+ * Approver: PREPARES a month and may not close it.
+ *
+ * Changed 2026-09-02 with OPEN-QUESTIONS 29. This session used to hold
+ * `admin.closing.periode`, back when one code gated the assessment, the
+ * provision, the accrual and the close together. Closing is now Admin Pusat
+ * only and `admin.closing.hitung` carries the month-end arithmetic, so an
+ * Approver runs every step up to the close and is refused the close itself.
+ */
 const SESSION_APPROVER = {
   ...DASAR,
   user: { id: "u2", username: "approver", nama: "Rina Wulandari", role: "APPROVER" },
@@ -118,7 +126,7 @@ const SESSION_APPROVER = {
     "laporan.view",
     "admin.closing.view",
     "admin.closing.kolektibilitas",
-    "admin.closing.periode",
+    "admin.closing.hitung",
   ],
 };
 
@@ -558,7 +566,7 @@ describe("Periode Akuntansi: the register, and what a closed month leaves behind
     view.unmount();
   });
 
-  test("an Approver may close a month and still may not reopen one", async () => {
+  test("an Approver may neither close a month nor reopen one", async () => {
     const { mount, textOf } = await import("./testing");
     at("/admin/periode?periode=p-closed");
     stubFetch(handler({ session: SESSION_APPROVER }));
@@ -566,6 +574,28 @@ describe("Periode Akuntansi: the register, and what a closed month leaves behind
 
     expect(textOf(view.container)).toContain("Reopen adalah tindakan Admin Pusat");
     expect(tombol(view.container).some((t) => t.includes("Buka kembali periode"))).toBe(false);
+    view.unmount();
+  });
+
+  /**
+   * OPEN-QUESTIONS 29, decided 2026-09-02. Until then one code gated the
+   * assessment, the provision, the accrual AND the close, so an Approver held
+   * all four. Closing is now Admin Pusat only.
+   *
+   * Asserted as the ABSENCE of the control rather than as a disabled one: the
+   * server refuses the call either way, and a button that is present but always
+   * refused is worse than no button, because it tells a branch officer that
+   * closing is theirs to do and then fails at the last step of the month.
+   */
+  test("an Approver prepares the month but is not offered the close", async () => {
+    const { mount, textOf } = await import("./testing");
+    at("/admin/closing-periode?periode=p-open");
+    stubFetch(handler({ session: SESSION_APPROVER }));
+    const view = await mount(<App />);
+
+    // The checklist is exactly what an Approver comes here to read.
+    expect(textOf(view.container)).toContain("Prasyarat");
+    expect(tombol(view.container).some((t) => t.includes("Tutup periode"))).toBe(false);
     view.unmount();
   });
 });

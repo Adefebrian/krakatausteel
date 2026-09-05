@@ -28,7 +28,7 @@ A mitra is its own principal type, in its own module (`apps/api/src/modules/mitr
 | | staff | mitra |
 |---|---|---|
 | cookie name | `tjsl_sid` | `tjsl_mitra` |
-| cookie path | `/` | `/mitra` |
+| cookie path | `/` | `/api/mitra` |
 | Redis session prefix | `tjsl:sess:` | `tjsl:msess:` |
 | Hono context key | `principal` | `mitraPrincipal` |
 | idle / absolute TTL | 8h / 24h | 30m / 8h |

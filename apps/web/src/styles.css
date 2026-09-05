@@ -760,6 +760,24 @@ h3 {
   max-width: none;
 }
 
+/*
+ * A REPORT PAGE IS A WIDE INSTRUMENT, SO IT OPTS OUT TOO.
+ *
+ * The 860px measure above is right for a page of prose and wrong for a page
+ * whose body is an eight column ageing grid or a province by sector matrix.
+ * And the mismatch was visible before it was reasoned about: the filter row and
+ * the page heading are NOT panels, so they kept the full 1128px column while
+ * every card under them stopped at 860, and a report read as a full width
+ * header sitting over a body that ended two hundred pixels short of it. Found
+ * by measuring a screenshot at 1440, not by a test.
+ */
+.laporan-page > .panel,
+.laporan-page > .page-note,
+.laporan-page > .errorstate,
+.laporan-page > .empty {
+  max-width: none;
+}
+
 .page-head-row {
   display: flex;
   align-items: flex-start;
@@ -3270,4 +3288,1676 @@ h3 {
  */
 .sel-utama.is-lebar {
   max-width: 360px;
+}
+
+/* ===========================================================================
+   OPERATIONAL REPORTS (spec 10.1, 10.2, 10.4)
+   =========================================================================== */
+
+/*
+ * A REPORT TABLE'S HEADERS MAY WRAP. EVERY OTHER TABLE'S MAY NOT.
+ *
+ * `.table thead th` is `white-space: nowrap` for a good reason: a header that
+ * wraps makes a row of eight lists look ragged. On a REPORT it has a cost that
+ * outweighs that, and it was measured rather than argued: a nowrap header is a
+ * hard MINIMUM width for its column, so "Penyisihan dibutuhkan" and "Selisih
+ * terhadap jurnal" set floors no amount of declared width could get under, the
+ * nine column table came to 1341px inside a 1092px box, and "Nilai penyisihan",
+ * the column report 28 exists to show, sat off the right edge at 1440, 1280 and
+ * 1024 alike. Found with a browser, invisible to every test in this repo.
+ *
+ * So on a report page, and only there, the label may take two lines and the
+ * FIGURES keep their nowrap (`.table th.is-numeric`, `.table td.is-numeric`),
+ * which is the part that must never break.
+ */
+.laporan-page .table thead th {
+  white-space: normal;
+  vertical-align: bottom;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  height: auto;
+  min-height: var(--table-header-height);
+  line-height: var(--leading-caption);
+}
+
+/* --------------------------------------------- a naming cell in a table */
+
+/*
+ * THE NAME WRAPS, THE LINE UNDER IT DOES NOT.
+ *
+ * `.sel-utama` clips BOTH lines to one, which is right for a cell whose job is
+ * to not reshape a nine column row and wrong for the cell a reader is scanning.
+ * Two screens proved it in one afternoon: the report index printed "Laporan
+ * Realisasi Penyaluran berdasarkan Provinsi, Kota..." on the page whose entire
+ * job is finding a report by name, and the ageing grid printed "MB-0002 Siti
+ * Aminah Perd...". So the name gets the two lines it needs, and the qualifying
+ * line under it is clamped to one, which keeps every row within one line of its
+ * neighbour without hiding the thing being looked for.
+ */
+.sel-nama {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sel-nama-judul {
+  /* Two lines, then an ellipsis. Unbounded, a forty character partner name
+     made its row four times taller than its neighbours and the list stopped
+     reading as one list. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.sel-nama-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The phone form of the same list. One shape per card, the name given the two
+   lines it needs, the grouping and the availability resting on one baseline. */
+.katalog-kartu-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.katalog-kartu-item {
+  display: flex;
+  min-width: 0;
+}
+
+.katalog-kartu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.katalog-kartu.is-statis {
+  cursor: default;
+}
+
+.katalog-kartu:not(.is-statis):hover {
+  border-color: var(--color-border-strong);
+}
+
+.katalog-kartu:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.katalog-kartu-judul {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+.katalog-kartu-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.katalog-kartu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-3);
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.katalog-kartu-meta {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------------- the two matrices */
+
+/*
+ * A cross tabulation carries TWO figures per cell, a value and a count, and
+ * both are always printed. They stack rather than sit side by side so a row of
+ * twenty sector columns still has a predictable column width, and the count
+ * sits under the value at caption size because the value is the figure a
+ * reader totals and the count is the one they sanity check it against.
+ */
+.matriks-sel {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.matriks-cacah {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/*
+ * The row label column. It is a `th scope="row"`, so it is left aligned, never
+ * wrapped to two lines mid word, and wide enough for a province name without
+ * pushing the numeric columns off the right edge.
+ */
+.matriks-kepala {
+  text-align: left;
+  min-width: 180px;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.matriks-tabel td,
+.matriks-tabel th {
+  vertical-align: top;
+}
+
+/* The phone affordance that opens one row's cells. A real 44px target inside
+   the card's meta slot, never a bare text link. */
+.matriks-buka {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--touch-target);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.matriks-buka:hover {
+  color: var(--color-accent-hover);
+}
+
+.matriks-buka:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.matriks-rincian {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.matriks-rincian-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.matriks-rincian-item:last-child {
+  border-bottom: 0;
+}
+
+.matriks-rincian-item.is-total {
+  font-weight: var(--weight-semibold);
+}
+
+.matriks-rincian-nama {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.matriks-rincian-nilai {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------- the receivable card, report 9 */
+
+/* A sub heading inside a report body, one step under the Panel's own h2, used
+   where one report prints two tables that must stay told apart. */
+.kartu-bagian-judul {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-subhead);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+/* A page level action row that keeps its buttons on one baseline and wraps to
+   a full width column on a phone rather than producing a two line target. */
+.halaman-aksi {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ------------------------------------------------ demographics, report 27 */
+
+/*
+ * Seven distributions, one shape. The cards share a fixed height so a
+ * distribution with three buckets and one with twelve do not produce two card
+ * shapes; the bucket list scrolls inside the card instead of stretching it.
+ */
+.demografi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-4);
+}
+
+/*
+ * EQUAL HEIGHT PER ROW, SET BY THE TALLEST CARD, NOT BY A NUMBER.
+ *
+ * This card used to be `height: 340px` with the bucket list scrolling inside
+ * it. That kept every card identical and hid a figure: the fifth age band and
+ * the fifth sector sat below the fold of their own card, with no scrollbar
+ * anyone would notice, so a report about a population silently dropped two of
+ * its groups. Seen in a screenshot at 1440, invisible to every test.
+ *
+ * A grid row already stretches its items to the tallest one, so dropping the
+ * fixed height gives the same "one shape per row" and loses nothing.
+ */
+.demografi-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.demografi-kartu-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.demografi-kartu-judul {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+.demografi-kartu-sub {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.demografi-ember-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* The list starts directly under the heading on every card, so every card's
+     buckets line up with its neighbour's. The row's own stretch is what puts
+     the bottom edges on one line. */
+}
+
+.demografi-ember {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "head head"
+    "bar persen";
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+
+.demografi-ember-head {
+  grid-area: head;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.demografi-ember-nama {
+  min-width: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.demografi-ember-cacah {
+  flex: 0 0 auto;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+}
+
+/* A flat neutral track and a flat neutral fill. No gradient, no glow: the bar
+   is a second reading of a printed percentage, not an ornament. */
+.demografi-ember-bar {
+  grid-area: bar;
+  display: block;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  overflow: hidden;
+}
+
+.demografi-ember-isi {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
+
+.demografi-ember-persen {
+  grid-area: persen;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.demografi-kosong {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .demografi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .halaman-aksi > * {
+    flex: 1 1 100%;
+  }
+}
+
+/* ===========================================================================
+   THE PUBLIC PORTAL AND THE MITRA AREA (spec 9.5, spec 4.9)
+   ===========================================================================
+
+   TWO SHELLS, ONE RHYTHM, AND NEITHER IS THE STAFF SHELL. They share the app
+   shell pattern with `.shell` (sticky header over safe-area-inset-top, an
+   independently scrolling body, a fixed bottom tab bar over
+   safe-area-inset-bottom on a phone) and they share the token set, so the
+   product reads as one product. They do NOT share a selector with it, because
+   ADR 0019 keeps the two principals apart and a shared rule is how a change
+   meant for staff reshapes the page a borrower or a member of the public sees.
+
+   The rules below are written once and applied to both surfaces through a
+   selector list, so the public portal and the mitra area cannot drift from
+   each other either. */
+
+.publik-shell,
+.mitra-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--color-surface);
+}
+
+.publik-topbar,
+.mitra-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  flex: 0 0 auto;
+  padding-top: env(safe-area-inset-top);
+  background: var(--color-bg);
+  border-bottom: var(--border-weight) solid var(--color-border);
+}
+
+.publik-topbar-row,
+.mitra-topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: var(--shell-topbar-height);
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+
+.publik-brand,
+.mitra-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.publik-mark,
+.mitra-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-text);
+}
+
+.publik-brand-name,
+.mitra-brand-name {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mitra-identitas {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.mitra-identitas-nama {
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.mitra-identitas-kode {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* The desktop navigation. A segmented control, not a menu: three destinations
+   do not need a drawer, and a drawer on three items hides the whole product. */
+.publik-nav,
+.mitra-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+.mitra-nav {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 var(--space-5) var(--space-3);
+  justify-content: flex-start;
+}
+
+.publik-nav-btn,
+.mitra-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-4);
+  border: var(--border-weight) solid transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-body);
+  cursor: pointer;
+}
+
+.publik-nav-btn:hover,
+.mitra-nav-btn:hover {
+  background: var(--color-surface-sunken);
+  color: var(--color-text);
+}
+
+.publik-nav-btn:focus-visible,
+.mitra-nav-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.publik-nav-btn.is-active,
+.mitra-nav-btn.is-active {
+  background: var(--color-accent-weak);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+.publik-main,
+.mitra-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.publik-lebar,
+.mitra-lebar {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+}
+/*
+ * THE PUBLIC COLUMN IS NARROWER THAN THE MITRA ONE, and the reason is what is
+ * in it. The portal is three forms and a page of prose, and a 900px wide box
+ * for a sixteen digit NIK is a box nobody knows how much to type into. The
+ * mitra area is a grid of contract cards and a schedule, which needs the room.
+ * The header keeps the same measure as the body it sits over, so the brand and
+ * the first card start on one line.
+ */
+.publik-topbar-row,
+.publik-lebar {
+  max-width: 720px;
+}
+
+.publik-page,
+.mitra-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.publik-page-head,
+.mitra-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.publik-page-title,
+.mitra-page-title {
+  margin: 0;
+  font-size: var(--text-h4);
+  line-height: var(--leading-h4);
+  font-weight: var(--weight-semibold);
+}
+
+.publik-page-sub,
+.mitra-page-sub {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.publik-kartu,
+.mitra-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+}
+
+.publik-kartu-head,
+.mitra-kartu-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.publik-kartu-judul,
+.mitra-kartu-judul {
+  margin: 0;
+  font-size: var(--text-subhead);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+.publik-kartu-sub,
+.mitra-kartu-sub {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.publik-kartu-body,
+.mitra-kartu-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The action row rests on one baseline across cards of different heights. */
+.publik-kartu-foot,
+.mitra-kartu-foot {
+  margin-top: auto;
+  padding-top: var(--space-3);
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+/* ------------------------------------------------------------------ forms */
+
+.publik-form,
+.mitra-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.publik-langkah {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.publik-aksi {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.publik-pilihan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* A choice is a card sized target, never a bare radio dot next to text: at
+   375px a 16px radio is not a 44px target and the label is what people aim at. */
+.publik-opsi {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.publik-opsi:hover {
+  border-color: var(--color-border-strong);
+}
+
+.publik-opsi.is-active {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-weak);
+}
+
+.publik-opsi:focus-within {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.publik-opsi input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: var(--color-accent);
+}
+
+.publik-opsi-teks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.publik-opsi-judul {
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+.publik-opsi-jelas {
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.publik-catatan,
+.mitra-catatan {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.publik-catatan > svg,
+.mitra-catatan > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.publik-gagal,
+.mitra-gagal {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-weak);
+  color: var(--color-danger);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.publik-gagal > svg,
+.mitra-gagal > svg,
+.mitra-berhasil > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.mitra-berhasil {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-success-border);
+  border-radius: var(--radius-md);
+  background: var(--color-success-weak);
+  color: var(--color-success);
+  font-size: var(--text-body);
+}
+
+/* ------------------------------------------------------- declared documents */
+
+.publik-dokumen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.publik-dokumen-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.publik-dokumen-item {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.publik-dokumen-jenis {
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+}
+
+.publik-dokumen-nama {
+  min-width: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publik-dokumen-hapus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-caption);
+  cursor: pointer;
+}
+
+.publik-dokumen-hapus:hover {
+  color: var(--color-danger);
+}
+
+.publik-dokumen-hapus:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The label is there for a screen reader and for the desk; the icon carries it
+   at a glance. Hidden visually only, never removed from the accessible name. */
+.publik-dokumen-hapus > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.publik-dokumen-tambah {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ------------------------------------------------------------ the receipt */
+
+.publik-tiket {
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-h4);
+  line-height: var(--leading-h4);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.publik-fakta,
+.mitra-ringkas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.publik-fakta-item,
+.mitra-ringkas-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.publik-fakta-item dt,
+.mitra-ringkas-item dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.publik-fakta-item dd,
+.mitra-ringkas-item dd {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.publik-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.publik-status-pesan {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+/* --------------------------------------------------------------- the help */
+
+.publik-tanya {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.publik-tanya-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-4);
+  border-bottom: var(--border-weight) solid var(--color-border);
+}
+
+.publik-tanya-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.publik-tanya-judul {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+.publik-tanya-jawab {
+  margin: 0;
+  max-width: 72ch;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.publik-daftar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.publik-daftar-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.publik-daftar-item > svg {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------------ mitra sign in page */
+
+.mitra-masuk {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: calc(var(--space-6) + env(safe-area-inset-top)) var(--space-4)
+    calc(var(--space-6) + env(safe-area-inset-bottom));
+  background: var(--color-surface);
+}
+
+.mitra-masuk-kotak {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-6);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+}
+
+.mitra-masuk-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mitra-masuk-judul {
+  margin: 0;
+  font-size: var(--text-h4);
+  line-height: var(--leading-h4);
+  font-weight: var(--weight-semibold);
+}
+
+.mitra-masuk-sub,
+.mitra-masuk-catatan {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------------- mitra load states */
+
+.mitra-pesan {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: var(--space-6) var(--space-4);
+  background: var(--color-surface);
+}
+
+.mitra-pesan-kotak {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-6);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  text-align: center;
+}
+
+.mitra-pesan-judul {
+  margin: 0;
+  font-size: var(--text-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+.mitra-pesan-teks,
+.mitra-muat {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.mitra-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-5);
+  border: var(--border-weight) solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.mitra-btn.is-utama {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+.mitra-btn:hover {
+  border-color: var(--color-primary-hover);
+}
+
+.mitra-btn.is-utama:hover {
+  background: var(--color-primary-hover);
+}
+
+.mitra-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.mitra-muat-gagal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-weak);
+}
+
+.mitra-muat-gagal-judul {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  color: var(--color-danger);
+}
+
+.mitra-muat-gagal-teks {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text);
+}
+
+.mitra-kosong {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.mitra-kosong-ikon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+}
+
+.mitra-kosong-judul {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+.mitra-kosong-teks {
+  margin: 0;
+  max-width: 52ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+/* An ABSENT value, printed as words. Never blank, and never sent through the
+   money formatter, which would call a legitimately empty field unreadable. */
+.mitra-kosong-nilai {
+  color: var(--color-text-subtle);
+  font-weight: var(--weight-regular);
+}
+
+/* ------------------------------------------------------------- mitra akad */
+
+.mitra-akad-list,
+.mitra-baris-list,
+.mitra-ringkas-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mitra-akad-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+
+.mitra-akad-item {
+  display: flex;
+  min-width: 0;
+}
+
+/* ONE SHAPE FOR EVERY CARD: the same five parts in the same places, the
+   outstanding block pinned to the bottom with margin-top:auto, so a long
+   contract number cannot make one card taller than its neighbour. */
+.mitra-akad-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.mitra-akad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mitra-akad-no {
+  min-width: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mitra-akad-fakta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.mitra-akad-fakta-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mitra-akad-fakta-item dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.mitra-akad-fakta-item dd {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+.mitra-akad-sisa {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-3);
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.mitra-akad-sisa-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.mitra-akad-sisa-nilai {
+  text-align: right;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+.mitra-akad-buka {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.mitra-akad-buka:hover {
+  background: var(--color-accent-weak);
+  border-color: var(--color-accent-border);
+}
+
+.mitra-akad-buka:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.mitra-kembali {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-body);
+  cursor: pointer;
+}
+
+.mitra-kembali:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.mitra-angka-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.mitra-angka {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.mitra-angka-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.mitra-angka-nilai {
+  font-size: var(--text-subhead);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+.mitra-ringkas-baris {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-weight) solid var(--color-border);
+}
+
+.mitra-ringkas-list > .mitra-ringkas-baris:last-child {
+  border-bottom: 0;
+}
+
+.mitra-ringkas-baris-no {
+  min-width: 0;
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mitra-ringkas-baris-nilai {
+  text-align: right;
+  font-weight: var(--weight-semibold);
+}
+
+/* ------------------------------------------------------------ mitra tables */
+
+.mitra-tabel-bungkus {
+  overflow-x: auto;
+}
+
+.mitra-tabel {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+}
+
+/*
+ * The caption NAMES the table for assistive technology, and the card's own
+ * heading names it on screen, so printing both put two headings on one table.
+ * Hidden visually, never removed: a data table with no accessible name is a
+ * grid of numbers a screen reader cannot introduce.
+ */
+.mitra-tabel-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mitra-tabel th,
+.mitra-tabel td {
+  padding: var(--space-3);
+  border-bottom: var(--border-weight) solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.mitra-tabel thead th {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.mitra-tabel .is-numeric {
+  text-align: right;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  white-space: nowrap;
+}
+
+.mitra-sub-angka {
+  display: block;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* The phone form of the same rows. Hidden on a desk; the table is hidden on a
+   phone. One array drives both, so they cannot disagree. */
+.mitra-baris-list {
+  display: none;
+}
+
+.mitra-baris-item {
+  display: flex;
+  min-width: 0;
+}
+
+.mitra-baris-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.mitra-baris-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mitra-baris-judul {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+.mitra-baris-sub,
+.mitra-baris-meta {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.mitra-baris-nilai {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.mitra-baris-nilai-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.mitra-baris-nilai-val {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+/* ------------------------------------------------------------- the tab bar */
+
+.publik-tabbar,
+.mitra-tabbar {
+  display: none;
+}
+
+.publik-tab,
+.mitra-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--touch-target);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-caption);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.publik-tab-label,
+.mitra-tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publik-tab.is-active,
+.mitra-tab.is-active {
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+.publik-tab:focus-visible,
+.mitra-tab:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+@media (max-width: 900px) {
+  .publik-dokumen-item,
+  .publik-dokumen-tambah {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* THE SCHEDULE BECOMES CARDS AT 900, NOT AT 640, and the difference was
+     found by measuring rather than by looking: the seven column instalment
+     table is 778px wide, so at 768 it still had to be dragged sideways inside
+     its own wrapper while the page itself looked fine. A table a reader has to
+     scroll to reach the amount due is a table that does not answer the
+     question it was opened for. */
+  .mitra-tabel-bungkus {
+    display: none;
+  }
+  .mitra-baris-list {
+    display: flex;
+  }
+}
+
+@media (max-width: 360px) {
+  /* Two facts side by side stop fitting a rupiah figure here, and a money
+     value broken across two lines is harder to read than a taller card. */
+  .mitra-akad-fakta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  /* THE APP SHELL ON A PHONE: the header nav becomes the bottom tab bar, the
+     content scrolls on its own, and the last card clears the bar. */
+  .publik-nav,
+  .mitra-nav {
+    display: none;
+  }
+  .publik-topbar-row,
+  .mitra-topbar-row {
+    padding: 0 var(--space-4);
+  }
+  .publik-lebar,
+  .mitra-lebar {
+    padding: var(--space-4) var(--space-4)
+      calc(var(--shell-tabbar-height) + var(--space-6) + env(safe-area-inset-bottom));
+  }
+  .publik-tabbar,
+  .mitra-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    align-items: stretch;
+    height: calc(var(--shell-tabbar-height) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--color-bg);
+    border-top: var(--border-weight) solid var(--color-border);
+  }
+  .publik-kartu,
+  .mitra-kartu {
+    padding: var(--space-4);
+  }
+  .publik-tiket {
+    font-size: var(--text-subhead);
+  }
+  .mitra-akad-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mitra-identitas-nama {
+    max-width: 140px;
+  }
+  .publik-aksi > * {
+    flex: 1 1 100%;
+  }
 }

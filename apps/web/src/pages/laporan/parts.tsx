@@ -112,6 +112,30 @@ export function NilaiUang({ nilai }: { nilai: string | null | undefined }) {
 }
 
 /**
+ * A figure that is ALLOWED TO BE ABSENT, and prints why instead of a marker.
+ *
+ * `Nilai` treats a missing figure as unreadable and prints "tidak sah", which
+ * is right for a statement line that must always have a number and wrong for a
+ * column that legitimately has none: a sector with no budget line has NO
+ * anggaran, and "tidak sah" on that row would send an operator hunting a data
+ * fault that is not there. Once a reader sees that marker where it does not
+ * belong they stop trusting it everywhere, so absence gets its own words.
+ */
+export function NilaiAtau({
+  angka,
+  kosong,
+}: {
+  angka: Angka | null | undefined;
+  /** What an absent figure means here, e.g. "Tidak dianggarkan". */
+  kosong: string;
+}) {
+  if (angka === null || angka === undefined) {
+    return <span className="angka-kosong">{kosong}</span>;
+  }
+  return <Nilai angka={angka} />;
+}
+
+/**
  * A percentage of achievement.
  *
  * NULL IS NOT ZERO, and this is the one place on a variance report where the
@@ -488,6 +512,8 @@ export function HalamanLaporan<T>({
   hasil,
   judul,
   sumber,
+  crumb = "Laporan Akuntansi",
+  diamLabel,
   aksi,
   sebelum,
   children,
@@ -497,6 +523,10 @@ export function HalamanLaporan<T>({
   hasil: HasilApi<T>;
   judul: string;
   sumber: string;
+  /** Which of spec 10's four groupings this report belongs to. */
+  crumb?: string;
+  /** What to say when the report has deliberately not been asked for yet. */
+  diamLabel?: string;
   aksi?: ReactNode;
   /** A panel that has to be seen whether or not the report itself loaded, e.g.
    *  the failure of a reference read the report cannot be asked for without. */
@@ -506,7 +536,7 @@ export function HalamanLaporan<T>({
   return (
     <div className="page laporan-page">
       <header className="page-head">
-        <p className="page-crumb">Laporan Akuntansi</p>
+        <p className="page-crumb">{crumb}</p>
         <div className="page-head-row">
           <div className="page-head-text">
             <h1 className="page-title">{route.title}</h1>
@@ -525,7 +555,7 @@ export function HalamanLaporan<T>({
           hasil={hasil}
           judul={judul}
           sumber={sumber}
-          diamLabel="Pilih periode terlebih dahulu untuk membuka laporan ini."
+          diamLabel={diamLabel ?? "Pilih periode terlebih dahulu untuk membuka laporan ini."}
         >
           {children}
         </Muat>

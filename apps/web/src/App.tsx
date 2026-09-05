@@ -9,14 +9,7 @@ import { Login } from "./pages/Login";
 import { Placeholder } from "./pages/Placeholder";
 import { Parameter } from "./pages/konfigurasi/Parameter";
 import { ReportCatalog } from "./pages/ReportCatalog";
-import { AktivitasPage } from "./pages/laporan/Aktivitas";
-import { ArusKasPage } from "./pages/laporan/ArusKas";
-import { BaganAkunPage } from "./pages/laporan/BaganAkun";
-import { BukuBesarPage } from "./pages/laporan/BukuBesar";
-import { NeracaLajurPage } from "./pages/laporan/NeracaLajur";
-import { PerubahanAsetNetoPage } from "./pages/laporan/PerubahanAsetNeto";
-import { PosisiKeuanganPage } from "./pages/laporan/PosisiKeuangan";
-import { RkaVsRealisasiPage } from "./pages/laporan/RkaVsRealisasi";
+import { LAYAR_LAPORAN } from "./pages/laporan/layar";
 import { ClosingKolektibilitas } from "./pages/closing/ClosingKolektibilitas";
 import { ClosingPeriode } from "./pages/closing/ClosingPeriode";
 import { PeriodeAkuntansi } from "./pages/closing/PeriodeAkuntansi";
@@ -49,7 +42,9 @@ import { ReviewChecker } from "./pages/pumk/ReviewChecker";
 import { Reschedule } from "./pages/pumk/Reschedule";
 import { Simulasi } from "./pages/pumk/Simulasi";
 import { SurveyForm } from "./pages/pumk/SurveyForm";
-import { REPORT_GROUPS } from "./reports";
+import { MitraApp, adalahJalurMitra } from "./mitra/MitraApp";
+import { PortalPublik, adalahJalurPortal } from "./portal/PortalPublik";
+import { REPORT_GROUPS, REPORTS, reportPath } from "./reports";
 import { RouterProvider, useRouter } from "./router";
 import { SessionProvider, useSession } from "./session";
 import { AppShell } from "./shell/AppShell";
@@ -57,12 +52,42 @@ import { AppShell } from "./shell/AppShell";
 export function App() {
   return (
     <RouterProvider>
-      <SessionProvider>
-        <ToastProvider>
-          <Root />
-        </ToastProvider>
-      </SessionProvider>
+      <ToastProvider>
+        <Permukaan />
+      </ToastProvider>
     </RouterProvider>
+  );
+}
+
+/**
+ * WHICH OF THE THREE SURFACES THIS APPLICATION IS, DECIDED BEFORE ANYTHING
+ * ELSE IS MOUNTED.
+ *
+ * The server has three principals and ADR 0019 keeps them apart at every level
+ * it has: a staff session, a mitra session with its own cookie and its own
+ * store, and an anonymous public caller with no session at all. The frontend
+ * has to make the same split or it quietly reunifies them.
+ *
+ * SO `SessionProvider` IS MOUNTED ONLY ON THE STAFF SURFACE. A visitor on
+ * /pengajuan never fires `GET /auth/session`, never lands on the staff login
+ * screen when it answers 401, and never has a staff cookie attached to their
+ * application; a mitra on /mitra gets ../mitra/sesi.tsx and nothing of the
+ * staff bootstrap at all. `ToastProvider` sits above all three because it is a
+ * presentation concern with no authority in it.
+ *
+ * THE ORDER MATTERS AND IT IS THE ORDER OF AUTHORITY: public first, mitra
+ * second, staff last. The staff app is the only one that gets a path it did
+ * not claim, which is what makes an unknown /pengajuan-something a staff 404
+ * rather than a public page nobody built.
+ */
+function Permukaan() {
+  const { path } = useRouter();
+  if (adalahJalurPortal(path)) return <PortalPublik />;
+  if (adalahJalurMitra(path)) return <MitraApp />;
+  return (
+    <SessionProvider>
+      <Root />
+    </SessionProvider>
   );
 }
 
@@ -156,18 +181,25 @@ const HALAMAN: Record<
   "/admin/rka-nonpumk": (route) => <RkaPage route={route} jenis="NON_PUMK" />,
   "/admin/rka-keuangan": (route) => <RkaPage route={route} jenis="KEUANGAN" />,
 
-  // Spec 10.3 reports 16 to 20, 22, 23 and 24. Every other entry in the
-  // catalogue still falls through to Placeholder, which is what keeps the
-  // unbuilt reports honest instead of rendering an empty table.
-  "/laporan/bagan-akun": (route) => <BaganAkunPage route={route} />,
-  "/laporan/laporan-aktivitas": (route) => <AktivitasPage route={route} />,
-  "/laporan/laporan-arus-kas": (route) => <ArusKasPage route={route} />,
-  "/laporan/laporan-posisi-keuangan": (route) => <PosisiKeuanganPage route={route} />,
-  "/laporan/perubahan-aset-neto": (route) => <PerubahanAsetNetoPage route={route} />,
-  "/laporan/buku-besar": (route) => <BukuBesarPage route={route} />,
-  "/laporan/neraca-lajur": (route) => <NeracaLajurPage route={route} />,
-  "/laporan/rka-vs-realisasi": (route) => <RkaVsRealisasiPage route={route} />,
+  // Spec 10's thirty one reports are NOT listed one by one here. Their routes
+  // are derived below from ./pages/laporan/layar.tsx, the same table
+  // ./pages/ReportCatalog.tsx asks whether a catalogue entry is openable, so
+  // "reachable by URL" and "linked from the index" cannot drift apart. A
+  // report with no screen yet has no entry there and falls through to
+  // Placeholder, which is what keeps it honest instead of rendering an empty
+  // table.
+  ...rutaLaporan(),
 };
+
+/** One route per report that HAS a screen, keyed by its path in ./reports.ts. */
+function rutaLaporan(): Record<string, (route: PageRoute) => JSX.Element> {
+  const tabel: Record<string, (route: PageRoute) => JSX.Element> = {};
+  for (const report of REPORTS) {
+    const gambar = LAYAR_LAPORAN[report.no];
+    if (gambar) tabel[reportPath(report.slug)] = gambar;
+  }
+  return tabel;
+}
 
 function PageOutlet() {
   const { path } = useRouter();
