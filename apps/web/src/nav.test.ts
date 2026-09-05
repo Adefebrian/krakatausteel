@@ -16,7 +16,11 @@ function labels(permissions: readonly string[], groupId: string): string[] {
 }
 
 describe("navigation grouping", () => {
-  test("groups follow spec section 9, in spec order", () => {
+  test("groups follow spec section 9, in spec order, with the optional layer last", () => {
+    // The first nine are spec section 9's own order and nothing may reorder
+    // them. "Asisten" is spec 12's optional layer (Fase 8) and it is LAST on
+    // purpose: it is switched off by default, so it sits after every group the
+    // product is whole without.
     expect(NAV_GROUPS.map((group) => group.label)).toEqual([
       "Dashboard",
       "Pendanaan UMK",
@@ -27,6 +31,23 @@ describe("navigation grouping", () => {
       "Konfigurasi",
       "Portal",
       "Tools",
+      "Asisten",
+    ]);
+  });
+
+  test("the assistant's two pages are held by different people, mirroring the server", () => {
+    // Filling a form faster and deciding which entries to read first are
+    // different jobs. A Maker who could open the review queue, or a Checker who
+    // could open the document assistant, would be a menu asserting a product
+    // the server refuses.
+    expect(labels(PERMISSIONS_BY_ROLE.MAKER, "asisten")).toEqual(["Asisten Dokumen"]);
+    expect(labels(PERMISSIONS_BY_ROLE.CHECKER, "asisten")).toEqual(["Antrean Anomali"]);
+    expect(labels(PERMISSIONS_BY_ROLE.APPROVER, "asisten")).toEqual(["Antrean Anomali"]);
+    // Read only, and the queue is one more read over journals it may open.
+    expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "asisten")).toEqual(["Antrean Anomali"]);
+    expect(labels(PERMISSIONS_BY_ROLE.ADMIN_PUSAT, "asisten")).toEqual([
+      "Asisten Dokumen",
+      "Antrean Anomali",
     ]);
   });
 

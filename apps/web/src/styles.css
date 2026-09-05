@@ -4961,3 +4961,544 @@ h3 {
     flex: 1 1 100%;
   }
 }
+
+/* ===========================================================================
+   ASISTEN (spec 12, Fase 8)
+   ===========================================================================
+
+   Two screens, one system, and the whole visual argument is that NOTHING HERE
+   IS A SAVED VALUE. There is no accent fill, no badge that reads as approval,
+   and no card that borrows the shape of a record. The proposal cards are
+   ordinary form cards on white; the only tinted surface on either page is the
+   one a person deliberately ticked, and it is the same quiet accent wash the
+   selected states elsewhere in the product use.
+
+   Every card in each grid shares ONE shape: same padding, same radius, same
+   border weight, the repeated element (the tick, the weight) pinned with
+   margin-top:auto, and the variable content (a quoted span, a free text
+   keterangan) clamped, so nothing a model or a bookkeeper wrote can reshape one
+   card against its neighbour. */
+
+/* -------------------------------------------------- the switched off state */
+
+/*
+ * OFF IS NOT BROKEN, AND IT MUST NOT LOOK BROKEN. This panel is deliberately
+ * built out of the same neutral surface as every other panel rather than out of
+ * the error tokens: the endpoints answered, correctly, with an empty result.
+ * The three lines are the fact, what to do instead, and why it is not a bug, in
+ * that order, because a reader who came here to do a job needs the second line
+ * more than the first.
+ */
+.asisten-mati .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.asisten-mati-kalimat {
+  margin: 0;
+  max-width: 82ch;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text);
+}
+
+.asisten-mati-lanjut {
+  margin: 0;
+  max-width: 82ch;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.asisten-mati-teknis {
+  margin: 0;
+  max-width: 82ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-subtle);
+}
+
+/* ------------------------------------------------------------- the request */
+
+.asisten-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* One shape for every inline notice on these two pages, whatever it is saying.
+   The tone is carried by the icon and by the words, never by colour alone. */
+.asisten-peringatan {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-caution-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-caution-weak);
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text);
+}
+
+.asisten-peringatan.is-selesai {
+  border-color: var(--color-success-border);
+  background: var(--color-success-weak);
+}
+
+.asisten-peringatan svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.asisten-keputusan-ringkas {
+  margin: 0 0 var(--space-3);
+  max-width: 82ch;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text);
+}
+
+/* ------------------------------------------------------------- fact lists */
+
+.asisten-fakta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.asisten-fakta-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.asisten-fakta-item dt {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.asisten-fakta-item dd {
+  margin: 0;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------- one suggestion */
+
+/*
+ * ELEVEN PROPOSED FIELDS AS ONE SYSTEM.
+ *
+ * A CSS grid row already stretches its cells to the tallest, and the tick is
+ * pinned with margin-top:auto, so the "Pakai nilai ini" control of every card
+ * in a row rests on one baseline no matter how long the quoted span was. The
+ * quote itself is clamped to two lines and the position line to one, which is
+ * what stops a model's answer from deciding the height of the page.
+ */
+.usulan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usulan-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+/* The ONE tinted card on this page, and a person put it there by ticking it. */
+.usulan-item.is-dipakai {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-weak);
+}
+
+/*
+ * NO DEAD CELL AT THE END OF THE GRID. A document schema has an odd number of
+ * fields as often as an even one (PROPOSAL has eleven, LPJ has seven), and a
+ * two column grid then leaves half a panel width of nothing under the last
+ * card. The odd last card takes the whole row instead: same padding, same
+ * radius, same internal order, one step wider.
+ */
+.usulan-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+/*
+ * THE HEAD ROW IS ONE HEIGHT WHETHER OR NOT THE FIELD HAS A BADGE. A field the
+ * assistant proposed nothing for carries no citation verdict, so its head row
+ * was two pixels shorter than its neighbour's and every line under it sat two
+ * pixels high. Invisible to a test, visible side by side at 1440.
+ */
+.usulan-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 28px;
+}
+
+.usulan-head > .badge {
+  flex: 0 0 auto;
+}
+
+.usulan-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.usulan-keyakinan {
+  margin: 0;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/*
+ * THE QUOTED SPAN IS UNTRUSTED TEXT FROM AN APPLICANT'S DOCUMENT. It is
+ * rendered as a text node by React, and here it is also boxed and clamped, so a
+ * quote of any length occupies the same two lines and cannot be dressed up to
+ * look like the page's own words.
+ */
+.usulan-kutipan {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.usulan-posisi {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.usulan-catatan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* Pinned to the foot of the card, and a real 44px target: this tick is the
+   only act on the page that means "I will use this value". */
+.usulan-pakai {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: auto;
+  min-height: var(--touch-target);
+  padding-top: var(--space-2);
+  border-top: var(--border-weight) solid var(--color-border);
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.usulan-pakai input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-accent);
+}
+
+/* ----------------------------------------------------------- the rule book */
+
+.aturan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The same rule for the rule book, for the same reason: the catalogue ships
+   eight rules today and nothing guarantees the next one keeps it even. */
+.aturan-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.aturan-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.aturan-head,
+.temuan-head,
+.anomali-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.aturan-judul,
+.temuan-judul {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.aturan-bobot,
+.temuan-bobot,
+.anomali-skor {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.aturan-bobot-label,
+.temuan-bobot-label,
+.anomali-skor-label {
+  color: var(--color-text-subtle);
+}
+
+.aturan-bobot-val,
+.temuan-bobot-val,
+.anomali-skor-val {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+/* Clamped to three lines so eight rule cards read as one grid rather than as
+   eight paragraphs of different lengths. */
+.aturan-jelas {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.aturan-sumber {
+  margin-top: auto;
+  margin-bottom: 0;
+  padding-top: var(--space-2);
+  border-top: var(--border-weight) solid var(--color-border);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+/* ------------------------------------------------------------ the queue */
+
+.anomali-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * A FLAGGED JOURNAL IS A VALID JOURNAL, and the card says so by looking like
+ * every other record card in the product: neutral border, white ground, no
+ * warning wash. The score is a figure in the head row, not a stamp.
+ */
+.anomali-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.anomali-nomor {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.anomali-meta {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* A bookkeeper's free text. Clamped to two lines for the same reason a model's
+   quote is: nothing written elsewhere decides the shape of this list. */
+.anomali-keterangan {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.anomali-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-weight) solid var(--color-border);
+  font-size: var(--text-caption);
+}
+
+.anomali-total-label {
+  color: var(--color-text-subtle);
+}
+
+.anomali-total-val {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.temuan-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.temuan-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.temuan-alasan {
+  margin: 0;
+  max-width: 82ch;
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+/* One line per journal card, pinned to its foot, so the whole queue rests on
+   one baseline whether a journal fired one rule or four. */
+.anomali-catatan {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: auto 0 0;
+  padding-top: var(--space-2);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.anomali-catatan svg {
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------ breakpoints */
+
+@media (max-width: 1024px) {
+  .asisten-fakta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  /* One column well before the phone breakpoint: a proposed value sits in a
+     text input, and two inputs side by side stop being comfortable long before
+     the layout stops fitting. */
+  .usulan-grid,
+  .aturan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .asisten-fakta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .usulan-item,
+  .aturan-item,
+  .anomali-item {
+    padding: var(--space-3);
+  }
+  /* A head row with a badge in it wraps to two lines rather than squeezing the
+     label to three characters. */
+  .usulan-head {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+  .anomali-head,
+  .temuan-head,
+  .aturan-head {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  /* The submit row is one full width target per button on a phone, so nothing
+     on either page is a two line tap. */
+  .asisten-form .form-actions-row > *,
+  .asisten-keputusan-ringkas + .form-actions-row > * {
+    flex: 1 1 100%;
+  }
+}

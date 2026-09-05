@@ -14,6 +14,8 @@ import { ClosingKolektibilitas } from "./pages/closing/ClosingKolektibilitas";
 import { ClosingPeriode } from "./pages/closing/ClosingPeriode";
 import { PeriodeAkuntansi } from "./pages/closing/PeriodeAkuntansi";
 import { RkaPage } from "./pages/rka/RkaPage";
+import { AntreanAnomali } from "./pages/ai/AntreanAnomali";
+import { AsistenDokumen } from "./pages/ai/AsistenDokumen";
 import { Integritas } from "./pages/tools/Integritas";
 import { Rekonsiliasi } from "./pages/tools/Rekonsiliasi";
 import { Lpj } from "./pages/nonpumk/Lpj";
@@ -165,6 +167,17 @@ const HALAMAN: Record<
   // way in.
   "/tools/integritas": (route) => <Integritas route={route} />,
   "/tools/rekonsiliasi": (route) => <Rekonsiliasi route={route} />,
+
+  // Spec 12, Fase 8. The assistant, and both halves of it are OFF by default.
+  // Neither page is hidden behind the flag: with the layer off both open and
+  // say so in words, because a screen that simply is not there cannot tell a
+  // Maker why the button they were promised is missing.
+  //
+  // NEITHER OF THEM WRITES A BUSINESS RECORD. The extraction page's only POSTs
+  // are the extraction itself and the confirmation of a suggestion, and both
+  // land in `ai_saran` and nowhere else; the anomaly page is entirely GETs.
+  "/ai/ekstraksi": (route) => <AsistenDokumen route={route} />,
+  "/ai/anomali": (route) => <AntreanAnomali route={route} />,
 
   // Spec 8 and spec 9.3. The monthly close: the classification, the checklist
   // and the close itself, and the period register the reopen is performed from.

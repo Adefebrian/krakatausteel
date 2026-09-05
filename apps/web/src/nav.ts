@@ -1014,6 +1014,55 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       },
     ],
   },
+  /**
+   * Spec 12, Fase 8. LAST IN THE LIST ON PURPOSE, and it is not an aesthetic
+   * choice: this layer is optional and switched OFF by default, so it must sit
+   * after every group the product is whole without. The nine groups above are
+   * spec section 9's own order and nothing here reorders them.
+   *
+   * TWO PAGES, TWO PERMISSIONS, NOT INTERCHANGEABLE. Filling a form faster and
+   * deciding which entries to read first are different jobs held by different
+   * people, so a Maker sees only the document assistant and a Checker sees
+   * only the review queue. With the flag off both pages still open and both
+   * say so in words; that is the honest answer and it is why neither is hidden
+   * behind the flag.
+   */
+  {
+    id: "asisten",
+    label: "Asisten",
+    icon: "search",
+    items: [
+      {
+        path: "/ai/ekstraksi",
+        label: "Asisten Dokumen",
+        title: "Asisten Pembacaan Dokumen",
+        permission: "ai.ekstraksi",
+        summary:
+          "Menempel teks dokumen lalu membaca usulan isian beserta keyakinan dan potongan teks sumbernya. Usulan tidak pernah tersimpan sendiri, Anda yang memutuskan dan mengisi formulir aslinya.",
+        willContain: [
+          "Pilihan jenis dokumen: proposal, invoice, LPJ, KTP, NPWP, dan NIB",
+          "Setiap usulan menampilkan keyakinan dan potongan teks yang dibacanya",
+          "Usulan yang potongan teksnya tidak ditemukan ditandai sebagai belum terbukti",
+          "Ringkasan apa yang dikirim ke model, termasuk jumlah identitas yang disamarkan",
+          "Keputusan Anda dicatat pada log saran, tanpa membuat dokumen apa pun",
+        ],
+      },
+      {
+        path: "/ai/anomali",
+        label: "Antrean Anomali",
+        title: "Antrean Tinjauan Anomali Jurnal",
+        permission: "ai.anomali",
+        summary:
+          "Urutan baca untuk jurnal yang sudah diposting pada satu periode, dari yang paling layak ditinjau ulang. Alat bantu urutan, bukan penolakan: jurnal yang ditandai tetap jurnal yang sah.",
+        willContain: [
+          "Filter periode dan cabang, dengan cabang di luar wewenang ditolak server",
+          "Delapan aturan deterministik beserta bobotnya, tanpa model bahasa",
+          "Setiap temuan menyertakan angka yang dipakai menghitungnya",
+          "Skor hanya menentukan urutan baca, tidak menahan closing atau posting",
+        ],
+      },
+    ],
+  },
 ];
 
 /** Every route in the product, module pages and report pages alike. */

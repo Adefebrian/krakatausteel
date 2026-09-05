@@ -96,6 +96,16 @@ export const PERMISSIONS = [
   "tools.rekonsiliasi",
   "tools.integritas",
 
+  // Spec 12, Fase 8. TWO CODES AND NOT ONE, mirroring the server: the two
+  // halves of the assistant serve different people at different moments.
+  // `ai.ekstraksi` speeds up the Maker's data entry, `ai.anomali` orders the
+  // Checker's and the Approver's reading. They were absent from this mirror
+  // while the server already shipped them, and the parity test only enforces
+  // the web list being a SUBSET, so nothing was red and the menu this file
+  // drives was quietly smaller than the product.
+  "ai.ekstraksi",
+  "ai.anomali",
+
   "audit.view",
 ] as const;
 
@@ -131,6 +141,12 @@ const READ_ONLY: Permission[] = [
   // Taking the evidence away. An auditor who may read every report but never
   // export one cannot produce a working paper.
   "laporan.export",
+  // The anomaly review queue (spec 12 priority 2). It is a GET over journals
+  // the Auditor may already open, and ordering them by which deserves reading
+  // first is exactly what an attestation does. Listed in `HANYA_BUKTI` below
+  // so it does NOT flow to every operational role through `LIHAT`: the queue
+  // orders somebody's review work, and a Maker does not review.
+  "ai.anomali",
 ];
 
 /**
@@ -145,6 +161,7 @@ const HANYA_BUKTI: readonly Permission[] = [
   "admin.closing.view",
   "admin.rka.view",
   "laporan.export",
+  "ai.anomali",
 ];
 
 const LIHAT: Permission[] = READ_ONLY.filter(
@@ -167,6 +184,11 @@ const MAKER: Permission[] = [
   "jurnal.create",
   "portal.konversi",
   "tools.import",
+  // Spec 12 priority 1, and spec 12 says who it is for: "Manfaat terbesar bagi
+  // Maker". It buys a proposed set of form fields and nothing else. No
+  // proposal is created, no mitra is created, nothing is saved from the
+  // extraction alone, so it is safe on the role that files the paperwork.
+  "ai.ekstraksi",
 ];
 
 const CHECKER: Permission[] = [
@@ -179,6 +201,10 @@ const CHECKER: Permission[] = [
   "nonpumk.lpj.verifikasi",
   "jurnal.verify",
   "tools.rekonsiliasi",
+  // The review queue. A Checker deciding which entries to verify first is the
+  // exact use spec 12 describes, and the queue blocks nothing: a flagged
+  // journal is still a valid journal.
+  "ai.anomali",
 ];
 
 const APPROVER: Permission[] = [
@@ -201,6 +227,9 @@ const APPROVER: Permission[] = [
   // The officer who signs what the entity reports is the officer who produces
   // the signed artefact. ADMIN_CABANG and ADMIN_PUSAT inherit it from here.
   "laporan.export",
+  // The Approver reads the same queue before posting and before handing a
+  // green checklist to head office. It orders reading; it refuses nothing.
+  "ai.anomali",
 ];
 
 const ADMIN_CABANG: Permission[] = [

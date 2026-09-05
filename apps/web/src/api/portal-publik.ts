@@ -1,4 +1,5 @@
-// The two UNAUTHENTICATED endpoints of spec 9.5, and nothing else.
+// The THREE UNAUTHENTICATED endpoints of spec 9.5, and nothing else: the
+// entity selector, the application, and the ticket status check.
 //
 // IT DOES NOT GO THROUGH ./http.ts, AND THAT IS THE POINT.
 //
@@ -24,6 +25,7 @@ import type {
   AturanField,
   CekStatusInput,
   DokumenPengajuan,
+  EntitasPublik,
   HasilPengajuan,
   JenisDokumen,
   JenisPengajuan,
@@ -36,6 +38,7 @@ export type {
   AturanField,
   CekStatusInput,
   DokumenPengajuan,
+  EntitasPublik,
   HasilPengajuan,
   JenisDokumen,
   JenisPengajuan,
@@ -142,6 +145,56 @@ async function kirim<T>(path: string, body: unknown): Promise<T> {
     throw new PortalTidakTerhubung("Server tidak menjawab dengan data pada permintaan ini.");
   }
   return (await res.json()) as T;
+}
+
+/**
+ * The entities a member of the public may apply to, code and name.
+ *
+ * A GET, and the only one on this surface, because it verifies no secret and
+ * stores nothing: there is no credential here to keep out of an access log.
+ * `credentials: "omit"` for the same reason as the two POSTs, and its own
+ * request path rather than `kirim` because that helper posts a JSON body.
+ *
+ * WHAT THE CALLER DOES WITH A FAILURE IS THE POINT. This read replaces a text
+ * box an applicant had to type a code into, and it must not become a way for
+ * the form to stop working: ../portal/Pengajuan.tsx falls back to that text
+ * box when this call fails or answers with nothing. A public form that cannot
+ * be filled in because one request failed is worse than one that asks for a
+ * code off a leaflet.
+ */
+export async function entitasPublik(): Promise<EntitasPublik[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/portal/entitas`, {
+      method: "GET",
+      credentials: "omit",
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    throw new PortalTidakTerhubung(
+      "Daftar entitas tidak dapat diambil. Periksa koneksi Anda lalu coba lagi.",
+    );
+  }
+  if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) {
+    throw new PortalTidakTerhubung("Daftar entitas tidak dapat diambil dari server.");
+  }
+  const amplop = (await res.json().catch(() => null)) as { data?: unknown } | null;
+  const data = amplop?.data;
+  if (!Array.isArray(data)) {
+    throw new PortalTidakTerhubung("Daftar entitas tidak terbaca dari jawaban server.");
+  }
+  // FILTERED HERE, NOT TRUSTED. The two columns are the two a printed form
+  // already carries, and anything that is not a pair of non empty strings is
+  // dropped rather than rendered as an option that would produce a 400 the
+  // applicant cannot diagnose.
+  return data.filter(
+    (baris): baris is EntitasPublik =>
+      typeof baris === "object" &&
+      baris !== null &&
+      typeof (baris as EntitasPublik).kode === "string" &&
+      typeof (baris as EntitasPublik).nama === "string" &&
+      (baris as EntitasPublik).kode.trim() !== "",
+  );
 }
 
 /** Spec 9.5: submit an application without logging in. */

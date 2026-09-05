@@ -352,6 +352,160 @@ describe("the status check answers one way for every failure", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Choosing the entity, and what happens when that read fails
+// ---------------------------------------------------------------------------
+//
+// `GET /portal/entitas` replaced a text box a member of the public had to type
+// a `kodeEntitas` into off a leaflet. The property this block protects is that
+// it replaced it WITHOUT making the form depend on it: a public form that
+// cannot be filled in when one request fails is worse than one that asks for a
+// code.
+
+const ENTITAS = {
+  data: [
+    { kode: "KS", nama: "PT Krakatau Steel (Persero) Tbk" },
+    { kode: "KDL", nama: "PT Krakatau Daya Listrik" },
+  ],
+};
+
+function pilihanSelect(view: { container: HTMLElement }, label: string): string[] {
+  const field = [...view.container.querySelectorAll(".field")].find((f) =>
+    f.querySelector(".field-label")?.textContent?.startsWith(label),
+  );
+  const select = field?.querySelector("select");
+  if (!select) throw new Error(`pilihan "${label}" tidak ada di layar`);
+  return [...select.querySelectorAll("option")].map((o) => o.textContent ?? "");
+}
+
+describe("the entity is chosen from a list, and the list is not a dependency", () => {
+  test("the live entities are offered by name, and no code has to be typed", async () => {
+    const { mount } = await import("./testing");
+    at("/pengajuan");
+    stubFetch((call) =>
+      call.url.includes("/portal/entitas") ? json(200, ENTITAS) : json(404, { error: "x" }),
+    );
+    const view = await mount(<App />);
+
+    expect(pilihanSelect(view, "Entitas tujuan")).toEqual([
+      "Pilih entitas tujuan",
+      "KS PT Krakatau Steel (Persero) Tbk",
+      "KDL PT Krakatau Daya Listrik",
+    ]);
+    // The old text box is gone while the list is there, so there is nothing to
+    // mistype.
+    expect(() => isianBernama(view, "Kode entitas tujuan")).toThrow();
+    view.unmount();
+  });
+
+  test("the read is anonymous by transport, like the two POSTs on this surface", async () => {
+    const { mount } = await import("./testing");
+    at("/pengajuan");
+    stubFetch((call) =>
+      call.url.includes("/portal/entitas") ? json(200, ENTITAS) : json(404, { error: "x" }),
+    );
+    const view = await mount(<App />);
+
+    const baca = calls.find((call) => call.url.includes("/portal/entitas"));
+    expect(baca?.method).toBe("GET");
+    expect(baca?.credentials).toBe("omit");
+    view.unmount();
+  });
+
+  test("NOTHING is preselected, so an application is never quietly addressed", async () => {
+    const { mount, clickOn, textOf } = await import("./testing");
+    at("/pengajuan");
+    stubFetch((call) =>
+      call.url.includes("/portal/entitas") ? json(200, ENTITAS) : json(404, { error: "x" }),
+    );
+    const view = await mount(<App />);
+
+    await clickOn(tombolBerisi(view, "Lanjut"));
+    expect(textOf(view.container)).toContain("Pilih entitas tujuan.");
+    // Still on step one: the step did not advance on an unmade choice.
+    expect(textOf(view.container)).toContain("Langkah 1 dari 3");
+    view.unmount();
+  });
+
+  test("the chosen code is what is submitted, unchanged", async () => {
+    const { mount, clickOn, typeInto, typeIntoTextarea, selectOption } = await import("./testing");
+    at("/pengajuan");
+    stubFetch((call) => {
+      if (call.url.includes("/portal/entitas")) return json(200, ENTITAS);
+      if (call.url.includes("/portal/pengajuan")) return json(201, HASIL_AJUKAN);
+      return json(404, { error: "x" });
+    });
+    const view = await mount(<App />);
+
+    const select = view.container.querySelector("select") as HTMLSelectElement;
+    await selectOption(select, "KDL");
+    await clickOn(tombolBerisi(view, "Lanjut"));
+    await isiLangkahDuaDanTiga(view, { clickOn, typeInto, typeIntoTextarea });
+
+    const kirim = calls.find((call) => call.url.includes("/portal/pengajuan"));
+    expect(JSON.parse(kirim?.body ?? "{}").kodeEntitas).toBe("KDL");
+    view.unmount();
+  });
+
+  test("when the read FAILS the old text box comes back and the form still submits", async () => {
+    const { mount, clickOn, typeInto, typeIntoTextarea, textOf } = await import("./testing");
+    at("/pengajuan");
+    stubFetch((call) => {
+      if (call.url.includes("/portal/entitas")) return json(503, { error: "sedang gangguan" });
+      if (call.url.includes("/portal/pengajuan")) return json(201, HASIL_AJUKAN);
+      return json(404, { error: "x" });
+    });
+    const view = await mount(<App />);
+
+    expect(textOf(view.container)).toContain("Formulir ini tetap bisa dikirim");
+    await isiSampaiKirim(view, { clickOn, typeInto, typeIntoTextarea });
+
+    const kirim = calls.find((call) => call.url.includes("/portal/pengajuan"));
+    expect(kirim).toBeTruthy();
+    expect(JSON.parse(kirim?.body ?? "{}").kodeEntitas).toBe("KS");
+    view.unmount();
+  });
+
+  test("an empty list falls back the same way, rather than offering an empty picker", async () => {
+    const { mount, clickOn, typeInto, typeIntoTextarea } = await import("./testing");
+    at("/pengajuan");
+    stubFetch((call) => {
+      if (call.url.includes("/portal/entitas")) return json(200, { data: [] });
+      if (call.url.includes("/portal/pengajuan")) return json(201, HASIL_AJUKAN);
+      return json(404, { error: "x" });
+    });
+    const view = await mount(<App />);
+
+    await isiSampaiKirim(view, { clickOn, typeInto, typeIntoTextarea });
+    expect(calls.some((call) => call.url.includes("/portal/pengajuan"))).toBe(true);
+    view.unmount();
+  });
+
+  test("the fallback offers a retry, and a later success turns the box into a list", async () => {
+    const { mount, clickOn } = await import("./testing");
+    at("/pengajuan");
+    let gagalDulu = true;
+    stubFetch((call) => {
+      if (call.url.includes("/portal/entitas")) {
+        if (gagalDulu) {
+          gagalDulu = false;
+          return json(503, { error: "sedang gangguan" });
+        }
+        return json(200, ENTITAS);
+      }
+      return json(404, { error: "x" });
+    });
+    const view = await mount(<App />);
+
+    expect(isianBernama(view, "Kode entitas tujuan")).toBeTruthy();
+    await clickOn(tombolBerisi(view, "Coba muat daftar entitas lagi"));
+    await view.flush();
+
+    expect(pilihanSelect(view, "Entitas tujuan")).toContain("KS PT Krakatau Steel (Persero) Tbk");
+    view.unmount();
+  });
+});
+
 describe("the public copy obeys the house rules", () => {
   test("no long dash anywhere on the three public pages", async () => {
     const { mount, textOf } = await import("./testing");
@@ -428,13 +582,26 @@ function tekanLihatStatus(view: { container: HTMLElement }, clickOn: Alat["click
   return clickOn(tombolBerisi(view, "Lihat status"));
 }
 
-/** Walks the three steps with valid answers and presses submit. */
+/**
+ * Walks the three steps with valid answers and presses submit, driving step one
+ * through the FALLBACK text box. Every caller of this helper stubs
+ * `/portal/entitas` as a failure or leaves it unstubbed, which is what the
+ * fallback is for; a caller that wants the picker drives step one itself and
+ * calls `isiLangkahDuaDanTiga`.
+ */
 async function isiSampaiKirim(view: { container: HTMLElement }, alat: Alat) {
   const { clickOn, typeInto } = alat;
 
   // Step 1: entity and kind. PUMK is the default, so it is not touched.
   await typeInto(isianBernama(view, "Kode entitas tujuan"), "KS");
   await clickOn(tombolBerisi(view, "Lanjut"));
+
+  await isiLangkahDuaDanTiga(view, alat);
+}
+
+/** Steps two and three, once step one has been answered somehow. */
+async function isiLangkahDuaDanTiga(view: { container: HTMLElement }, alat: Alat) {
+  const { clickOn, typeInto } = alat;
 
   // Step 2: the PUMK allowlist.
   await typeInto(isianBernama(view, "Nama lengkap"), "Budi Santoso");

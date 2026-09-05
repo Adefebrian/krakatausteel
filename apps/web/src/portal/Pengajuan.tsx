@@ -13,6 +13,15 @@
 // refusal arrives as ONE sentence with no fields attached to it (core/http.ts
 // drops a coded domain error's `detail`). See ./formulir.ts.
 //
+// THE ENTITY IS CHOSEN FROM A LIST, AND THE LIST IS NOT A DEPENDENCY. Step one
+// used to ask a member of the public to TYPE a `kodeEntitas` off a leaflet, and
+// a code typed wrong is a refused application the applicant cannot diagnose.
+// `GET /portal/entitas` now answers with the code and name of every live
+// entity, so the choice is a list. The old text box is still here, and it is
+// what the step falls back to the moment that read fails or answers with
+// nothing: a public form that cannot be filled in because one request failed is
+// worse than one that asks for a code off a leaflet. See `PilihEntitas`.
+//
 // THE VERIFIER IS EXACTLY ONE OF TWO, and the form enforces that rather than
 // letting the server refuse it: the engine takes NIK or date of birth, never
 // both, because two verifiers on one ticket means an attacker only ever has to
@@ -22,7 +31,7 @@
 // will open the ticket later, it is stored as a hash and never in cleartext, so
 // nobody can look it up and read it back to the applicant. The form says so
 // before it is typed, not after.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Field,
@@ -35,9 +44,11 @@ import {
 } from "@krakatausteel/ui";
 import {
   ajukan,
+  entitasPublik,
   PortalGagal,
   PortalTidakTerhubung,
   type DokumenPengajuan,
+  type EntitasPublik,
   type HasilPengajuan,
   type JenisDokumen,
   type JenisPengajuan,
@@ -77,6 +88,161 @@ const JENIS_PILIHAN: readonly { value: JenisPengajuan; label: string; jelas: str
 const POLA_EMAIL = /^[^\s@]{1,64}@[^\s@.]{1,63}(\.[^\s@.]{1,63})+$/;
 const POLA_TELEPON = /^[0-9+][0-9 ()-]{6,24}$/;
 
+/**
+ * The live entities a member of the public may apply to.
+ *
+ * ITS OWN HOOK RATHER THAN ../api/useApi. That hook belongs to the staff app:
+ * it swallows `UnauthorizedError` because ../session.tsx owns that case, and
+ * this surface has no session and must never produce a staff login screen.
+ * Twenty lines here keep the public surface free of staff plumbing, which is
+ * the split App.tsx makes before anything is mounted.
+ *
+ * A FAILURE IS A STATE, NOT AN EXCEPTION THAT REACHES THE APPLICANT. "gagal"
+ * is handled by `PilihEntitas` as "type the code instead", never as a panel
+ * that stops the form.
+ */
+type StatusEntitas = "memuat" | "siap" | "gagal";
+
+interface DaftarEntitas {
+  status: StatusEntitas;
+  daftar: readonly EntitasPublik[];
+  muatUlang: () => void;
+}
+
+function useEntitas(): DaftarEntitas {
+  const [status, setStatus] = useState<StatusEntitas>("memuat");
+  const [daftar, setDaftar] = useState<readonly EntitasPublik[]>([]);
+  const [percobaan, setPercobaan] = useState(0);
+
+  useEffect(() => {
+    let batal = false;
+    setStatus("memuat");
+    entitasPublik().then(
+      (isi) => {
+        if (batal) return;
+        setDaftar(isi);
+        setStatus("siap");
+      },
+      () => {
+        if (batal) return;
+        setDaftar([]);
+        setStatus("gagal");
+      },
+    );
+    return () => {
+      batal = true;
+    };
+  }, [percobaan]);
+
+  return { status, daftar, muatUlang: () => setPercobaan((n) => n + 1) };
+}
+
+/**
+ * Step one's first question: where does this application go.
+ *
+ * TWO SHAPES, ONE ANSWER, AND THE FALLBACK IS THE OLD SCREEN EXACTLY. When the
+ * list is there the applicant picks from it and can never mistype a code. When
+ * the read failed, or answered with no live entity at all, the same text box
+ * this step has always had comes back with the same hint, so the form stays
+ * submittable on a broken network. Nothing about the request that is finally
+ * sent changes between the two: it is a `kodeEntitas` string either way.
+ *
+ * NOTHING IS PRESELECTED. Even with a single entity in the list the select
+ * opens on "Pilih entitas tujuan" and the step will not advance until somebody
+ * chooses, because an application quietly addressed to an entity the applicant
+ * never picked is the failure this control exists to prevent.
+ */
+function PilihEntitas({
+  entitas,
+  kode,
+  setKode,
+  galat,
+  sentuh,
+}: {
+  entitas: DaftarEntitas;
+  kode: string;
+  setKode: (nilai: string) => void;
+  galat: string | undefined;
+  sentuh: boolean;
+}) {
+  const pakaiDaftar = entitas.status === "siap" && entitas.daftar.length > 0;
+
+  if (entitas.status === "memuat") {
+    return (
+      <Field
+        label="Entitas tujuan"
+        required
+        hint="Sedang mengambil daftar entitas yang membuka program."
+      >
+        <Select
+          aria-label="Entitas tujuan"
+          value=""
+          disabled
+          onChange={() => undefined}
+          options={[{ value: "", label: "Memuat daftar entitas" }]}
+        />
+      </Field>
+    );
+  }
+
+  if (pakaiDaftar) {
+    return (
+      <Field
+        label="Entitas tujuan"
+        required
+        hint="Pilih BUMN yang membuka program yang Anda tuju. Namanya tertulis pada pengumuman atau brosur yang Anda terima."
+        {...(sentuh && galat ? { error: galat } : {})}
+      >
+        <Select
+          aria-label="Entitas tujuan"
+          value={kode}
+          onChange={(event) => setKode(event.currentTarget.value)}
+          options={[
+            { value: "", label: "Pilih entitas tujuan" },
+            ...entitas.daftar.map((baris) => ({
+              value: baris.kode,
+              label: `${baris.kode} ${baris.nama}`,
+            })),
+          ]}
+        />
+      </Field>
+    );
+  }
+
+  return (
+    <>
+      <Field
+        label="Kode entitas tujuan"
+        required
+        hint="Kode BUMN yang membuka program ini, tertulis pada pengumuman atau brosur yang Anda terima."
+        {...(sentuh && galat ? { error: galat } : {})}
+      >
+        <TextInput
+          aria-label="Kode entitas tujuan"
+          value={kode}
+          maxLength={32}
+          autoComplete="off"
+          invalid={sentuh && galat !== undefined}
+          onChange={(event) => setKode(event.currentTarget.value)}
+        />
+      </Field>
+      <div className="publik-catatan">
+        <Icon name="info" size={16} />
+        <span>
+          {entitas.status === "gagal"
+            ? "Daftar entitas belum bisa diambil dari server, jadi ketik kodenya seperti biasa. Formulir ini tetap bisa dikirim."
+            : "Belum ada entitas yang bisa ditampilkan, jadi ketik kodenya seperti biasa. Formulir ini tetap bisa dikirim."}
+        </span>
+      </div>
+      <div className="publik-aksi">
+        <Button variant="secondary" onClick={entitas.muatUlang}>
+          Coba muat daftar entitas lagi
+        </Button>
+      </div>
+    </>
+  );
+}
+
 export function Pengajuan() {
   const [langkah, setLangkah] = useState(0);
   const [hasil, setHasil] = useState<HasilPengajuan | null>(null);
@@ -111,6 +277,7 @@ function Formulir({
   setLangkah: (nilai: number) => void;
   selesai: (hasil: HasilPengajuan) => void;
 }) {
+  const entitas = useEntitas();
   const [kodeEntitas, setKodeEntitas] = useState("");
   const [jenis, setJenis] = useState<JenisPengajuan>("PUMK");
   const [isi, setIsi] = useState<Record<string, string>>({});
@@ -138,9 +305,20 @@ function Formulir({
     setIsi((lama) => ({ ...lama, [kunci]: nilai }));
   }
 
+  const pakaiDaftarEntitas = entitas.status === "siap" && entitas.daftar.length > 0;
   const galatSatu: Record<string, string> = {};
-  if (kodeEntitas.trim() === "") galatSatu.kodeEntitas = "Wajib diisi.";
-  else if (kodeEntitas.trim().length > 32) galatSatu.kodeEntitas = "Maksimal 32 karakter.";
+  if (kodeEntitas.trim() === "") {
+    galatSatu.kodeEntitas = pakaiDaftarEntitas ? "Pilih entitas tujuan." : "Wajib diisi.";
+  } else if (kodeEntitas.trim().length > 32) {
+    galatSatu.kodeEntitas = "Maksimal 32 karakter.";
+  } else if (
+    pakaiDaftarEntitas &&
+    !entitas.daftar.some((baris) => baris.kode === kodeEntitas.trim())
+  ) {
+    // Only reachable when the list arrives (or changes on a retry) after a code
+    // was already held. The chosen entity has to be one the server named.
+    galatSatu.kodeEntitas = "Pilih entitas dari daftar.";
+  }
 
   const galatDua: Record<string, string> = {};
   for (const field of fields) {
@@ -254,20 +432,13 @@ function Formulir({
       >
         {langkah === 0 ? (
           <div className="publik-form">
-            <Field
-              label="Kode entitas tujuan"
-              required
-              hint="Kode BUMN yang membuka program ini, tertulis pada pengumuman atau brosur yang Anda terima."
-              error={sentuh ? galatSatu.kodeEntitas : undefined}
-            >
-              <TextInput
-                value={kodeEntitas}
-                maxLength={32}
-                autoComplete="off"
-                invalid={sentuh && galatSatu.kodeEntitas !== undefined}
-                onChange={(event) => setKodeEntitas(event.currentTarget.value)}
-              />
-            </Field>
+            <PilihEntitas
+              entitas={entitas}
+              kode={kodeEntitas}
+              setKode={setKodeEntitas}
+              galat={galatSatu.kodeEntitas}
+              sentuh={sentuh}
+            />
 
             <fieldset className="publik-pilihan">
               <legend className="field-label">Jenis pengajuan</legend>
