@@ -7,7 +7,14 @@ import { Dashboard } from "./pages/dashboard/Dashboard";
 import { Forbidden, NotFound, SessionLoading, SessionUnreachable } from "./pages/Fallbacks";
 import { Login } from "./pages/Login";
 import { Placeholder } from "./pages/Placeholder";
+import { BelumTersedia } from "./pages/konfigurasi/BelumTersedia";
+import { Cabang } from "./pages/konfigurasi/Cabang";
+import { Coa } from "./pages/konfigurasi/Coa";
+import { EventJurnal } from "./pages/konfigurasi/EventJurnal";
+import { Karyawan } from "./pages/konfigurasi/Karyawan";
+import { MasterReferensi } from "./pages/konfigurasi/MasterReferensi";
 import { Parameter } from "./pages/konfigurasi/Parameter";
+import { Pengguna } from "./pages/konfigurasi/Pengguna";
 import { ReportCatalog } from "./pages/ReportCatalog";
 import { LAYAR_LAPORAN } from "./pages/laporan/layar";
 import { ClosingKolektibilitas } from "./pages/closing/ClosingKolektibilitas";
@@ -172,7 +179,37 @@ const HALAMAN: Record<
   "/nonpumk/lpj": (route) => <Lpj route={route} />,
   "/nonpumk/monitoring-lpj": (route) => <MonitoringLpj route={route} />,
 
+  // Spec 9.4's configuration surface. TWELVE NAV ENTRIES, TEN SCREENS, AND THE
+  // SPLIT IS THE API'S.
+  //
+  // FOUR NAV ENTRIES SHARE ONE IMPLEMENTATION, because the server is one
+  // endpoint: `/konfigurasi/master/:jenis` is a table-driven surface over five
+  // reference tables that differ only in their columns, and the rules that
+  // matter (deactivate never delete, an immutable key, entity scope) are
+  // identical across all five. Drawing it four times is how one of the four
+  // ends up offering a delete.
+  //
+  // AND TWO ENTRIES OPEN ON A PAGE THAT SAYS WHY THEY DO NOT EXIST. Neither
+  // `template-laporan` nor `nomor-dokumen` has an endpoint, and neither is
+  // getting one invented here: both are effective-dated problems (see
+  // ./pages/konfigurasi/BelumTersedia.tsx). They deliberately do NOT fall
+  // through to Placeholder, whose "yang akan tersedia di halaman ini" reads as
+  // "coming soon" and would invite somebody to wait for a screen that is
+  // blocked on a decision rather than on work.
+  "/konfigurasi/coa": (route) => <Coa route={route} />,
+  "/konfigurasi/wilayah": (route) => (
+    <MasterReferensi route={route} jenis={["provinsi", "kota"]} />
+  ),
+  "/konfigurasi/sektor": (route) => <MasterReferensi route={route} jenis={["sektor"]} />,
+  "/konfigurasi/bidang": (route) => <MasterReferensi route={route} jenis={["bidang"]} />,
+  "/konfigurasi/sdg": (route) => <MasterReferensi route={route} jenis={["sdg"]} />,
+  "/konfigurasi/cabang": (route) => <Cabang route={route} />,
+  "/konfigurasi/karyawan": (route) => <Karyawan route={route} />,
+  "/konfigurasi/pengguna": (route) => <Pengguna route={route} />,
   "/konfigurasi/parameter": (route) => <Parameter route={route} />,
+  "/konfigurasi/event-jurnal": (route) => <EventJurnal route={route} />,
+  "/konfigurasi/template-laporan": (route) => <BelumTersedia route={route} />,
+  "/konfigurasi/nomor-dokumen": (route) => <BelumTersedia route={route} />,
 
   // Spec 9.6, the two diagnostic screens. Both READ ONLY, both behind their own
   // permission, and neither carries a control that repairs anything: a finding

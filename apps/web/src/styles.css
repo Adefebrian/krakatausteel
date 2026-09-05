@@ -6080,3 +6080,611 @@ h3 {
     -webkit-line-clamp: 2;
   }
 }
+
+/* ================================================== konfigurasi: master data
+
+   The eight administration screens (bagan akun, lima tabel referensi, cabang,
+   karyawan, pengguna, pemetaan event) share this block, so "a fixed fact", "a
+   boolean property with its meaning", "a status control" and "a before and
+   after" look the same on all of them. Spacing, radius and padding come from
+   the same tokens the rest of the product uses; nothing here introduces a
+   second rhythm. */
+
+/* A field the API refuses to change, shown as a fact with its reason. One
+   shape whatever the reason's length: the reason wraps, the row does not
+   reflow, and a list of five reads as one system. */
+/* TWO COLUMNS, AND AN ODD LAST CARD SPANS BOTH, so the grid never leaves a
+   dead cell. The chart of accounts has FIVE fixed facts, and an auto-fit track
+   put four across and left the fifth alone beside three empty cells: seen at
+   1440, not caught by a test. Two fixed columns plus the span rule is exact for
+   every count this component is given (one on the master and user screens, two
+   on the branch screen, five here). */
+.tetap-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tetap-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.tetap-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  min-width: 0;
+}
+
+.tetap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.tetap-label {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.tetap-kunci {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-subtle);
+}
+
+.tetap-nilai {
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.tetap-alasan {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* A boolean property of a master row: box, visible label, what it means, and
+   the reason it is unavailable when it is. */
+.sifat-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.sifat-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.sifat-item.is-tertahan {
+  background: var(--color-surface);
+}
+
+.sifat-kotak {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  cursor: pointer;
+}
+
+.sifat-item.is-tertahan .sifat-kotak {
+  cursor: default;
+}
+
+.sifat-kotak input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--color-accent);
+  cursor: inherit;
+}
+
+.sifat-kotak input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.sifat-teks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.sifat-label {
+  font-weight: var(--weight-medium);
+}
+
+.sifat-arti,
+.sifat-alasan {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* Activate and deactivate: the current state on the left, the one control on
+   the right, at the same rhythm on every screen in the group. */
+.status-kendali {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.status-teks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.status-judul {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+
+.status-sub {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* What a deactivation does, beside what it does not do. Two columns of the
+   same shape, so neither reads as the footnote of the other. */
+.akibat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.akibat-kolom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.akibat-judul {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.akibat-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+}
+
+/* A selectable account row inside the shared chart of accounts tree. The tree
+   itself is ../laporan/BaganAkun.tsx's markup, unchanged; this only makes the
+   name a target. */
+.coa-buka {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.coa-buka:hover {
+  background: var(--color-surface);
+}
+
+.coa-buka:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.coa-row.is-terpilih {
+  background: var(--color-surface);
+}
+
+.coa-row.is-terpilih .coa-kode {
+  font-weight: var(--weight-semibold);
+}
+
+/* A section inside a detail panel: roles, account status, temporary password.
+   One heading rhythm, so a long panel still reads as a sequence of decisions
+   rather than as one wall. */
+.blok-aksi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.blok-judul {
+  margin: 0;
+  font-size: var(--text-subhead);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+.blok-sub {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* The role catalogue, annotated per caller by the server. A role this officer
+   may not grant is visibly unavailable and carries the server's own sentence. */
+.peran-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.peran-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.peran-item.is-tertahan {
+  background: var(--color-surface);
+}
+
+.peran-kotak {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  cursor: pointer;
+}
+
+.peran-item.is-tertahan .peran-kotak {
+  cursor: default;
+}
+
+.peran-kotak input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--color-accent);
+  cursor: inherit;
+}
+
+.peran-kotak input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.peran-teks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.peran-nama {
+  font-weight: var(--weight-medium);
+}
+
+.peran-sifat,
+.peran-alasan {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* ============================================ konfigurasi: event mapping */
+
+.event-kode {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.event-kosong-list,
+.mapping-list,
+.usul-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-kosong-item,
+.mapping-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.event-kosong-teks,
+.mapping-ket {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.mapping-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mapping-kaki {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.mapping-sisi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mapping-label {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.mapping-nilai {
+  overflow-wrap: anywhere;
+}
+
+/* One proposal, drawn as a diff. The two sides are the same width and the same
+   ink: the "before" is evidence, not a footnote. */
+.usul-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.usul-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.usul-alasan {
+  margin: 0;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.usul-meta {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.usul-banding {
+  display: flex;
+  flex-direction: column;
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.usul-banding-kepala,
+.usul-banding-baris {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3);
+}
+
+.usul-banding-kepala {
+  background: var(--color-surface);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.usul-banding-baris + .usul-banding-baris,
+.usul-banding-kepala + .usul-banding-baris {
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.usul-banding-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.usul-banding-sisi {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A changed row is marked by WEIGHT AND A WORD, not by colour alone: the
+   difference has to survive a black and white printout and a reader who does
+   not distinguish the two hues. */
+.usul-banding-baris.is-beda .usul-banding-sisi {
+  font-weight: var(--weight-semibold);
+}
+
+.usul-tanda {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-caution);
+}
+
+/* The two legs of a proposed mapping, side by side and the same shape. */
+.kaki-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.kaki-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  min-width: 0;
+}
+
+.kaki-judul {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+
+@media (max-width: 900px) {
+  .usul-banding-kepala,
+  .usul-banding-baris {
+    grid-template-columns: minmax(0, 140px) minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  /* One column on a phone, and the span rule stops mattering. */
+  .tetap-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /*
+    AN EVENT CODE IS NEVER BROKEN ACROSS TWO LINES IF IT CAN BE HELPED.
+
+    At 320 the head row put the code and its badge side by side, and
+    PENCAIRAN_PUMK came out as "PENCA IRAN_ PUMK": an identifier the reader has
+    to reassemble, on the screen where identifying the right event is the whole
+    job. PELUNASAN_DIPERCEPAT_PUMK broke even at full width. So on a phone the
+    badge moves to its own line, giving the code the full width, and the code
+    drops to the caption size the rest of a phone card already uses. An unbroken
+    code at 13px beats a broken one at 16. Seen at 320, not caught by a test.
+  */
+  .usul-head,
+  .mapping-head {
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: var(--space-2);
+  }
+
+  .event-kode {
+    font-size: var(--text-caption);
+    line-height: var(--leading-caption);
+  }
+
+  /* Every side by side pair becomes labelled rows, so a phone reads top to
+     bottom instead of scrolling sideways. The two sides keep their headings,
+     because "which column is the before" is the whole point of the panel. */
+  .akibat-grid,
+  .mapping-kaki,
+  .kaki-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usul-banding-kepala {
+    display: none;
+  }
+
+  .usul-banding-baris {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+
+  .usul-banding-sisi::before {
+    display: block;
+    font-size: var(--text-caption);
+    line-height: var(--leading-caption);
+    font-weight: var(--weight-regular);
+    color: var(--color-text-muted);
+  }
+
+  .usul-banding-sisi:nth-of-type(2)::before {
+    content: "Berlaku saat usulan diajukan";
+  }
+
+  .usul-banding-sisi:nth-of-type(3)::before {
+    content: "Diusulkan";
+  }
+
+  .status-kendali {
+    align-items: stretch;
+  }
+
+  .status-kendali .btn {
+    width: 100%;
+  }
+}

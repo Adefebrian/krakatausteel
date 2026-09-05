@@ -110,6 +110,20 @@ export function apiPut<T>(path: string, body?: unknown): Promise<T> {
 }
 
 /**
+ * A PARTIAL edit, and the distinction from PUT is load bearing on the
+ * administration surface. `PUT /organisasi/pengguna/:id/peran` replaces the
+ * whole role set; every `PATCH` here changes only the fields it names and
+ * leaves the rest alone, which is what lets a screen edit a name without
+ * resending a branch it never showed the operator.
+ */
+export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  return send<T>(path, {
+    method: "PATCH",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/**
  * Multipart upload. The content type header is deliberately NOT set: the
  * browser has to add its own boundary, and forcing application/json here is
  * how an upload silently arrives as an unparseable body.

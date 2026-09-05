@@ -96,6 +96,20 @@ export const PERMISSIONS = [
   "konfigurasi.coa",
   "konfigurasi.user",
   "konfigurasi.parameter",
+  // THE EVENT TO JOURNAL MAPPING (ADR 0004, migration 0036), and its own code
+  // rather than part of `konfigurasi.master`, mirroring the server.
+  //
+  // `konfigurasi.master` also gates sector names, provinces and the SDG list,
+  // which head office edits as routine data entry. Sharing one code would mean
+  // that granting somebody the right to rename a sector granted them the right
+  // to decide what every future PENCAIRAN_PUMK debits.
+  //
+  // HOLDING IT IS NOT ENOUGH TO CHANGE A MAPPING. The change is a
+  // maker-checker: the proposer and the approver must be different people, and
+  // the server refuses a self approval before any write. This code says who may
+  // take part at all, which is why the screen is opened by it and every control
+  // on the screen still asks who the signed in officer is.
+  "konfigurasi.mapping",
 
   "portal.view",
   "portal.konversi",

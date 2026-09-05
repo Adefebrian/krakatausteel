@@ -188,16 +188,29 @@ describe("every report in spec 10 has a screen, and every screen has a route", (
   test("the placeholder sentence the test above looks for is a real sentence", async () => {
     // A POSITIVE CONTROL. The test above asserts an ABSENCE, and an absence
     // assertion is worthless if the string it looks for was never rendered by
-    // anything. A route with no screen still falls through to Placeholder, and
-    // this is what proves the sentence exists to be found.
+    // anything. This is what proves the sentence exists to be found.
+    //
+    // IT MOUNTS `Placeholder` DIRECTLY, and it did not always. It used to open
+    // /konfigurasi/wilayah, which fell through to Placeholder because that nav
+    // entry had no screen. Every nav entry now HAS one, so there is no longer a
+    // route in the product that reaches Placeholder, and pointing this control
+    // at a route again would only make it rot the next time a screen lands.
+    // Placeholder itself stays: it is the catch for a nav entry added before
+    // its screen, which is exactly the state the eleven configuration entries
+    // were in.
     const { mount, textOf } = await import("./testing");
-    at("/konfigurasi/wilayah");
-    stubFetch((call) =>
-      call.url.includes("/auth/session")
-        ? json(200, { ...SESSION, permissions: [...SESSION.permissions, "konfigurasi.master"] })
-        : handler(call),
+    const { Placeholder } = await import("./pages/Placeholder");
+    const view = await mount(
+      <Placeholder
+        route={{
+          path: "/contoh/belum-ada-layar",
+          label: "Contoh",
+          title: "Halaman contoh tanpa layar",
+          summary: "Rute yang punya entri navigasi tetapi belum punya layar.",
+          willContain: ["Isi halaman ini ketika fasenya mendarat"],
+        }}
+      />,
     );
-    const view = await mount(<App />);
     expect(textOf(view.container)).toContain("Halaman belum diisi");
     view.unmount();
   });

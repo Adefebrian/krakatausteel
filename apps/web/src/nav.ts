@@ -837,14 +837,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/konfigurasi/event-jurnal",
         label: "Event Journal Mapping",
         title: "Event Journal Mapping",
-        permission: "konfigurasi.parameter",
+        // NOT `konfigurasi.parameter`, and the difference is the whole point.
+        // Repointing an event decides what every future jurnal of that event
+        // debits and credits, which is why the server gave it a code of its
+        // own and put a maker checker in front of it.
+        permission: "konfigurasi.mapping",
         summary:
-          "Pemetaan peristiwa bisnis ke pasangan akun debit dan kredit, satu satunya jalur pembentukan jurnal otomatis.",
+          "Pemetaan peristiwa bisnis ke pasangan akun debit dan kredit, diubah lewat usulan yang diputus orang lain.",
         willContain: [
-          "Daftar event beserta akun debit dan kredit yang dipakai",
-          "Validasi akun masih aktif dan sesuai tipe saldo normalnya",
-          "Riwayat perubahan mapping beserta periode berlakunya",
-          "Tidak ada modul yang boleh membuat baris jurnal di luar mapping ini",
+          "Daftar event beserta akun debit dan kredit yang berlaku saat ini",
+          "Usulan perubahan beserta pemetaan sebelum dan sesudahnya, berdampingan",
+          "Persetujuan oleh orang yang berbeda dari pengusul, ditolak server bila sama",
+          "Pembatalan usulan hanya oleh pengusulnya sendiri",
         ],
       },
       {
@@ -852,12 +856,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         label: "Format Nomor Dokumen",
         title: "Format Nomor Dokumen",
         permission: "konfigurasi.parameter",
-        summary: "Pola penomoran proposal, akad, jurnal, dan bukti, beserta reset counter per periode.",
+        summary:
+          "Belum tersedia. Mengubah pola penomoran di tengah tahun membuat satu tahun berjalan punya dua bentuk nomor, dan API untuk itu sengaja belum ada.",
         willContain: [
-          "Pola nomor per jenis dokumen dengan komponen kode cabang, tahun, bulan, dan urutan",
-          "Aturan reset counter per bulan atau per tahun",
-          "Pratinjau nomor berikut yang akan terbentuk",
-          "Nomor yang sudah terpakai tidak bisa dipakai ulang",
+          "Belum ada endpoint apa pun untuk membaca maupun menulis pola penomoran",
+          "Yang harus diputuskan lebih dulu: sejak kapan pola baru berlaku, dan apa yang terjadi pada nomor yang sudah terbit",
+          "Sampai itu diputuskan, pola penomoran hanya berubah lewat migrasi basis data yang ditinjau",
+          "Halaman ini menyatakan alasannya, bukan menampilkan formulir yang tidak menyimpan apa pun",
         ],
       },
       {
@@ -866,12 +871,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         title: "Template Baris Laporan",
         permission: "konfigurasi.parameter",
         summary:
-          "Susunan baris Laporan Posisi Keuangan, Aktivitas, dan Arus Kas beserta akun yang masuk ke setiap baris.",
+          "Belum tersedia. Menyunting template membuat laporan periode lama tercetak ulang dengan susunan baru, dan API untuk itu sengaja belum ada.",
         willContain: [
-          "Definisi baris laporan, urutan, indentasi, dan baris total",
-          "Pemetaan akun ke baris laporan, satu akun tidak boleh terhitung dua kali",
-          "Validasi Total Aset sama dengan Liabilitas plus Aset Neto",
-          "Validasi Kas Akhir Arus Kas sama dengan saldo akun kas di Posisi Keuangan",
+          "Belum ada endpoint apa pun untuk membaca maupun menulis susunan baris laporan",
+          "Yang harus diputuskan lebih dulu: apakah template berlaku sejak periode tertentu, atau berlaku surut ke seluruh riwayat",
+          "Sampai itu diputuskan, susunan baris hanya berubah lewat migrasi basis data yang ditinjau",
+          "Halaman ini menyatakan alasannya, bukan menampilkan formulir yang tidak menyimpan apa pun",
         ],
       },
     ],
