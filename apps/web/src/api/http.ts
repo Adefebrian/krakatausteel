@@ -42,16 +42,26 @@ function isJson(res: Response): boolean {
   return (res.headers.get("content-type") ?? "").includes("json");
 }
 
-/** The API's error envelope, apps/api/src/core/http.ts's `AppErrorBody`. */
-async function messageOf(res: Response, fallback: string): Promise<string> {
-  if (!isJson(res)) return fallback;
+/**
+ * The API's error envelope, apps/api/src/core/http.ts's `AppErrorBody`, read
+ * ONCE and returned whole.
+ *
+ * The sentence is what a banner shows. The body is what a FORM needs: see
+ * `ApiRequestError.body` in ./auth.ts for why three of this API's refusals
+ * carry data a screen has to render rather than a message it can only print.
+ */
+async function tolakan(
+  res: Response,
+  fallback: string,
+): Promise<{ pesan: string; body: unknown }> {
+  if (!isJson(res)) return { pesan: fallback, body: null };
   try {
     const body = (await res.json()) as { error?: unknown; kode?: unknown; code?: unknown };
     const kode = typeof body.kode === "string" ? body.kode : typeof body.code === "string" ? body.code : null;
     const pesan = typeof body.error === "string" && body.error.trim() !== "" ? body.error : fallback;
-    return kode ? `${pesan} (${kode})` : pesan;
+    return { pesan: kode ? `${pesan} (${kode})` : pesan, body };
   } catch {
-    return fallback;
+    return { pesan: fallback, body: null };
   }
 }
 
@@ -69,10 +79,8 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
-    throw new ApiRequestError(
-      res.status,
-      await messageOf(res, `Permintaan ke ${path} ditolak server (${res.status})`),
-    );
+    const ditolak = await tolakan(res, `Permintaan ke ${path} ditolak server (${res.status})`);
+    throw new ApiRequestError(res.status, ditolak.pesan, ditolak.body);
   }
   if (res.status === 204) return undefined as T;
   if (!isJson(res)) {
@@ -115,10 +123,48 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   }
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
-    throw new ApiRequestError(res.status, await messageOf(res, `Unggahan ke ${path} ditolak (${res.status})`));
+    const ditolak = await tolakan(res, `Unggahan ke ${path} ditolak (${res.status})`);
+    throw new ApiRequestError(res.status, ditolak.pesan, ditolak.body);
   }
   if (!isJson(res)) throw new ApiUnreachableError(`Server tidak menjawab dengan data pada ${path}`);
   return (await res.json()) as T;
+}
+
+/**
+ * The per-FIELD detail of a boundary refusal (`code: "VALIDASI"`), keyed by
+ * field path exactly as the router wrote it, or null.
+ *
+ * A form puts these ON THE FIELD. Printing "baris.2.akunId wajib berupa UUID"
+ * in a banner over a twelve line journal is a message an operator cannot act
+ * on without counting rows by hand.
+ */
+export function galatField(cause: unknown): Record<string, string[]> | null {
+  if (!(cause instanceof ApiRequestError)) return null;
+  const body = cause.body;
+  if (typeof body !== "object" || body === null) return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return null;
+  const keluar: Record<string, string[]> = {};
+  for (const [kunci, nilai] of Object.entries(detail as Record<string, unknown>)) {
+    if (Array.isArray(nilai)) keluar[kunci] = nilai.map((v) => String(v));
+  }
+  return Object.keys(keluar).length === 0 ? null : keluar;
+}
+
+/**
+ * The DOMAIN code of a refusal (`kodeDomain`), or null.
+ *
+ * `code` is the HTTP taxonomy and is the same word for every 400; `kodeDomain`
+ * is the specific accounting rule that refused, and it is what lets a form put
+ * `KAS_BANK_TANPA_AKUN_KAS` on the account picker instead of at the top of the
+ * page where it reads as "something went wrong".
+ */
+export function kodeDomain(cause: unknown): string | null {
+  if (!(cause instanceof ApiRequestError)) return null;
+  const body = cause.body;
+  if (typeof body !== "object" || body === null) return null;
+  const kode = (body as { kodeDomain?: unknown }).kodeDomain;
+  return typeof kode === "string" ? kode : null;
 }
 
 /** The sentence a page shows for a thrown error, whatever its class. */

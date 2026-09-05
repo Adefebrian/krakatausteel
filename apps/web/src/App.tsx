@@ -16,8 +16,19 @@ import { PeriodeAkuntansi } from "./pages/closing/PeriodeAkuntansi";
 import { RkaPage } from "./pages/rka/RkaPage";
 import { AntreanAnomali } from "./pages/ai/AntreanAnomali";
 import { AsistenDokumen } from "./pages/ai/AsistenDokumen";
+import { Impor } from "./pages/tools/Impor";
 import { Integritas } from "./pages/tools/Integritas";
 import { Rekonsiliasi } from "./pages/tools/Rekonsiliasi";
+import { DaftarJurnal } from "./pages/jurnal/DaftarJurnal";
+import { JurnalKasBank } from "./pages/jurnal/JurnalKasBank";
+import { JurnalPinbuk } from "./pages/jurnal/JurnalPinbuk";
+import { JurnalUmum } from "./pages/jurnal/JurnalUmum";
+import { Pembalik } from "./pages/jurnal/Pembalik";
+import { PostingJurnal } from "./pages/jurnal/PostingJurnal";
+import { VerifikasiJurnal } from "./pages/jurnal/VerifikasiJurnal";
+import { AkunMitra } from "./pages/portal/AkunMitra";
+import { PengajuanPortal } from "./pages/portal/PengajuanPortal";
+import { VerifikasiKonversi } from "./pages/portal/VerifikasiKonversi";
 import { Lpj } from "./pages/nonpumk/Lpj";
 import { MonitoringLpj } from "./pages/nonpumk/MonitoringLpj";
 import { Penilaian } from "./pages/nonpumk/Penilaian";
@@ -34,6 +45,7 @@ import { JadwalPage } from "./pages/pumk/JadwalPage";
 import { JaminanForm } from "./pages/pumk/JaminanForm";
 import { KartuPiutangPage, KartuPiutangPicker } from "./pages/pumk/KartuPiutang";
 import { MitraBermasalah } from "./pages/pumk/MitraBermasalah";
+import { MitraBinaan } from "./pages/pumk/MitraBinaan";
 import { PencairanForm } from "./pages/pumk/PencairanForm";
 import { Pengakhiran } from "./pages/pumk/Pengakhiran";
 import { Persetujuan } from "./pages/pumk/Persetujuan";
@@ -146,6 +158,7 @@ const HALAMAN: Record<
   "/pumk/reschedule": (route) => <Reschedule route={route} />,
   "/pumk/pengakhiran": (route) => <Pengakhiran route={route} />,
   "/pumk/mitra-bermasalah": (route) => <MitraBermasalah route={route} />,
+  "/pumk/mitra": (route) => <MitraBinaan route={route} />,
 
   "/nonpumk/proposal": (route) => <ProposalListNonPumk route={route} />,
   "/nonpumk/proposal/baru": (route) => <ProposalFormNonPumk route={route} />,
@@ -167,6 +180,44 @@ const HALAMAN: Record<
   // way in.
   "/tools/integritas": (route) => <Integritas route={route} />,
   "/tools/rekonsiliasi": (route) => <Rekonsiliasi route={route} />,
+
+  // Spec 9.6's writing half. One implementation, three configurations: the
+  // workflow is identical (preview, read the rejections, commit all or
+  // nothing) and only the file's columns and what a committed row MEANS
+  // differ. Drawing it three times is how three screens end up disagreeing
+  // about what a commit does.
+  "/tools/import-mitra": (route) => <Impor route={route} jenis="MITRA" />,
+  "/tools/import-angsuran": (route) => <Impor route={route} jenis="ANGSURAN" />,
+  "/tools/import-saldo-awal": (route) => <Impor route={route} jenis="SALDO_AWAL" />,
+
+  // Spec 9.4's seven journal screens, on the routes modules/jurnal shipped.
+  //
+  // FOUR OF THEM READ THE SAME `GET /jurnal` UNDER A DIFFERENT FILTER: the
+  // document list, the Checker's DRAFT queue, the Approver's posting queue and
+  // the reversal picker. Two endpoints answering the same rows would
+  // eventually disagree about what is in the ledger.
+  //
+  // AND `/jurnal/pembalik` IS THE SCREEN SPEC 9.4 CALLS "HAPUS JURNAL
+  // TRANSAKSI". The nav keeps that label because it is the word an operator
+  // searches for; the screen itself is a reversal from its heading down, and
+  // there is no delete route behind it because the API has none.
+  "/jurnal": (route) => <DaftarJurnal route={route} />,
+  "/jurnal/umum": (route) => <JurnalUmum route={route} />,
+  "/jurnal/kas-bank": (route) => <JurnalKasBank route={route} />,
+  "/jurnal/pinbuk": (route) => <JurnalPinbuk route={route} />,
+  "/jurnal/verifikasi": (route) => <VerifikasiJurnal route={route} />,
+  "/jurnal/posting": (route) => <PostingJurnal route={route} />,
+  "/jurnal/pembalik": (route) => <Pembalik route={route} />,
+
+  // Spec 9.5's STAFF portal, which is not ./portal/. That folder is the public
+  // surface, mounted by `Permukaan` above with no session at all; these four
+  // run on a staff session and are gated by portal.view or portal.konversi.
+  // ADR 0019 keeps the three principals apart, and a shared page between them
+  // is where they would quietly rejoin.
+  "/portal/pengajuan-pumk": (route) => <PengajuanPortal route={route} jenis="PUMK" />,
+  "/portal/pengajuan-non-pumk": (route) => <PengajuanPortal route={route} jenis="NON_PUMK" />,
+  "/portal/verifikasi": (route) => <VerifikasiKonversi route={route} />,
+  "/portal/akun-mitra": (route) => <AkunMitra route={route} />,
 
   // Spec 12, Fase 8. The assistant, and both halves of it are OFF by default.
   // Neither page is hidden behind the flag: with the layer off both open and

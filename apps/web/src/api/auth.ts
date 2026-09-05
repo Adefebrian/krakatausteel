@@ -76,10 +76,29 @@ export class ApiUnreachableError extends Error {
 /** Thrown when the API refused the request for a reason the user can act on. */
 export class ApiRequestError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /**
+   * The API's own JSON body, verbatim, when it sent one.
+   *
+   * IT IS CARRIED BECAUSE THREE REFUSALS ARE THE PRODUCT AND NOT THE FAILURE.
+   * `core/http.ts` answers `{error, code, detail}` for a boundary validation,
+   * where `detail` is keyed by field path and belongs on the field rather than
+   * in a banner; it answers `{error, code, kodeDomain}` for a domain refusal,
+   * where the code is what a form branches on to decide WHICH field to blame
+   * (`KAS_BANK_TANPA_AKUN_KAS` is about the account picker, not about the
+   * date); and `POST /impor/:jenis/komit` answers a 400 whose `laporan` field
+   * carries every rejected row with its line number, which is the entire point
+   * of the screen that asked.
+   *
+   * Flattening all three into one sentence, which is what `message` alone is,
+   * throws the actionable half away. `message` still carries the server's
+   * sentence, so nothing that ignores this field changes behaviour.
+   */
+  readonly body: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.name = "ApiRequestError";
     this.status = status;
+    this.body = body ?? null;
   }
 }
 

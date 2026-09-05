@@ -1,0 +1,785 @@
+// The seven journal screens of spec 9.4, tested through the real App.
+//
+// THE THEME OF THIS FILE IS THAT A LEDGER SCREEN MUST NOT LIE ABOUT WHAT IT
+// DOES. So every assertion below is one of six kinds:
+//
+//   the reversal screen says "this is not a deletion" BEFORE the click, in
+//   words, in its preview, and in its confirmation, and never carries a delete
+//   control (spec 16 scenario 10);
+//   a document that has been reversed is still IN the list and reads as
+//   "Dibalik", never as gone (ADR 0010);
+//   a form that files a journal files a DRAFT and says so, and no form on this
+//   module can post;
+//   a domain refusal lands on the CONTROL it is about, not in an anonymous
+//   banner: `KAS_BANK_TANPA_AKUN_KAS` belongs to the cash account picker;
+//   a verified draft is visible as verified, because verification stamps a
+//   column and leaves the status alone;
+//   money goes through packages/ui and an absent value is never the "tidak
+//   sah" marker.
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { App } from "./App";
+
+/** The banned long dash, built from its code point so this file stays clean. */
+const LONG_DASH = String.fromCharCode(0x2014);
+
+type FetchFn = typeof globalThis.fetch;
+const realFetch: FetchFn = globalThis.fetch;
+
+interface Call {
+  url: string;
+  method: string;
+  body: string | null;
+}
+
+let calls: Call[] = [];
+
+function stubFetch(handler: (call: Call) => Response) {
+  calls = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const call: Call = {
+      url: String(input),
+      method: init?.method ?? "GET",
+      body: typeof init?.body === "string" ? init.body : null,
+    };
+    calls.push(call);
+    return handler(call);
+  }) as FetchFn;
+}
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function notFound(): Response {
+  return new Response("404 Not Found", { status: 404, headers: { "content-type": "text/plain" } });
+}
+
+function at(path: string) {
+  globalThis.history.replaceState(null, "", path);
+}
+
+function teksSemua(container: HTMLElement): string {
+  return (container.textContent ?? "").replace(/\s+/g, " ");
+}
+
+function semuaTombol(container: HTMLElement): string {
+  return [...container.querySelectorAll("button")]
+    .map((b) => b.textContent ?? "")
+    .join(" | ")
+    .toLowerCase();
+}
+
+function tombol(container: HTMLElement, teks: string): HTMLButtonElement {
+  const hit = [...container.querySelectorAll("button")].find((b) =>
+    (b.textContent ?? "").toLowerCase().includes(teks.toLowerCase()),
+  );
+  if (!hit) throw new Error(`tombol "${teks}" tidak ditemukan`);
+  return hit as HTMLButtonElement;
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+const CABANG_A = { id: "c1", kode: "01", nama: "Cabang Cilegon" };
+const CABANG_B = { id: "c2", kode: "02", nama: "Cabang Serang" };
+
+const DASAR = {
+  user: { id: "u1", username: "adminpusat", nama: "Sri Handayani", role: "ADMIN_PUSAT" },
+  cabang: CABANG_A,
+  cabangTersedia: [CABANG_A, CABANG_B],
+  periode: { tahun: 2026, bulan: 3, status: "OPEN" },
+  roles: ["ADMIN_PUSAT"],
+  readOnly: false,
+  lintasCabang: true,
+};
+
+const SESSION_ADMIN = {
+  ...DASAR,
+  permissions: [
+    "dashboard.view",
+    "jurnal.view",
+    "jurnal.create",
+    "jurnal.update",
+    "jurnal.delete",
+    "jurnal.verify",
+    "jurnal.post",
+    "jurnal.reversal",
+    "laporan.view",
+    "pumk.view",
+  ],
+};
+
+/** A Maker: files journals, and holds neither verify nor reversal. */
+const SESSION_MAKER = {
+  ...DASAR,
+  user: { id: "u2", username: "maker", nama: "Budi Santoso", role: "MAKER" },
+  roles: ["MAKER"],
+  permissions: ["dashboard.view", "jurnal.view", "jurnal.create", "laporan.view", "pumk.view"],
+};
+
+/** An Auditor: reads the ledger, holds no code that changes a line. */
+const SESSION_AUDITOR = {
+  ...DASAR,
+  user: { id: "u3", username: "auditor", nama: "Dewi Lestari", role: "AUDITOR" },
+  roles: ["AUDITOR"],
+  readOnly: true,
+  permissions: ["dashboard.view", "jurnal.view", "laporan.view"],
+};
+
+// ---------------------------------------------------------------------------
+// Fixtures, in the shapes modules/jurnal already names
+// ---------------------------------------------------------------------------
+
+function ringkasan(over: Record<string, unknown> = {}) {
+  return {
+    id: "j1",
+    noJurnal: "JU-2026-03-0007",
+    jenis: "UMUM",
+    tanggalTransaksi: "2026-03-11",
+    periodeId: "p1",
+    periodeLabel: "Maret 2026",
+    cabangId: "c1",
+    cabangKode: "01",
+    cabangNama: "Cabang Cilegon",
+    keterangan: "Reklasifikasi beban pembinaan",
+    referensiTipe: null,
+    referensiId: null,
+    totalDebit: "1500000.00",
+    totalKredit: "1500000.00",
+    status: "POSTED",
+    isAutoGenerated: false,
+    jalurPosting: "ENGINE",
+    reversalOfJurnalId: null,
+    reversedByJurnalId: null,
+    dibuatOleh: "Budi Santoso",
+    diverifikasiOleh: "Rina Wulandari",
+    verifiedAt: "2026-03-12T02:00:00.000Z",
+    dipostingOleh: "Sri Handayani",
+    postedAt: "2026-03-12T04:00:00.000Z",
+    jumlahBaris: 2,
+    version: 3,
+    ...over,
+  };
+}
+
+function barisTampil(over: Record<string, unknown> = {}) {
+  return {
+    id: "b1",
+    urutan: 1,
+    akunId: "a1",
+    debit: "1500000.00",
+    kredit: "0.00",
+    keterangan: null,
+    mitraId: null,
+    akadId: null,
+    dimensi: {},
+    akunKode: "5.1.01",
+    akunNama: "Beban Pembinaan Kemitraan",
+    mitraNama: null,
+    akadNo: null,
+    ...over,
+  };
+}
+
+function detail(over: Record<string, unknown> = {}) {
+  return {
+    ...ringkasan(),
+    baris: [
+      barisTampil(),
+      barisTampil({
+        id: "b2",
+        urutan: 2,
+        akunId: "a2",
+        debit: "0.00",
+        kredit: "1500000.00",
+        akunKode: "1.1.01",
+        akunNama: "Kas",
+      }),
+    ],
+    pembalik: null,
+    dibalikOleh: null,
+    ...over,
+  };
+}
+
+const BAGAN_AKUN = {
+  header: {
+    namaBumn: "PT Krakatau Steel",
+    namaLaporan: "Bagan Akun",
+    periode: "-",
+    cabang: "Semua cabang",
+    tanggalCetak: "2026-03-20",
+    dicetakOleh: "Sri Handayani",
+  },
+  baris: [
+    {
+      akunId: "a1",
+      kode: "5.1.01",
+      nama: "Beban Pembinaan Kemitraan",
+      parentId: null,
+      level: 3,
+      tipe: "BEBAN",
+      saldoNormal: "DEBIT",
+      isPostable: true,
+      isKas: false,
+      isKontra: false,
+      klasifikasiArusKas: null,
+      klasifikasiLaporan: "BEBAN",
+      aktif: true,
+      status: "Aktif",
+    },
+    {
+      akunId: "a2",
+      kode: "1.1.01",
+      nama: "Kas",
+      parentId: null,
+      level: 3,
+      tipe: "ASET",
+      saldoNormal: "DEBIT",
+      isPostable: true,
+      isKas: true,
+      isKontra: false,
+      klasifikasiArusKas: null,
+      klasifikasiLaporan: "ASET",
+      aktif: true,
+      status: "Aktif",
+    },
+    {
+      akunId: "a3",
+      kode: "1.1",
+      nama: "Aset Lancar",
+      parentId: null,
+      level: 2,
+      tipe: "ASET",
+      saldoNormal: "DEBIT",
+      isPostable: false,
+      isKas: false,
+      isKontra: false,
+      klasifikasiArusKas: null,
+      klasifikasiLaporan: "ASET",
+      aktif: true,
+      status: "Aktif",
+    },
+  ],
+};
+
+const PERIODE = {
+  data: [
+    {
+      id: "p1",
+      tahun: 2026,
+      bulan: 3,
+      tanggalMulai: "2026-03-01",
+      tanggalAkhir: "2026-03-31",
+      status: "OPEN",
+      sumberData: "LEDGER_LIVE",
+    },
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+interface Pilihan {
+  session?: unknown;
+  daftar?: unknown[];
+  detail?: unknown;
+  /** Response for POST /jurnal/:id/pembalik. */
+  pembalik?: Response;
+  /** Response for POST /jurnal. */
+  buat?: Response;
+}
+
+function handler(pilihan: Pilihan = {}) {
+  return (call: Call): Response => {
+    const { url, method } = call;
+    if (url.includes("/auth/session")) return json(200, pilihan.session ?? SESSION_ADMIN);
+    if (url.includes("/laporan/bagan-akun")) return json(200, BAGAN_AKUN);
+    if (url.includes("/laporan/periode")) return json(200, PERIODE);
+    if (url.includes("/konfigurasi/JURNAL/")) {
+      return json(403, { error: "Tidak berwenang", code: "TIDAK_BERWENANG" });
+    }
+    if (url.includes("/pumk/mitra")) return json(200, { data: [] });
+    if (url.includes("/pumk/cluster")) return json(200, { data: [] });
+    if (method === "POST" && /\/jurnal\/[^/]+\/pembalik/.test(url)) {
+      return (
+        pilihan.pembalik ??
+        json(201, ringkasan({ id: "j2", noJurnal: "JB-2026-03-0001", jenis: "REVERSAL" }))
+      );
+    }
+    if (method === "POST" && url.endsWith("/jurnal")) {
+      return pilihan.buat ?? json(201, ringkasan({ id: "j9", noJurnal: "JU-2026-03-0009", status: "DRAFT" }));
+    }
+    if (/\/jurnal\/[0-9a-zA-Z-]+(\?|$)/.test(url) && method === "GET") {
+      return json(200, pilihan.detail ?? detail());
+    }
+    if (url.includes("/jurnal")) {
+      return json(200, { data: pilihan.daftar ?? [ringkasan()] });
+    }
+    return notFound();
+  };
+}
+
+beforeEach(() => {
+  at("/");
+});
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+// ---------------------------------------------------------------------------
+// Daftar Jurnal
+// ---------------------------------------------------------------------------
+
+describe("Daftar Jurnal: the ledger, including what was reversed", () => {
+  test("a REVERSED document is listed and reads as reversed, never as removed", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal");
+    stubFetch(
+      handler({
+        daftar: [ringkasan({ status: "REVERSED", reversedByJurnalId: "j2" })],
+      }),
+    );
+    const view = await mount(<App />);
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("JU-2026-03-0007");
+    expect(teks).toContain("Dibalik");
+    expect(teks).not.toContain("dihapus dari buku besar");
+    view.unmount();
+  });
+
+  test("a verified draft reads as verified, not merely as a draft", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal");
+    stubFetch(
+      handler({ daftar: [ringkasan({ status: "DRAFT", verifiedAt: "2026-03-12T02:00:00.000Z" })] }),
+    );
+    const view = await mount(<App />);
+
+    expect(teksSemua(view.container)).toContain("Draft terverifikasi");
+    view.unmount();
+  });
+
+  test("the list carries no delete control for a posted document", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    expect(semuaTombol(view.container)).not.toContain("hapus");
+    expect(teksSemua(view.container)).toContain("jurnal pembalik");
+    view.unmount();
+  });
+
+  test("an Auditor may open the list, and finds nothing that writes", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal");
+    stubFetch(handler({ session: SESSION_AUDITOR }));
+    const view = await mount(<App />);
+
+    expect(teksSemua(view.container)).toContain("JU-2026-03-0007");
+    const tombolTeks = semuaTombol(view.container);
+    expect(tombolTeks).not.toContain("posting");
+    expect(tombolTeks).not.toContain("verifikasi dokumen");
+    expect(tombolTeks).not.toContain("pembalik");
+    view.unmount();
+  });
+
+  test("figures go through the money formatter, and none is the unreadable marker", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal");
+    stubFetch(handler({ daftar: [ringkasan({ keterangan: null })] }));
+    const view = await mount(<App />);
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("1.500.000,00");
+    expect(teks).not.toContain("tidak sah");
+    expect(teks).toContain("tanpa keterangan");
+    view.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The reversal screen. Spec 16 scenario 10.
+// ---------------------------------------------------------------------------
+
+describe("Hapus Jurnal Transaksi: it is a reversal, and it says so first", () => {
+  test("the page states the three facts before a document is even chosen", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/pembalik");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("bukan penghapusan");
+    expect(teks).toContain("Dokumen asal tetap ada di buku besar");
+    expect(teks).toContain("Sistem membentuk dokumen baru");
+    expect(teks).toContain("periode akuntansi yang masih terbuka");
+    view.unmount();
+  });
+
+  test("no control on the page is called hapus", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/pembalik");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    expect(semuaTombol(view.container)).not.toContain("hapus");
+    view.unmount();
+  });
+
+  test("choosing a document previews the swap, both sides, with the original kept", async () => {
+    const { mount, clickOn } = await import("./testing");
+    at("/jurnal/pembalik?dokumen=j1");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("Dokumen asal JU-2026-03-0007, tetap ada");
+    expect(teks).toContain("Jurnal pembalik yang akan dibentuk");
+    // The swapped side is shown, not described: the credit leg of the preview
+    // carries the debit amount of the original.
+    expect(view.container.querySelectorAll(".banding-sisi").length).toBe(2);
+    expect(teks).toContain("nomor dialokasikan server");
+    void clickOn;
+    view.unmount();
+  });
+
+  test("the reason is mandatory and a short one does not arm the control", async () => {
+    const { mount, typeIntoTextarea } = await import("./testing");
+    at("/jurnal/pembalik?dokumen=j1");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    const kirim = tombol(view.container, "Buat jurnal pembalik");
+    expect(kirim.disabled).toBe(true);
+
+    const area = view.container.querySelector("#alasan-pembalik") as HTMLTextAreaElement;
+    await typeIntoTextarea(area, "salah");
+    expect(tombol(view.container, "Buat jurnal pembalik").disabled).toBe(true);
+
+    await typeIntoTextarea(area, "Salah akun beban, dikoreksi ke akun yang benar");
+    expect(tombol(view.container, "Buat jurnal pembalik").disabled).toBe(false);
+    view.unmount();
+  });
+
+  test("the confirmation says the original is kept, and asks for the document number", async () => {
+    const { mount, typeIntoTextarea, clickOn } = await import("./testing");
+    at("/jurnal/pembalik?dokumen=j1");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    const area = view.container.querySelector("#alasan-pembalik") as HTMLTextAreaElement;
+    await typeIntoTextarea(area, "Salah akun beban, dikoreksi ke akun yang benar");
+    await clickOn(tombol(view.container, "Buat jurnal pembalik"));
+
+    const teks = teksSemua(document.body as unknown as HTMLElement);
+    expect(teks).toContain("Dokumen asal tidak dihapus");
+    expect(teks).toContain("Tetap ada di buku besar, status menjadi Dibalik");
+    expect(teks).toContain("Ketik nomor dokumen asal untuk mengonfirmasi");
+    view.unmount();
+  });
+
+  test("after the click the result is the NEW document, and the original is linked", async () => {
+    const { mount, typeIntoTextarea, typeInto, clickOn } = await import("./testing");
+    at("/jurnal/pembalik?dokumen=j1");
+    stubFetch(handler());
+    const view = await mount(<App />);
+
+    const area = view.container.querySelector("#alasan-pembalik") as HTMLTextAreaElement;
+    await typeIntoTextarea(area, "Salah akun beban, dikoreksi ke akun yang benar");
+    await clickOn(tombol(view.container, "Buat jurnal pembalik"));
+
+    const frasa = document.querySelector("#confirm-phrase-input") as HTMLInputElement;
+    await typeInto(frasa, "JU-2026-03-0007");
+    // Scoped to the dialog's own footer. The page carries a button with the
+    // same label, and clicking that one would merely reopen the dialog.
+    const konfirm = [...document.querySelectorAll(".modal-foot button")].find((b) =>
+      (b.textContent ?? "").includes("Buat jurnal pembalik"),
+    );
+    await clickOn(konfirm!);
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("JB-2026-03-0001");
+    expect(teks).toContain("Tidak ada dokumen yang dihapus");
+    expect(teks).toContain("tetap ada di buku besar dengan status Dibalik");
+
+    const kirim = calls.find((c) => c.method === "POST" && c.url.includes("/pembalik"));
+    expect(kirim).toBeDefined();
+    expect(JSON.parse(kirim!.body ?? "{}").alasan).toBe(
+      "Salah akun beban, dikoreksi ke akun yang benar",
+    );
+    view.unmount();
+  });
+
+  test("a document already reversed shows its pair instead of a second reversal", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/pembalik?dokumen=j1");
+    stubFetch(
+      handler({
+        detail: detail({
+          status: "REVERSED",
+          dibalikOleh: { id: "j2", noJurnal: "JB-2026-03-0001" },
+        }),
+      }),
+    );
+    const view = await mount(<App />);
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("sudah pernah dibalik");
+    expect(teks).toContain("JB-2026-03-0001");
+    expect(semuaTombol(view.container)).not.toContain("buat jurnal pembalik");
+    view.unmount();
+  });
+
+  test("a DRAFT is refused with the reason a draft is cancelled, not reversed", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/pembalik?dokumen=j1");
+    stubFetch(handler({ detail: detail({ status: "DRAFT", postedAt: null, dipostingOleh: null }) }));
+    const view = await mount(<App />);
+
+    expect(teksSemua(view.container)).toContain("belum diposting");
+    expect(teksSemua(view.container)).toContain("diperbaiki atau dibatalkan oleh pembuatnya");
+    view.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The three input forms
+// ---------------------------------------------------------------------------
+
+describe("Input jurnal: a draft is filed, and nothing on the form posts", () => {
+  test("Jurnal Umum offers no posting control, and says what a draft is", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/umum");
+    stubFetch(handler({ session: SESSION_MAKER }));
+    const view = await mount(<App />);
+
+    const tombolTeks = semuaTombol(view.container);
+    expect(tombolTeks).toContain("simpan draft jurnal umum");
+    expect(tombolTeks).not.toContain("posting");
+    expect(teksSemua(view.container)).toContain("belum masuk buku besar");
+    view.unmount();
+  });
+
+  test("an unbalanced document names the difference and keeps the control closed", async () => {
+    const { mount, typeInto, selectOption } = await import("./testing");
+    at("/jurnal/umum");
+    stubFetch(handler({ session: SESSION_MAKER }));
+    const view = await mount(<App />);
+
+    const akunSatu = view.container.querySelector("#baris-1-akun") as HTMLSelectElement;
+    const akunDua = view.container.querySelector("#baris-2-akun") as HTMLSelectElement;
+    expect(akunSatu).toBeTruthy();
+    await selectOption(akunSatu, "a1");
+    await selectOption(akunDua, "a2");
+    await typeInto(view.container.querySelector("#baris-1-jumlah") as HTMLInputElement, "1.000.000");
+    await typeInto(view.container.querySelector("#baris-2-jumlah") as HTMLInputElement, "900.000");
+
+    expect(teksSemua(view.container)).toContain("Debit dan kredit belum sama, selisih 100.000,00");
+    expect(tombol(view.container, "Simpan draft jurnal umum").disabled).toBe(true);
+    view.unmount();
+  });
+
+  test("the account picker offers only postable accounts", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/umum");
+    stubFetch(handler({ session: SESSION_MAKER }));
+    const view = await mount(<App />);
+
+    const pilihan = [...(view.container.querySelector("#baris-1-akun")?.querySelectorAll("option") ?? [])]
+      .map((o) => o.textContent ?? "")
+      .join(" | ");
+    expect(pilihan).toContain("5.1.01");
+    // 1.1 Aset Lancar is a header account and would be refused by the engine.
+    expect(pilihan).not.toContain("Aset Lancar");
+    view.unmount();
+  });
+
+  test("Kas Bank puts KAS_BANK_TANPA_AKUN_KAS on the cash account field", async () => {
+    const { mount, typeInto, selectOption, clickOn } = await import("./testing");
+    at("/jurnal/kas-bank");
+    stubFetch(
+      handler({
+        session: SESSION_MAKER,
+        buat: json(400, {
+          error: "Jurnal Kas Bank harus memakai akun kas atau bank di salah satu sisinya.",
+          code: "VALIDASI",
+          kodeDomain: "KAS_BANK_TANPA_AKUN_KAS",
+        }),
+      }),
+    );
+    const view = await mount(<App />);
+
+    await selectOption(view.container.querySelector("#kas-akun") as HTMLSelectElement, "a2");
+    await typeInto(view.container.querySelector("#kas-jumlah") as HTMLInputElement, "1.000.000");
+    await selectOption(view.container.querySelector("#baris-1-akun") as HTMLSelectElement, "a1");
+    await typeInto(view.container.querySelector("#baris-1-jumlah") as HTMLInputElement, "1.000.000");
+
+    await clickOn(tombol(view.container, "Simpan draft jurnal kas bank"));
+
+    const field = view.container.querySelector("#kas-akun")?.closest(".field");
+    expect((field?.textContent ?? "")).toContain("akun kas atau bank");
+    expect(field?.className).toContain("has-error");
+    view.unmount();
+  });
+
+  test("the cash account picker offers only accounts the chart marks as cash", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/kas-bank");
+    stubFetch(handler({ session: SESSION_MAKER }));
+    const view = await mount(<App />);
+
+    const pilihan = [...(view.container.querySelector("#kas-akun")?.querySelectorAll("option") ?? [])]
+      .map((o) => o.textContent ?? "")
+      .join(" | ");
+    expect(pilihan).toContain("1.1.01 Kas");
+    expect(pilihan).not.toContain("Beban Pembinaan");
+    view.unmount();
+  });
+
+  test("Pinbuk falls back to a free category field and says why, when the parameter is refused", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/pinbuk");
+    stubFetch(handler({ session: SESSION_MAKER }));
+    const view = await mount(<App />);
+
+    const kategori = view.container.querySelector("#pinbuk-kategori");
+    expect(kategori?.tagName).toBe("INPUT");
+    expect(teksSemua(view.container)).toContain("parameter sistem yang tidak terbaca oleh peran Anda");
+    view.unmount();
+  });
+
+  test("saving answers with the DRAFT that was filed, and names who acts next", async () => {
+    const { mount, typeInto, selectOption, clickOn } = await import("./testing");
+    at("/jurnal/umum");
+    stubFetch(handler({ session: SESSION_MAKER }));
+    const view = await mount(<App />);
+
+    await selectOption(view.container.querySelector("#baris-1-akun") as HTMLSelectElement, "a1");
+    await selectOption(view.container.querySelector("#baris-2-akun") as HTMLSelectElement, "a2");
+    await typeInto(view.container.querySelector("#baris-1-jumlah") as HTMLInputElement, "1.000.000");
+    await typeInto(view.container.querySelector("#baris-2-jumlah") as HTMLInputElement, "1.000.000");
+    await clickOn(tombol(view.container, "Simpan draft jurnal umum"));
+
+    const teks = teksSemua(view.container);
+    expect(teks).toContain("JU-2026-03-0009");
+    expect(teks).toContain("belum masuk buku besar");
+    expect(teks).toContain("Checker membuka Verifikasi Jurnal");
+
+    const kirim = calls.find((c) => c.method === "POST" && c.url.endsWith("/jurnal"));
+    const badan = JSON.parse(kirim?.body ?? "{}");
+    expect(badan.jenis).toBe("UMUM");
+    // Exactly one side per line, and money as a decimal string, never a number.
+    expect(badan.baris[0].debit).toBe("1000000.00");
+    expect(badan.baris[0].kredit).toBeUndefined();
+    expect(typeof badan.baris[0].debit).toBe("string");
+    // The four fields the router refuses are never sent.
+    expect(badan.referensiTipe).toBeUndefined();
+    expect(badan.kunciIdempotensi).toBeUndefined();
+    expect(badan.isAutoGenerated).toBeUndefined();
+    view.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Verification and posting
+// ---------------------------------------------------------------------------
+
+describe("Verifikasi dan Posting", () => {
+  test("the verification screen shows the control on the user's own document, and warns", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/verifikasi?dokumen=j1");
+    stubFetch(
+      handler({
+        daftar: [ringkasan({ status: "DRAFT", verifiedAt: null, diverifikasiOleh: null })],
+        detail: detail({
+          status: "DRAFT",
+          verifiedAt: null,
+          diverifikasiOleh: null,
+          dibuatOleh: "Sri Handayani",
+        }),
+      }),
+    );
+    const view = await mount(<App />);
+
+    expect(teksSemua(view.container)).toContain("Server menolak verifikasi oleh pembuat dokumen");
+    // The control stays, because the refusal is the evidence the rule is real.
+    expect(semuaTombol(view.container)).toContain("verifikasi dokumen ini");
+    view.unmount();
+  });
+
+  test("the verification screen offers no return to maker, and says why", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/verifikasi");
+    stubFetch(handler({ daftar: [ringkasan({ status: "DRAFT", verifiedAt: null })] }));
+    const view = await mount(<App />);
+
+    expect(semuaTombol(view.container)).not.toContain("kembalikan");
+    expect(teksSemua(view.container)).toContain("server tidak punya jalurnya");
+    view.unmount();
+  });
+
+  test("the posting screen is honest that the engine does not require verification", async () => {
+    const { mount } = await import("./testing");
+    at("/jurnal/posting");
+    stubFetch(handler({ daftar: [ringkasan({ status: "DRAFT", verifiedAt: null })] }));
+    const view = await mount(<App />);
+
+    expect(teksSemua(view.container)).toContain(
+      "Engine tidak mensyaratkan verifikasi sebelum posting",
+    );
+    view.unmount();
+  });
+
+  test("the batch confirmation states that one refusal leaves nothing posted", async () => {
+    const { mount, clickOn } = await import("./testing");
+    at("/jurnal/posting");
+    stubFetch(handler({ daftar: [ringkasan({ status: "DRAFT", verifiedAt: null })] }));
+    const view = await mount(<App />);
+
+    await clickOn(view.container.querySelector("#pilih-j1") as HTMLInputElement);
+    await clickOn(tombol(view.container, "dokumen sekaligus"));
+
+    expect(teksSemua(document.body as unknown as HTMLElement)).toContain(
+      "tidak ada satu pun yang masuk buku besar",
+    );
+    view.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// House style
+// ---------------------------------------------------------------------------
+
+describe("House style holds on every journal screen", () => {
+  for (const path of [
+    "/jurnal",
+    "/jurnal/umum",
+    "/jurnal/kas-bank",
+    "/jurnal/pinbuk",
+    "/jurnal/verifikasi",
+    "/jurnal/posting",
+    "/jurnal/pembalik",
+  ]) {
+    test(`${path} carries no long dash and no unreadable figure`, async () => {
+      const { mount } = await import("./testing");
+      at(path);
+      stubFetch(handler());
+      const view = await mount(<App />);
+
+      const teks = teksSemua(view.container);
+      expect(teks).not.toContain(LONG_DASH);
+      expect(teks).not.toContain("tidak sah");
+      expect(teks.length).toBeGreaterThan(200);
+      view.unmount();
+    });
+  }
+});

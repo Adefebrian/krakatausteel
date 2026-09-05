@@ -45,6 +45,14 @@ export const PERMISSIONS = [
 
   "jurnal.view",
   "jurnal.create",
+  // Correcting and cancelling one's OWN draft, before anyone verified it.
+  // Neither touches a POSTED entry: the engine refuses that, and correction
+  // after posting is a reversal. They were absent from this mirror while the
+  // server already granted both to the MAKER, and the parity test only
+  // enforces the web list being a SUBSET, so nothing was red and the journal
+  // screens could not offer a Maker the two controls the API gives them.
+  "jurnal.update",
+  "jurnal.delete",
   "jurnal.verify",
   "jurnal.post",
   "jurnal.reversal",
@@ -188,6 +196,10 @@ const MAKER: Permission[] = [
   "nonpumk.penyaluran",
   "nonpumk.lpj",
   "jurnal.create",
+  // The Maker owns its own DRAFT journals, so it must be able to correct and
+  // cancel one before a Checker verifies it. Mirrors the server's own grant.
+  "jurnal.update",
+  "jurnal.delete",
   "portal.konversi",
   "tools.import",
   // Spec 12 priority 1, and spec 12 says who it is for: "Manfaat terbesar bagi

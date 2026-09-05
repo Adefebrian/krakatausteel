@@ -5502,3 +5502,581 @@ h3 {
     flex: 1 1 100%;
   }
 }
+
+/* ===========================================================================
+   JURNAL, PORTAL PETUGAS, DAN IMPOR MASSAL (spec 9.4, 9.5, 9.6)
+
+   Three modules, one set of primitives, because they are one product. The
+   fact grid, the line editor, the running total and the queue row below are
+   shared by all three surfaces so a document opened on the journal list, a
+   submission opened on the portal queue and a rejection report opened on an
+   import read as one system rather than as three designs.
+
+   Every card in every grid here shares one radius, one border weight, one
+   padding, and pins its repeated element to one baseline. Nothing in this
+   block introduces a gradient, a glow, a coloured page background, or a
+   decorative rule: the only lines are structural borders and table rules that
+   separate real data.
+   =========================================================================== */
+
+/* A filter control that legitimately wants the whole row: a search box reads
+   badly at 260px next to five narrow selects, and wrapping it onto its own
+   line keeps the filter block one rhythm instead of a ragged edge. */
+.filter-laporan-group.is-lebar {
+  flex: 1 1 100%;
+  max-width: none;
+}
+
+/* ------------------------------------------------------------- fact grids */
+
+/*
+  The header facts of one document. One shape on the journal detail, the
+  reversal preview, the submission detail and the mitra profile, so a reader
+  moving between them never has to relearn where a value is.
+
+  `auto-fill` with a floor rather than a fixed column count: the same grid has
+  to hold four facts on a phone and twelve on a monitor without either becoming
+  a ladder or a squeeze.
+*/
+.fakta-grid {
+  display: grid;
+  gap: var(--space-3) var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  margin: 0;
+}
+
+.fakta-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.fakta-key {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.fakta-val {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+/* A section heading inside a panel body, one step under the panel title. */
+.sub-judul {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: none;
+}
+
+/* --------------------------------------------------------- table cell bits */
+
+/*
+  A journal keterangan is free text and can be a paragraph. Clamped to two
+  lines so one verbose document cannot make its row four times the height of
+  its neighbours, which is what turns a ledger into a ragged pile.
+*/
+.sel-keterangan {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sel-akun {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sel-akun-kode {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-medium);
+}
+
+.sel-akun-nama {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------- journal lines on a phone */
+
+/*
+  One journal line as a card. A FIXED shape: code and side on the head row,
+  account name on the second, note and figure on a pinned foot. Nothing a line
+  carries can make one card taller than its neighbour.
+*/
+.baris-kartu-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.baris-kartu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+}
+
+.baris-kartu-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.baris-kartu-kode {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+}
+
+.baris-kartu-sisi {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.baris-kartu-nama {
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+/* Pinned, so the figure rests on one baseline across every card in the list
+   even when the account names above them wrap differently. */
+.baris-kartu-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: var(--border-weight) solid var(--color-border);
+}
+
+.baris-kartu-ket {
+  min-width: 0;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.baris-kartu-nilai {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ line editor */
+
+.baris-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.baris-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+  ONE CARD PER LINE, ONE SHAPE, whatever the line carries. The remove control
+  sits on its own row rather than inline with the fields, so it is a full
+  height target at every width and never becomes the thing an operator hits
+  while reaching for the amount.
+*/
+.baris-editor-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.baris-editor-grid {
+  display: grid;
+  gap: var(--space-3) var(--space-4);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 2fr);
+  align-items: start;
+}
+
+.baris-editor-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.baris-editor-aksi {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.baris-editor-tambah {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* ---------------------------------------------------------- running total */
+
+/*
+  Debit, credit, difference. The difference cell is toned by state and ALWAYS
+  carries its own label and figure, so the state is never carried by colour
+  alone.
+*/
+.total-berjalan {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.total-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.total-item.is-seimbang {
+  border-color: var(--color-success-border);
+  background: var(--color-success-weak);
+}
+
+.total-item.is-selisih {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-weak);
+}
+
+.total-key {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.total-val {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-body);
+  line-height: var(--leading-subhead);
+  font-weight: var(--weight-semibold);
+}
+
+/* ------------------------------------------------------------- checkboxes */
+
+/* A 44px target with a real label, so a bulk selection is reachable by
+   keyboard and by thumb rather than being a 13px box next to some text. */
+.kotak-pilih {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+
+.kotak-pilih input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.kotak-pilih input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.kotak-pilih-teks {
+  /* The label names the row for a screen reader; the row itself is already on
+     screen, so the text is not repeated visually. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------- the posting queue */
+
+.antrean-posting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.antrean-posting-item {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/*
+  The row itself is one target and one shape: number and badge on the head,
+  one meta line, then the note and the figure on a pinned foot. Equal heights
+  across the queue come from the clamp on the note plus the pinned foot, not
+  from a fixed height that would clip a long document number.
+*/
+.antrean-posting-btn {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: var(--touch-target);
+  padding: var(--space-3);
+  border: var(--border-weight) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.antrean-posting-btn:hover {
+  background: var(--color-surface);
+}
+
+.antrean-posting-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.antrean-posting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.antrean-posting-no {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-semibold);
+}
+
+.antrean-posting-sub {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+.antrean-posting-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-2);
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+}
+
+.antrean-posting-ket {
+  min-width: 0;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.antrean-posting-nilai {
+  font-family: var(--font-numeric);
+  font-variant-numeric: var(--numeric-variant);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------- the reversal comparison */
+
+/*
+  The one panel in the product that has to be read before a click rather than
+  after it. It is toned as a note, not as an alarm: this is the correct and
+  ordinary way to fix a posted entry, and a red panel would read as "something
+  has gone wrong" on a page where nothing has.
+*/
+.panel-pembalik {
+  border-color: var(--color-caution-border);
+  background: var(--color-caution-weak);
+}
+
+/*
+  ONE MEASURE PER PANEL, NOT TWO.
+
+  `.langkah-list` runs to the panel edge and `.peringatan-teks` stops at its own
+  reading measure, so a panel holding both showed a numbered list running to
+  1090px above a paragraph stopping at 630px, which reads as an alignment fault
+  rather than as typography. Caught by looking at the page at 1440, not by a
+  test.
+
+  `panel-panduan` marks the three "read this before you act" panels that carry
+  both, and gives them one measure. It is a class rather than a rule on every
+  `.panel-body`, so no screen outside these three changes width.
+*/
+.panel-panduan .langkah-list,
+.panel-panduan .peringatan-teks,
+.panel-sandi .peringatan-teks {
+  max-width: 92ch;
+}
+
+.banding-sisi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.banding-judul {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.banding-sub {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------ the one time password */
+
+.panel-sandi {
+  border-color: var(--color-caution-border);
+  background: var(--color-caution-weak);
+}
+
+/*
+  The password itself. Monospaced and selectable, wrapping rather than
+  scrolling, because an officer reading it aloud or copying it by hand must be
+  able to see every character at once.
+*/
+.sandi-nilai {
+  display: inline-block;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-weight) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  letter-spacing: 0.04em;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------ breakpoints */
+
+@media (max-width: 1100px) {
+  /* Four fields in a line editor row stop being comfortable well before the
+     layout stops fitting: the account select and the note both need room to
+     read, so they pair up rather than shrink. */
+  .baris-editor-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .banding {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .total-berjalan {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .baris-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .baris-editor-item {
+    padding: var(--space-3);
+  }
+  /*
+    TWO COLUMNS ON A PHONE, NOT ONE.
+
+    A document header carries twelve facts, and one column turns them into a
+    twelve card ladder an operator scrolls past to reach the thing they came
+    for. At 140px a label like "Tanggal transaksi" and a value like
+    "02-03-2026" both fit at 320 as well as at 390, so the pair stays two up
+    and the header stays one screen. Seen at 390, not caught by a test.
+  */
+  .fakta-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+  /*
+    ONE SHAPE PER ROW ON A PHONE, NOT A SHAPE PER LABEL LENGTH.
+
+    Wrapping put "Draft" beside its document number and "Draft terverifikasi"
+    on a second line, so two rows of the same list had two different heights
+    and the list stopped reading as one system. Stacking unconditionally makes
+    every row the same shape whatever its badge says. Seen at 320, not caught
+    by a test.
+  */
+  .antrean-posting-head {
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: var(--space-1);
+  }
+  /*
+    And the note gets its own line rather than a one line clamp next to the
+    figure: at 320 the clamp left "Reklasifika..." , which is a keterangan
+    nobody can read. Two lines above the amount is legible and still bounded,
+    so rows stay equal height.
+  */
+  .antrean-posting-foot {
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: var(--space-1);
+  }
+  .antrean-posting-ket {
+    -webkit-line-clamp: 2;
+  }
+}
