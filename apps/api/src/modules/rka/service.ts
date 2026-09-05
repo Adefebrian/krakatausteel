@@ -53,6 +53,7 @@
 // modules/angsuran's test-support records as having cost this project two
 // production defects.
 import { canonicalPermission } from "../auth/index";
+import { tanggalLokal } from "../../core/waktu";
 import {
   DIMENSI_UNTUK_JENIS,
   KUNCI_KONFIGURASI_RKA,
@@ -613,7 +614,7 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
       sampaiTanggal: utama.tanggal_akhir,
       cabangId: opsi.cabangId,
       namaCabang,
-      tanggalCetak: jam().toISOString().slice(0, 10),
+      tanggalCetak: tanggalLokal(jam()),
       dicetakOleh: pengguna?.nama ?? "",
       // modules/laporan's vocabulary for the claim `sumberRealisasi` makes per
       // row. See `HeaderLaporanRka`.

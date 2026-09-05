@@ -33,6 +33,7 @@
 //
 // AND IT WRITES NOTHING. Every statement in ./repo.ts is a SELECT; spec 16
 // scenario 23 is a standing constraint on this file.
+import { tanggalLokal } from "../../core/waktu";
 import {
   KODE_LAPORAN,
   NAMA_LAPORAN,
@@ -516,7 +517,7 @@ export function buatEngineLaporan(deps: LaporanEngineDeps): LaporanEngine {
     // `pastikanCabang(ctx, filter.cabangId)`. Only this one is entity-level.
     const cabangId = null;
     const namaCabang = "Semua Cabang";
-    const hariIni = jam().toISOString().slice(0, 10);
+    const hariIni = tanggalLokal(jam());
     const templat = await muatTemplat(ctx.bumnId, hariIni, null);
 
     const kodeBaris = new Map<string, string>();

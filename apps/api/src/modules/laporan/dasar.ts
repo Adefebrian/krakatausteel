@@ -31,6 +31,7 @@
 // only; spec 16 scenario 23 is a standing constraint on this module and it is
 // structural here rather than disciplined.
 import { PERMISSIONS } from "../auth";
+import { tanggalLokal } from "../../core/waktu";
 import {
   KODE_LAPORAN,
   KUNCI_KONFIGURASI_LAPORAN,
@@ -250,7 +251,7 @@ export function buatDasarLaporan(deps: DasarDeps): DasarLaporan {
       sampaiTanggal: opsi.sampaiTanggal,
       cabangId: opsi.cabangId,
       namaCabang: opsi.namaCabang,
-      tanggalCetak: jam().toISOString().slice(0, 10),
+      tanggalCetak: tanggalLokal(jam()),
       dicetakOleh: pengguna?.nama ?? "",
       sumberData: opsi.sumberData,
       // A report with no layout template says so rather than naming one it did
@@ -267,7 +268,7 @@ export function buatDasarLaporan(deps: DasarDeps): DasarLaporan {
     repo,
     tx,
     jam,
-    hariIni: () => jam().toISOString().slice(0, 10),
+    hariIni: () => tanggalLokal(jam()),
     pastikanIzin,
     pastikanCabang,
     cabangUntukQuery,
