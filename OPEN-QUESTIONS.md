@@ -675,3 +675,48 @@ hibah itu dilebarkan test ini yang bicara.
 memuat `laporan.export`. Berkas itu sedang dipegang agen lain saat pekerjaan ini dikerjakan.
 Mirrornya wajib ditambah sebelum tombol ekspor muncul di layar mana pun; sampai itu terjadi, rute
 ekspor tetap benar dan tetap dijaga server, tetapi SPA tidak punya cara mengecek izinnya.
+
+---
+
+## 31. Posting jurnal manual TIDAK menuntut verifikasi, jadi Checker bisa dilewati
+
+**Ditemukan 2026-09-02** saat membangun layar Posting Jurnal, oleh agen yang membaca engine-nya
+sebelum menggambar layarnya.
+
+`postingSatu` di `apps/api/src/modules/jurnal/service.ts` memeriksa: jurnalnya ada, statusnya
+DRAFT, tidak ada yang mendahului, cabangnya dalam scope, periodenya OPEN, barisnya minimal dua,
+dan debit sama dengan kredit. **Tidak ada satu pun pemeriksaan atas `verified_at`, dan tidak ada
+pemeriksaan bahwa yang mem-posting bukan yang membuat.**
+
+Akibatnya dua, dan yang kedua lebih serius:
+
+1. Jurnal manual bisa di-posting tanpa pernah diverifikasi, jadi langkah Checker bisa dilewati
+   sepenuhnya.
+2. Pemegang `jurnal.create` dan `jurnal.post` sekaligus, yaitu **ADMIN_CABANG dan ADMIN_PUSAT**,
+   bisa membuat lalu mem-posting jurnalnya sendiri, tanpa orang kedua di mana pun.
+
+Yang bikin ini bukan sekadar kelonggaran: modul ini **sudah** menegakkan maker bukan checker di
+`verifikasiJurnal`. Aturan yang bisa dilewati dengan mengambil jalan lain bukan aturan yang
+ditegakkan, itu aturan yang kelihatan ditegakkan.
+
+Jalur engine tidak terpengaruh. `postingEvent` tidak memanggil `postingSatu`, jadi ini murni soal
+jurnal manual, yang justru tempat spesifikasi bagian 2 menuntut maker checker approver.
+
+**Kenapa belum diperbaiki.** Ada 39 titik pemanggilan `postingJurnal` di seluruh repo, sebagian
+besar fixture yang mem-posting draft tanpa langkah verifikasi. Menambahkan syaratnya bukan satu
+baris, dan lebih penting lagi ini **keputusan model kontrol**, bukan perbaikan mekanis. Ada
+pembacaan yang sah bahwa verifikasi adalah tinjauan opsional dan posting adalah tindakan
+otoritatifnya. Saya tidak mau memutuskannya sendirian di akhir sesi panjang, pada sistem yang
+pemiliknya sudah memilihnya jadi pemegang buku resmi.
+
+**Pilihan yang perlu diputuskan pemilik:**
+
+1. Posting menuntut `verified_at` terisi, dan yang mem-posting bukan yang membuat. Paling dekat
+   dengan bunyi spesifikasi bagian 2.
+2. Sama dengan 1, ditambah yang mem-posting juga bukan yang memverifikasi. Tiga orang penuh.
+3. Biarkan seperti sekarang, dan nyatakan di dokumentasi bahwa verifikasi jurnal adalah tinjauan
+   opsional. Kalau ini yang dipilih, `verifikasiJurnal` sebaiknya berhenti menegakkan maker bukan
+   checker, karena penegakan yang bisa dilewati lebih buruk daripada tidak ada.
+
+**Pemilik:** pemilik `modules/jurnal`, dengan konfirmasi tim akuntansi.
+**Batas waktu:** sebelum role dibagikan ke pengguna nyata.
