@@ -1049,16 +1049,25 @@ describe("Bagian 16", () => {
     expect(rek.cocok).toBe(true);
   });
 
-  test("skenario 19b: TEMUAN, Tools Rekonsiliasi dan Integritas TERTUTUP untuk Auditor", async () => {
-    // Not a softening of scenario 19, a separate reading of it. `tools.rekonsiliasi`
-    // is granted to CHECKER (and inherited by the two admin roles);
-    // `tools.integritas` only to ADMIN_CABANG and ADMIN_PUSAT. The AUDITOR role,
-    // which scenario 23 describes as the one that opens everything read-only,
-    // holds neither, so the reconciliation an auditor would most want is the
-    // one screen refused to them. Asserted so the decision is visible rather
-    // than discovered.
-    expect((await d.panggil("AUDITOR", "/tools/rekonsiliasi/piutang")).status).toBe(403);
-    expect((await d.panggil("AUDITOR", "/tools/integritas")).status).toBe(403);
+  test("skenario 19b: Auditor boleh membuka Rekonsiliasi dan Integritas, dan TETAP tidak boleh impor", async () => {
+    // This ran as a FINDING and is now the inverted assertion. The Auditor
+    // held neither code, so the reconciliation an auditor asks for first was
+    // the one read-only screen refused to the role scenario 23 describes as
+    // opening everything. Granted 2026-09-02: every route on modules/tools is
+    // a GET and the module is composed with no journal port and no audit port,
+    // so there was no write path being withheld.
+    expect((await d.panggil("AUDITOR", "/tools/rekonsiliasi/piutang")).status).toBe(200);
+    expect((await d.panggil("AUDITOR", "/tools/integritas")).status).toBe(200);
+
+    // The half that must NOT move. `tools.import` is the WRITING half of spec
+    // 9.6 and stays with the Maker, so widening the read did not widen the
+    // role. Asserted in the same test as the grant, because a grant and the
+    // boundary it must not cross belong in one place.
+    const impor = await d.panggil("AUDITOR", "/impor/MITRA/pratinjau", {
+      method: "POST",
+      body: { namaBerkas: "x.csv", isiBase64: btoa("a\n") },
+    });
+    expect(impor.status).toBe(403);
   });
 
   test("skenario 20: export lima laporan ke Excel, dan ke PDF", async () => {

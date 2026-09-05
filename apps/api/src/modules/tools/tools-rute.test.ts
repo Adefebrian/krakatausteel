@@ -114,16 +114,31 @@ describe("tools: rute HTTP", () => {
   });
 
   /**
-   * AUDITOR does NOT hold `tools.integritas` on the shipped grant matrix
-   * (modules/auth/permissions.ts grants it to ADMIN_CABANG, and so to
-   * ADMIN_PUSAT). Asserted as it SHIPS rather than quietly widened here:
-   * whether the read-only evidence role should be able to open the health
-   * check is a catalogue decision, and this module is not the place to make
-   * it. Reported alongside this phase.
+   * DECIDED 2026-09-02, and this assertion is the inverted one.
+   *
+   * The Auditor used to be refused here, asserted as it shipped rather than
+   * quietly widened, because whether the read only evidence role may open the
+   * health check is a catalogue decision and this module was not the place to
+   * make it. The acceptance run then named the contradiction: spec 2 calls the
+   * role read only PENUH and scenario 23 has it opening everything, yet the
+   * one reconciliation an external auditor asks for first was the single read
+   * only screen closed to it.
+   *
+   * Granting it withholds nothing, and that is the argument. Every route here
+   * is a GET and the module is composed with no journal port and no audit
+   * port, so there is no write path to protect.
    */
-  test("AUDITOR ditolak di health check, sesuai katalog izin yang dikirim", async () => {
+  test("AUDITOR boleh membuka health check: seluruhnya GET, dan modulnya tanpa port tulis", async () => {
     const res = await f.request("/tools/integritas", { cookie: cookieAuditor });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { hasil: { kode: string }[]; sehat: boolean };
+    expect(body.hasil).toHaveLength(9);
+    expect(body.sehat).toBe(true);
+  });
+
+  test("AUDITOR boleh membuka rekonsiliasi piutang, spec 8.4 butir 10", async () => {
+    const res = await f.request("/tools/rekonsiliasi/piutang", { cookie: cookieAuditor });
+    expect(res.status).toBe(200);
   });
 
   test("ADMIN_CABANG: cabang lain di query DITOLAK 403 dengan kodeDomain", async () => {

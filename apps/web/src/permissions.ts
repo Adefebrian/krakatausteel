@@ -138,6 +138,12 @@ const READ_ONLY: Permission[] = [
   "audit.view",
   "admin.closing.view",
   "admin.rka.view",
+  // The two diagnostic READS. Every route on modules/tools is a GET and the
+  // module is composed with no journal port and no audit port, so granting
+  // them to the read only role withholds nothing. `tools.import`, the writing
+  // half, deliberately stays with the Maker.
+  "tools.rekonsiliasi",
+  "tools.integritas",
   // Taking the evidence away. An auditor who may read every report but never
   // export one cannot produce a working paper.
   "laporan.export",

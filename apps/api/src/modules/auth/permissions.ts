@@ -355,6 +355,24 @@ const READ_ONLY: Permission[] = [
   // measured against: a variance the Auditor cannot trace to an approved
   // version is not evidence of anything.
   "admin.closing.view",
+  // THE TWO DIAGNOSTIC READS, granted 2026-09-02 after the acceptance run
+  // found the contradiction: the role spec 2 calls read only PENUH was the one
+  // role refused the reconciliation an external auditor asks for first.
+  //
+  // Both are safe to grant because there is nothing to withhold. Every route
+  // on `modules/tools` is a GET, and the module is wired with NO journal port
+  // and NO audit port, so "these endpoints diagnose, they never repair" is a
+  // property of the composition rather than a promise. `tools.rekonsiliasi` is
+  // spec 8.4 check 10, the sub ledger against the general ledger, which is
+  // also the check that blocks a period from closing; `tools.integritas` runs
+  // the same nine checks the demo seed's own acceptance gate runs, and its
+  // ninth is what caught the jasa administrasi misclassification that forty
+  // six green checks had missed.
+  //
+  // `tools.import` deliberately does NOT join them. That is the writing half
+  // of spec 9.6 and stays with the Maker.
+  "tools.rekonsiliasi",
+  "tools.integritas",
   "admin.rka.view",
   // Taking the evidence away. An auditor who may read every report but never
   // export one cannot produce a working paper, and attesting outside this
@@ -382,6 +400,11 @@ const HANYA_BUKTI: readonly Permission[] = [
   "admin.rka.view",
   "laporan.export",
   "ai.anomali",
+  // Evidence, not everybody's: CHECKER and ADMIN_CABANG still hold their own
+  // grant below, so this only stops the two codes flowing to every role that
+  // can log in.
+  "tools.rekonsiliasi",
+  "tools.integritas",
 ];
 
 const LIHAT: Permission[] = READ_ONLY.filter((p) => !HANYA_BUKTI.includes(p));

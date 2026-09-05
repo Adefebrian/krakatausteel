@@ -99,7 +99,19 @@ describe("visibleNav hides what the permission set lacks", () => {
   test("Auditor is read only: reports yes, every input page no", () => {
     const ids = groupIds(PERMISSIONS_BY_ROLE.AUDITOR);
     expect(ids).toContain("laporan");
-    expect(ids).not.toContain("tools");
+    // The Tools group IS visible, and holds exactly the two DIAGNOSTIC pages.
+    // Decided 2026-09-02: both are GET only and the module is composed with no
+    // journal port and no audit port, so granting them withholds nothing, and
+    // refusing the read only role the one reconciliation an external auditor
+    // asks for first was the contradiction. What the Auditor must still NOT
+    // see is the import pages, which are the writing half of spec 9.6 and stay
+    // with the Maker. Asserted as the exact list, so a third read only tool
+    // added later is a deliberate change rather than a silent one.
+    expect(ids).toContain("tools");
+    expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "tools")).toEqual([
+      "Rekonsiliasi Piutang",
+      "Cek Integritas",
+    ]);
     expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "pumk")).not.toContain("Input Proposal");
     expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "pumk")).not.toContain("Pencairan");
     expect(labels(PERMISSIONS_BY_ROLE.AUDITOR, "jurnal")).toEqual(["Daftar Jurnal"]);
