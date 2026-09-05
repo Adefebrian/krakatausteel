@@ -129,7 +129,22 @@ export function parseCsv(teks: string): HasilCsv {
     throw new KesalahanCsv("NUL", "Berkas memuat byte NUL dan tidak bisa diproses.");
   }
   const bersih = teks.charCodeAt(0) === 0xfeff ? teks.slice(1) : teks;
-  const mentah = pisah(bersih);
+  return dariMatriks(pisah(bersih));
+}
+
+/**
+ * The half of `parseCsv` that is NOT about commas and quotes: header
+ * normalisation, blank-row skipping, column-count checking, and keying each
+ * row by its header name.
+ *
+ * EXTRACTED SO XLSX AND CSV VALIDATE IDENTICALLY. `parseXlsx` (./xlsx.ts)
+ * produces the same matrix a CSV parse produces and hands it here, so "the
+ * header is wrong", "row 12 has the wrong number of columns" and "row 3 is
+ * blank" mean exactly the same thing whichever file the operator uploaded.
+ * Two copies of this would be two definitions of a valid file, and the one
+ * the .xlsx path got would be the one nobody had tested.
+ */
+export function dariMatriks(mentah: readonly { nomorBaris: number; sel: string[] }[]): HasilCsv {
   if (mentah.length === 0) throw new KesalahanCsv("KOSONG", "Berkas tidak berisi apa-apa.");
 
   const barisHeader = mentah[0]!;

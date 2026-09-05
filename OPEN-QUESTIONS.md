@@ -634,3 +634,44 @@ dijalankan ulang.
 menjelaskan tombol closing dengan kode itu. Keduanya tetap hijau karena kodenya masih ada di
 katalog, tetapi keduanya sekarang menggambarkan kebijakan yang sudah tidak berlaku. Diserahkan ke
 pemilik `apps/web`.
+
+## 30. Apakah Maker dan Checker boleh MENGUNDUH laporan, bukan cuma membacanya?
+
+`laporan.export` sekarang ada di katalog (spec 10: "ekspor ke Excel dan PDF"), terpisah dari
+`laporan.view`, dan dipegang **AUDITOR** dan **APPROVER** (karena itu juga ADMIN_CABANG dan
+ADMIN_PUSAT). **MAKER dan CHECKER tidak memegangnya**: keduanya membuka semua laporan di layar,
+dan mendapat 403 kalau menekan unduh.
+
+**Kenapa dipisah sama sekali.** Layar itu berbatas: terikat scope cabang, terpaginasi, setiap
+pembukaannya meninggalkan sesi, dan yang keluar keluar selembar demi selembar. Ekspor adalah
+**berkas**: ekstraksi massal `mitra.nik`, `alamat`, `telepon` dan outstanding per orang bernama, ke
+bentuk yang dikirim lewat surel, disalin ke flashdisk, dan dibuka di mesin yang tidak pernah
+didengar sistem ini, tanpa pemeriksaan scope di seberang sana dan tanpa cara menariknya kembali.
+Kalau keduanya satu kode, sistem ini tidak punya cara mengucapkan "baca laporannya, jangan bawa
+salinannya", dan itu kalimat yang harus bisa diucapkan pemilik data sebuah BUMN.
+
+**Kenapa Maker dan Checker tidak dapat, dan kenapa itu pertanyaan dan bukan jawaban.** Keduanya
+adalah role dengan orang paling banyak dan alasan paling tipis untuk memegang seluruh register
+mitra satu cabang sebagai berkas; spec 2 tidak memberi keduanya tugas pelaporan di luar membaca.
+Tapi "Maker yang menyiapkan paket penyaluran bulanan" adalah alur kerja yang masuk akal dan belum
+pernah dijelaskan siapa pun kepada kami. Kalau memang begitu, ini **satu baris** di daftar `MAKER`
+di `modules/auth/permissions.ts`. Arahnya sengaja: melebarkan hibah belakangan adalah keputusan
+yang diambil dengan sadar, menyempitkannya setelah semua orang punya berkasnya bukan.
+
+**Yang perlu diputuskan:**
+
+1. Apakah Maker boleh mengunduh laporan operasional cabangnya sendiri.
+2. Apakah Checker boleh, mengingat perannya adalah memeriksa berkas orang lain, bukan membawanya.
+3. Kalau salah satunya boleh, apakah cukup semua 30 laporan, atau perlu dibedakan antara laporan
+   operasional dan laporan yang memuat NIK dan alamat.
+
+**Pemilik:** pemilik data dan tim kepatuhan Krakatau Steel.
+
+**Bukti perilaku sekarang:** `modules/laporan/laporan-ekspor.test.ts` memanggil rute ekspor sebagai
+keenam role dan membaca hibahnya dari `PERMISSIONS_BY_ROLE`, bukan menuliskannya ulang, jadi hari
+hibah itu dilebarkan test ini yang bicara.
+
+**Yang BUKAN milik butir ini, dan masih harus mendarat:** `apps/web/src/permissions.ts` belum
+memuat `laporan.export`. Berkas itu sedang dipegang agen lain saat pekerjaan ini dikerjakan.
+Mirrornya wajib ditambah sebelum tombol ekspor muncul di layar mana pun; sampai itu terjadi, rute
+ekspor tetap benar dan tetap dijaga server, tetapi SPA tidak punya cara mengecek izinnya.

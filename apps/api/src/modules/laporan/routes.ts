@@ -80,16 +80,21 @@
 // statement -- invariant 14 broken, and undetectable from the printed page,
 // which is precisely why the field is reported rather than accepted.
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { badRequest, notFound } from "../../core/http";
 import { requirePrincipal, type Guards, type Principal } from "../../core/principal";
 import type { LaporanContext, LaporanEngine } from "./contract";
 import {
   BATAS_AUDIT_TRAIL_MAKS,
+  type FilterAuditTrail,
   type HasilAudit,
   type LaporanOperasionalEngine,
   type ModeLaporan,
 } from "./kontrak-operasional";
-import type { LaporanBaca } from "./baca";
+import { KATALOG_LAPORAN, type LaporanBaca } from "./baca";
+import { KODE_LAPORAN, LaporanError } from "./contract";
+import { FORMAT_EKSPOR, berkasEkspor, type FormatEkspor } from "./ekspor";
+import type { PdfPort } from "../../core/ports/pdf";
 
 export interface LaporanRoutesDeps {
   engine: LaporanEngine;
@@ -97,6 +102,15 @@ export interface LaporanRoutesDeps {
   operasional: LaporanOperasionalEngine;
   baca: LaporanBaca;
   guards: Guards;
+  /**
+   * Server-side PDF rendering, or null on a host that has no browser.
+   *
+   * NULL IS A SUPPORTED STATE, not a misconfiguration: the export surface
+   * offers `xlsx` and `html` regardless, and `pdf` answers 503 with the
+   * sentence that tells an operator to print the HTML from their own browser.
+   * A deployment is not broken because it declined to ship a 400 MB renderer.
+   */
+  pdf?: PdfPort | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +275,79 @@ function filterLaporan(c: Kueri): { periodeId: string; cabangId: string | null }
 }
 
 /**
+ * The five filters that belong to ONE report each, extracted so the report's
+ * own route and its export route cannot drift.
+ *
+ * They used to be inline in their handlers. Inlining them was fine while there
+ * was one caller; with an export path there are two, and two hand-written
+ * copies of "which fields does Buku Besar take" is how an export ends up
+ * ignoring `akunId` and printing the wrong account under the right title.
+ */
+function filterBaganAkun(c: Kueri): boolean {
+  const cek = new Pemeriksa();
+  const hanyaAktif = cek.opsionalBoolean(q(c.req.query("hanyaAktif")), "hanyaAktif", false);
+  cek.selesai();
+  return hanyaAktif;
+}
+
+function filterBukuBesar(c: Kueri): { periodeId: string; cabangId: string | null; akunId: string } {
+  // ONE checker for all three fields, so a request with three malformed
+  // parameters is answered once with three of them.
+  const cek = new Pemeriksa();
+  const filter = {
+    ...bacaFilterLaporan(cek, c),
+    akunId: cek.wajibUuid(q(c.req.query("akunId")), "akunId"),
+  };
+  cek.selesai();
+  return filter;
+}
+
+function filterJatuhTempo(c: Kueri): {
+  dariTanggal: string;
+  sampaiTanggal: string;
+  cabangId: string | null;
+} {
+  const cek = new Pemeriksa();
+  const filter = {
+    dariTanggal: cek.wajibTanggal(q(c.req.query("dariTanggal")), "dariTanggal"),
+    sampaiTanggal: cek.wajibTanggal(q(c.req.query("sampaiTanggal")), "sampaiTanggal"),
+    cabangId: cek.opsionalUuid(q(c.req.query("cabangId")), "cabangId"),
+  };
+  cek.selesai();
+  return filter;
+}
+
+function filterKartuPiutang(c: Kueri): {
+  periodeId: string;
+  cabangId: string | null;
+  mitraId: string;
+} {
+  const cek = new Pemeriksa();
+  const filter = {
+    ...bacaFilterLaporan(cek, c),
+    mitraId: cek.wajibUuid(q(c.req.query("mitraId")), "mitraId"),
+  };
+  cek.selesai();
+  return filter;
+}
+
+function filterAuditTrail(c: Kueri): FilterAuditTrail {
+  const cek = new Pemeriksa();
+  const filter = {
+    dariTanggal: cek.wajibTanggal(q(c.req.query("dariTanggal")), "dariTanggal"),
+    sampaiTanggal: cek.wajibTanggal(q(c.req.query("sampaiTanggal")), "sampaiTanggal"),
+    userId: cek.opsionalUuid(q(c.req.query("userId")), "userId"),
+    entitas: q(c.req.query("entitas"), 100),
+    aksi: q(c.req.query("aksi"), 100),
+    hasil: cek.satuDari<HasilAudit>(q(c.req.query("hasil")), "hasil", ["SUKSES", "DITOLAK"]),
+    batas: cek.opsionalCacah(q(c.req.query("batas")), "batas", 1, BATAS_AUDIT_TRAIL_MAKS),
+    offset: cek.opsionalCacah(q(c.req.query("offset")), "offset", 0, 1_000_000),
+  };
+  cek.selesai();
+  return filter;
+}
+
+/**
  * The same two filters plus spec 10.3 report 24's `mode`, which the twenty-one
  * period-scoped operational reports share.
  *
@@ -283,7 +370,13 @@ function filterPeriodeMode(
 // The router
 // ---------------------------------------------------------------------------
 
-export function createLaporanRoutes({ engine, operasional, baca, guards }: LaporanRoutesDeps) {
+export function createLaporanRoutes({
+  engine,
+  operasional,
+  baca,
+  guards,
+  pdf = null,
+}: LaporanRoutesDeps) {
   const { requireSession, requirePermission } = guards;
 
   /**
@@ -295,6 +388,76 @@ export function createLaporanRoutes({ engine, operasional, baca, guards }: Lapor
    * answers a POST to a report path.
    */
   const lihat = [requireSession, requirePermission("laporan.view")] as const;
+
+  /**
+   * BOTH CODES, AND IN THIS ORDER. An export is a read of the report plus a
+   * decision to let a copy of it leave, so a caller must hold `laporan.view`
+   * as well: someone granted only `laporan.export` can export nothing, which
+   * is the correct reading of a code that qualifies an act it does not grant.
+   *
+   * `laporan.export` is NOT held by Maker or Checker; the argument is at the
+   * grant site in modules/auth/permissions.ts. An unknown code here would
+   * throw at ROUTE REGISTRATION, so this line is also the boot-time proof that
+   * the catalogue ships it.
+   */
+  const ekspor = [
+    requireSession,
+    requirePermission("laporan.view"),
+    requirePermission("laporan.export"),
+  ] as const;
+
+  /**
+   * kode -> the same engine call the report's own route makes.
+   *
+   * Written out one line per report rather than derived, deliberately: a
+   * reader must be able to check by eye that `/laporan/aging-piutang` and
+   * `/laporan/ekspor/AGING_PIUTANG` reach the same method with the same
+   * filter. A clever mapping would hide exactly the mismatch worth catching.
+   */
+  const panggilan: Record<
+    string,
+    ((c: Context, ctx: LaporanContext) => Promise<unknown>) | undefined
+  > = {
+    // --- 10.1 --------------------------------------------------------------
+    REALISASI_WILAYAH: (c, x) => operasional.realisasiWilayah(filterPeriodeMode(c), x),
+    REALISASI_SEKTOR: (c, x) => operasional.realisasiSektor(filterPeriodeMode(c), x),
+    PENYALURAN_NASIONAL: (c, x) => operasional.penyaluranNasional(filterPeriodeMode(c), x),
+    PENERIMAAN_ANGSURAN: (c, x) => operasional.penerimaanAngsuran(filterPeriodeMode(c), x),
+    JATUH_TEMPO: (c, x) => operasional.jatuhTempo(filterJatuhTempo(c), x),
+    REKAP_PERMOHONAN_PUMK: (c, x) => operasional.rekapPermohonanPumk(filterPeriodeMode(c), x),
+    REKAP_REALISASI_PUMK: (c, x) => operasional.rekapRealisasiPumk(filterLaporan(c), x),
+    AGING_PIUTANG: (c, x) => operasional.agingPiutang(filterLaporan(c), x),
+    KARTU_PIUTANG: (c, x) => operasional.kartuPiutang(filterKartuPiutang(c), x),
+    KOLEKTIBILITAS: (c, x) => operasional.kolektibilitas(filterLaporan(c), x),
+    PERPINDAHAN_KOLEKTIBILITAS: (c, x) =>
+      operasional.perpindahanKolektibilitas(filterLaporan(c), x),
+
+    // --- 10.2 --------------------------------------------------------------
+    PENYALURAN_NON_PUMK: (c, x) => operasional.penyaluranNonPumk(filterPeriodeMode(c), x),
+    REKAP_BIDANG: (c, x) => operasional.rekapBidang(filterPeriodeMode(c), x),
+    PEMETAAN_SDG: (c, x) => operasional.pemetaanSdg(filterPeriodeMode(c), x),
+    MONITORING_LPJ: (c, x) => operasional.monitoringLpj(filterPeriodeMode(c), x),
+
+    // --- 10.3 --------------------------------------------------------------
+    BAGAN_AKUN: (c, x) => engine.baganAkun({ hanyaAktif: filterBaganAkun(c) }, x),
+    AKTIVITAS: (c, x) => engine.laporanAktivitas(filterLaporan(c), x),
+    ARUS_KAS: (c, x) => engine.laporanArusKas(filterLaporan(c), x),
+    POSISI_KEUANGAN: (c, x) => engine.laporanPosisiKeuangan(filterLaporan(c), x),
+    PERUBAHAN_ASET_NETO: (c, x) => engine.laporanPerubahanAsetNeto(filterLaporan(c), x),
+    REKAP_JURNAL: (c, x) => operasional.rekapJurnal(filterPeriodeMode(c), x),
+    BUKU_BESAR: (c, x) => engine.bukuBesar(filterBukuBesar(c), x),
+    NERACA_LAJUR: (c, x) => engine.neracaLajur(filterLaporan(c), x),
+
+    // --- 10.4 --------------------------------------------------------------
+    PORTAL_PUMK: (c, x) => operasional.portal({ ...filterPeriodeMode(c), jenis: "PUMK" }, x),
+    PORTAL_NON_PUMK: (c, x) =>
+      operasional.portal({ ...filterPeriodeMode(c), jenis: "NON_PUMK" }, x),
+    DEMOGRAFI_MITRA: (c, x) => operasional.demografiMitra(filterLaporan(c), x),
+    PERHITUNGAN_PENYISIHAN: (c, x) => operasional.perhitunganPenyisihan(filterLaporan(c), x),
+    BEBAN_PENYISIHAN: (c, x) => operasional.bebanPenyisihan(filterPeriodeMode(c), x),
+    AKRUAL_JASA: (c, x) => operasional.akrualJasa(filterLaporan(c), x),
+    AUDIT_TRAIL: (c, x) => operasional.auditTrail(filterAuditTrail(c), x),
+  };
 
   return new Hono()
     // ------------------------------------------------------------- referensi
@@ -326,10 +489,7 @@ export function createLaporanRoutes({ engine, operasional, baca, guards }: Lapor
     // are shown with it.
     .get("/bagan-akun", ...lihat, async (c) => {
       const p = requirePrincipal(c);
-      const cek = new Pemeriksa();
-      const hanyaAktif = cek.opsionalBoolean(q(c.req.query("hanyaAktif")), "hanyaAktif", false);
-      cek.selesai();
-      return c.json(await engine.baganAkun({ hanyaAktif }, konteks(p)));
+      return c.json(await engine.baganAkun({ hanyaAktif: filterBaganAkun(c) }, konteks(p)));
     })
 
     // -------------------------------------------------- 17. Laporan Aktivitas
@@ -380,15 +540,7 @@ export function createLaporanRoutes({ engine, operasional, baca, guards }: Lapor
     // can find the wrong entry.
     .get("/buku-besar", ...lihat, async (c) => {
       const p = requirePrincipal(c);
-      // ONE checker for all three fields, so a request with three malformed
-      // parameters is answered once with three of them.
-      const cek = new Pemeriksa();
-      const filter = {
-        ...bacaFilterLaporan(cek, c),
-        akunId: cek.wajibUuid(q(c.req.query("akunId")), "akunId"),
-      };
-      cek.selesai();
-      return c.json(await engine.bukuBesar(filter, konteks(p)));
+      return c.json(await engine.bukuBesar(filterBukuBesar(c), konteks(p)));
     })
 
     // --------------------------------------------------- 23. Neraca Lajur
@@ -441,14 +593,7 @@ export function createLaporanRoutes({ engine, operasional, baca, guards }: Lapor
     // returning the empty worksheet that reads as "nothing falls due".
     .get("/jatuh-tempo", ...lihat, async (c) => {
       const p = requirePrincipal(c);
-      const cek = new Pemeriksa();
-      const filter = {
-        dariTanggal: cek.wajibTanggal(q(c.req.query("dariTanggal")), "dariTanggal"),
-        sampaiTanggal: cek.wajibTanggal(q(c.req.query("sampaiTanggal")), "sampaiTanggal"),
-        cabangId: cek.opsionalUuid(q(c.req.query("cabangId")), "cabangId"),
-      };
-      cek.selesai();
-      return c.json(await operasional.jatuhTempo(filter, konteks(p)));
+      return c.json(await operasional.jatuhTempo(filterJatuhTempo(c), konteks(p)));
     })
 
     // ---------------------------------------------- 6. Rekap Permohonan
@@ -476,13 +621,7 @@ export function createLaporanRoutes({ engine, operasional, baca, guards }: Lapor
     // -------------------------------------------------- 9. Kartu Piutang
     .get("/kartu-piutang", ...lihat, async (c) => {
       const p = requirePrincipal(c);
-      const cek = new Pemeriksa();
-      const filter = {
-        ...bacaFilterLaporan(cek, c),
-        mitraId: cek.wajibUuid(q(c.req.query("mitraId")), "mitraId"),
-      };
-      cek.selesai();
-      return c.json(await operasional.kartuPiutang(filter, konteks(p)));
+      return c.json(await operasional.kartuPiutang(filterKartuPiutang(c), konteks(p)));
     })
 
     // ------------------------------------------------- 10. Kolektibilitas
@@ -584,22 +723,66 @@ export function createLaporanRoutes({ engine, operasional, baca, guards }: Lapor
     // this check is the boundary's, not the engine's.
     .get("/audit-trail", ...lihat, async (c) => {
       const p = requirePrincipal(c);
-      const cek = new Pemeriksa();
-      const filter = {
-        dariTanggal: cek.wajibTanggal(q(c.req.query("dariTanggal")), "dariTanggal"),
-        sampaiTanggal: cek.wajibTanggal(q(c.req.query("sampaiTanggal")), "sampaiTanggal"),
-        userId: cek.opsionalUuid(q(c.req.query("userId")), "userId"),
-        entitas: q(c.req.query("entitas"), 100),
-        aksi: q(c.req.query("aksi"), 100),
-        hasil: cek.satuDari<HasilAudit>(q(c.req.query("hasil")), "hasil", [
-          "SUKSES",
-          "DITOLAK",
-        ]),
-        batas: cek.opsionalCacah(q(c.req.query("batas")), "batas", 1, BATAS_AUDIT_TRAIL_MAKS),
-        offset: cek.opsionalCacah(q(c.req.query("offset")), "offset", 0, 1_000_000),
-      };
-      cek.selesai();
-      return c.json(await operasional.auditTrail(filter, konteks(p)));
+      return c.json(await operasional.auditTrail(filterAuditTrail(c), konteks(p)));
+    })
+
+    // ============================================================== EKSPOR
+    //
+    // SPEC 10: EVERY REPORT EXPORTABLE TO EXCEL AND PDF, and one route for all
+    // thirty rather than thirty `?format=` parameters bolted onto the routes
+    // above. That is not tidiness, it is the authorisation boundary:
+    // `laporan.export` gates exactly one path, so there is no report whose
+    // export slipped out under `laporan.view` because somebody added a
+    // parameter to a handler and forgot the second guard.
+    //
+    // THE FIGURES COME FROM `panggilan`, WHICH IS THE ROUTES ABOVE. Each entry
+    // calls the same engine method with the same filter builder, so an export
+    // cannot show a number the screen does not, cannot widen a branch scope,
+    // and cannot recompute a CLOSED period from the live ledger: the engine
+    // makes all three decisions and this path never sees them. `mode`,
+    // `akunId`, `mitraId` and the date windows are read from the query string
+    // by the SAME `Pemeriksa`, so an export refuses a malformed filter with the
+    // same 400 and the same per-field detail as the report it mirrors.
+    .get("/ekspor/:kode", ...ekspor, async (c) => {
+      const p = requirePrincipal(c);
+
+      const kode = c.req.param("kode") ?? "";
+      const entri = KATALOG_LAPORAN.find((e) => e.kode === kode);
+      const panggil = panggilan[kode];
+      if (!entri || !panggil) {
+        // Its own code rather than the router's 404: "report 24 is not in this
+        // module" and "there is no such path" are different facts, and the
+        // first one has an answer (ask modules/rka).
+        throw new LaporanError(
+          KODE_LAPORAN.LAPORAN_TIDAK_DIKENAL,
+          `Laporan "${kode}" tidak ada di modul ini. Lihat GET /laporan/katalog untuk daftarnya.`,
+        );
+      }
+
+      const formatMentah = c.req.query("format") ?? "xlsx";
+      if (!(FORMAT_EKSPOR as readonly string[]).includes(formatMentah)) {
+        throw new LaporanError(
+          KODE_LAPORAN.FORMAT_EKSPOR_TIDAK_DIKENAL,
+          `Format "${formatMentah}" tidak dikenal. Pilih salah satu dari: ${FORMAT_EKSPOR.join(", ")}.`,
+        );
+      }
+      const format = formatMentah as FormatEkspor;
+
+      const hasil = await panggil(c, konteks(p));
+      const berkas = await berkasEkspor(hasil, entri.nama, format, { pdf });
+
+      c.header("Content-Type", berkas.tipeKonten);
+      // `attachment` even for HTML, and that matters: served inline, a document
+      // built from user-entered text would run in this API's own origin. It is
+      // a download, and `X-Content-Type-Options: nosniff` (core/hardening.ts)
+      // keeps a browser from deciding otherwise.
+      c.header("Content-Disposition", `attachment; filename="${berkas.namaFile}"`);
+      // An export of a closed period is reproducible, but it is still a report
+      // about people; no shared cache should hold it.
+      c.header("Cache-Control", "private, no-store");
+      return c.body(
+        typeof berkas.isi === "string" ? berkas.isi : (berkas.isi.slice().buffer as ArrayBuffer),
+      );
     })
 
     // A 404 that is the API's own, in the API's own envelope, rather than

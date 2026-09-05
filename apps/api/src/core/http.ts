@@ -21,9 +21,17 @@ export type ErrorCode =
   | "KONFLIK"
   | "SEGREGASI_TUGAS"
   | "TERLALU_BANYAK_PERMINTAAN"
+  // A capability THIS DEPLOYMENT does not have, as opposed to a request this
+  // system refuses. Added with the report export: a host with no browser
+  // binary cannot produce a server-side PDF, and every existing code lies
+  // about it -- 500 sends somebody hunting a bug in the report, 409 claims a
+  // state conflict that does not exist, 404 claims the report is not there.
+  // 503 is the honest answer, and the message carries the operator's actual
+  // next step.
+  | "LAYANAN_TIDAK_TERSEDIA"
   | "KESALAHAN_SERVER";
 
-const STATUS_BY_CODE: Record<ErrorCode, 400 | 401 | 403 | 404 | 409 | 429 | 500> = {
+const STATUS_BY_CODE: Record<ErrorCode, 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503> = {
   VALIDASI: 400,
   TIDAK_TERAUTENTIKASI: 401,
   TIDAK_BERWENANG: 403,
@@ -31,6 +39,7 @@ const STATUS_BY_CODE: Record<ErrorCode, 400 | 401 | 403 | 404 | 409 | 429 | 500>
   KONFLIK: 409,
   SEGREGASI_TUGAS: 409,
   TERLALU_BANYAK_PERMINTAAN: 429,
+  LAYANAN_TIDAK_TERSEDIA: 503,
   KESALAHAN_SERVER: 500,
 };
 
@@ -290,6 +299,10 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   // what KONFLIK means here and why it is not a 400.
   SNAPSHOT_KOLEKTIBILITAS_BELUM_ADA: "KONFLIK",
   LAPORAN_TIDAK_BALANCE: "KONFLIK",
+  // modules/laporan/ekspor.ts. A bad `format` or an unknown report code is a
+  // VALIDASI by the default rule and needs no row; these two do.
+  EKSPOR_PDF_TIDAK_TERSEDIA: "LAYANAN_TIDAK_TERSEDIA",
+  EKSPOR_PDF_GAGAL: "LAYANAN_TIDAK_TERSEDIA",
 
   // --- modules/closing (spec 8) -------------------------------------------
   //

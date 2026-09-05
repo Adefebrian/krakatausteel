@@ -649,13 +649,21 @@ describe("kode izin yang tidak dikenal gagal saat WIRING, bukan sebagai 403 diam
     expect(() => resolveRequiredPermissions(["laporan.viewer"])).toThrow(/tidak dikenal/);
   });
 
-  test("laporan.view ada di katalog, laporan.export TIDAK", () => {
+  test("laporan.view DAN laporan.export ada di katalog, keduanya", () => {
+    // CHANGED DELIBERATELY, and what it used to say.
+    //
+    // It used to assert that `laporan.export` THROWS at wiring, and that was
+    // the right assertion for as long as the catalogue did not ship the code:
+    // it pinned the gap so an export route could not be built on an invented
+    // permission. The export routes are here now and the code ships (see the
+    // grant, and the argument for who holds it, in
+    // apps/api/src/modules/auth/permissions.ts), so the assertion is inverted
+    // rather than deleted. The MECHANISM it was really guarding -- an unknown
+    // code failing at route registration instead of becoming a silent 403 --
+    // is still pinned by the test above.
     expect(() => resolveRequiredPermissions(["laporan.view"])).not.toThrow();
-    // REPORTED, NOT INVENTED. Spec 10 requires an Excel and a PDF button on
-    // every report and the catalogue ships no `laporan.export`. This module
-    // must not mint one to make an export route convenient: the code is a
-    // decision for modules/auth, and until it exists there is nothing here to
-    // export anyway.
-    expect(() => resolveRequiredPermissions(["laporan.export"])).toThrow(/tidak dikenal/);
+    expect(() => resolveRequiredPermissions(["laporan.export"])).not.toThrow();
+    // And it is still a REAL check: a plausible near-miss spelling is refused.
+    expect(() => resolveRequiredPermissions(["laporan.ekspor"])).toThrow(/tidak dikenal/);
   });
 });

@@ -91,11 +91,15 @@ describe("laporan.view: kode terkirim, dan siapa yang memegangnya", () => {
 
   test("izin yang belum terdaftar di katalog membuat jalur gagal tertutup", async () => {
     // The mechanic itself, exercised against a code that deliberately is not
-    // in the catalogue. If a later pass adds `laporan.export` to this module
-    // before adding it to modules/auth, this is the behaviour that must
-    // follow: refuse, do not assume.
-    expect(PERMISSIONS).not.toContain("laporan.export" as never);
+    // in the catalogue. It used to name `laporan.export` as that code; the
+    // export pass added it to modules/auth, so this now names a spelling that
+    // is not and never will be a permission. The invariant under test is
+    // unchanged: a code this module names must exist in the shipped catalogue,
+    // and a code that does not exist must fail closed rather than be assumed.
+    expect(PERMISSIONS).not.toContain("laporan.ekspor.semua" as never);
     expect(Object.values(PERMISSION_LAPORAN).every((p) => PERMISSIONS.includes(p))).toBe(true);
+    // Both of this module's codes ship, including the export one.
+    expect(PERMISSIONS).toContain("laporan.export" as never);
     expect(KODE_LAPORAN.IZIN_BELUM_TERDAFTAR).toBe("IZIN_BELUM_TERDAFTAR");
   });
 });

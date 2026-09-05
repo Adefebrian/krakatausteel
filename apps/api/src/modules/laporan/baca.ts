@@ -125,7 +125,7 @@ export interface LaporanBaca {
  * date range. A screen that offered a period picker on any of them would be
  * offering a control the API refuses.
  */
-const KATALOG: readonly EntriKatalogLaporan[] = [
+export const KATALOG_LAPORAN: readonly EntriKatalogLaporan[] = [
   // --- 10.1 Laporan Pendanaan UMK -----------------------------------------
   { nomor: 1, kode: "REALISASI_WILAYAH", nama: NAMA_LAPORAN_OPERASIONAL.REALISASI_WILAYAH, path: "/laporan/realisasi-wilayah", perluPeriode: true, perluAkun: false },
   { nomor: 2, kode: "REALISASI_SEKTOR", nama: NAMA_LAPORAN_OPERASIONAL.REALISASI_SEKTOR, path: "/laporan/realisasi-sektor", perluPeriode: true, perluAkun: false },
@@ -254,7 +254,7 @@ export function buatLaporanBaca({ db }: LaporanBacaDeps): LaporanBaca {
 
     async katalog(ctx) {
       pastikanIzin(ctx);
-      return [...KATALOG];
+      return [...KATALOG_LAPORAN];
     },
   };
 }

@@ -64,15 +64,34 @@ Pendekatannya: satu layar generik yang digerakkan katalog untuk mayoritas lapora
 sendiri untuk yang bentuknya memang beda (matriks aging, kartu piutang). **Portal publik dan area
 mitra belum tersentuh sama sekali** oleh agen ini.
 
-### 3. Ekspor Excel dan PDF, berhenti paling awal
+### 3. Ekspor Excel dan PDF, SELESAI (dilanjutkan 2026-09-05)
 
-Cuma `apps/api/src/core/xlsx/` yang ada, dan isinya belum tentu utuh. Agen baru mulai menulis
-inti ZIP/OOXML berbatas. Belum ada dependensi yang ditambahkan, belum ada `laporan.export`.
+Inti ZIP/OOXML berbatas itu **dilanjutkan, bukan diganti**, dan library xlsx **tidak jadi
+ditambahkan**: alasannya ada di kepala `core/xlsx/zip.ts`, yaitu tidak satu pun pustaka
+JavaScript untuk .xlsx yang mengekspos batas jumlah byte yang boleh DIHASILKAN dekompresi, dan
+itu satu-satunya pertahanan jujur terhadap zip bomb. `node:zlib` punya
+`inflateRawSync(buf, { maxOutputLength })`, dan itu satu-satunya primitif berisiko di sana.
 
-Pemilik repo **sudah menyetujui menambah library xlsx**. Syarat yang saya berikan ke agen dan
-masih berlaku: batas ukuran berkas, batas jumlah entri, batas ukuran terdekompresi (zip bomb),
-tidak ada resolusi entitas eksternal, dan setiap sel teks yang diekspor dinetralkan dari formula
-injection (`=`, `+`, `-`, `@`, tab, carriage return).
+Yang mendarat:
+
+- `core/xlsx/` lengkap: `zip.ts`, `xml.ts`, `batas.ts` (dari agen sebelumnya), plus `tulis.ts`
+  (penulis workbook), `baca.ts` (pembaca berbatas) dan `sanitasi.ts` (netralisasi formula).
+- `core/ekspor/` (model dokumen generik untuk ketiga puluh laporan, plus render HTML cetak) dan
+  `core/ports/pdf.ts` + `core/adapters/pdf-chromium.ts`.
+- `GET /laporan/ekspor/:kode?format=xlsx|html|pdf`, satu rute untuk 30 laporan, memanggil metode
+  engine yang SAMA dengan rute layarnya.
+- `laporan.export` di katalog izin, dipegang Auditor dan Approver, **bukan** Maker dan Checker.
+  Argumennya di tempat hibahnya; pertanyaan yang tersisa di OPEN-QUESTIONS 30.
+- `modules/impor` menerima `.xlsx` (`format: "XLSX"`, isi base64) lewat parser yang sama.
+
+**PDF butuh `CHROMIUM_PATH` dan sengaja tidak menebak.** Tanpa itu `format=pdf` menjawab 503
+dengan kalimat yang menyuruh operator memakai `format=html` lalu mencetaknya dari browser
+sendiri; Excel dan HTML tetap jalan. Image produksi belum berisi Chromium.
+
+**Yang belum, dan diserahkan:** `apps/web/src/permissions.ts` belum memuat `laporan.export`
+(berkas itu dipegang agen lain), dan sebuah ekspor belum menulis baris `audit_log` karena
+`modules/laporan` sengaja tidak punya port tulis sama sekali. Keduanya dijelaskan di
+OPEN-QUESTIONS 30 dan di kepala `modules/laporan/ekspor.ts`.
 
 ### Yang tersisa saat lanjut
 

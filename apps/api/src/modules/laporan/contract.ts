@@ -260,14 +260,23 @@ export interface Angka {
  * be this module answering an authorisation question the specification already
  * answered.
  *
- * EXPORT IS NOT HERE. Spec 10 requires an Excel and a PDF button on every
- * report and the catalogue ships no `laporan.export`; that is a FINDING for
- * the export pass, not a code this module may invent while it has nothing to
- * export.
+ * EXPORT IS A SECOND CODE, AND IT ARRIVED WITH THE EXPORT ROUTES. It used to
+ * say "EXPORT IS NOT HERE ... a FINDING for the export pass"; the export pass
+ * is this one, and `laporan.export` now ships in modules/auth's catalogue.
+ *
+ * IT IS AN ADDITION, NOT A REPLACEMENT. An export route requires BOTH codes:
+ * `laporan.view` because an export is a read of the same report and obeys the
+ * same branch scope and the same frozen-versus-live rule, and `laporan.export`
+ * because a file that leaves the building is a second decision on top of that
+ * read. A caller holding only `laporan.export` can export nothing, which is
+ * the correct reading of a code that qualifies an act it does not grant.
  */
 export const PERMISSION_LAPORAN = {
   /** spec 2: every role's reporting privilege, Auditor included. */
   LIHAT: "laporan.view",
+  /** spec 10's "ekspor ke Excel dan PDF". NOT held by Maker or Checker; the
+   *  argument is at the grant site in modules/auth/permissions.ts. */
+  EKSPOR: "laporan.export",
 } as const;
 
 export type PermissionLaporan = (typeof PERMISSION_LAPORAN)[keyof typeof PERMISSION_LAPORAN];
@@ -410,6 +419,24 @@ export const KODE_LAPORAN = {
   CABANG_DILUAR_SCOPE: "CABANG_DILUAR_SCOPE",
   /** A permission this engine names is absent from the shipped catalogue. */
   IZIN_BELUM_TERDAFTAR: "IZIN_BELUM_TERDAFTAR",
+
+  // --- ./ekspor.ts ---------------------------------------------------------
+  /** `format` names something that is not xlsx, html or pdf. */
+  FORMAT_EKSPOR_TIDAK_DIKENAL: "FORMAT_EKSPOR_TIDAK_DIKENAL",
+  /** `/laporan/ekspor/:kode` names a report this module does not answer. */
+  LAPORAN_TIDAK_DIKENAL: "LAPORAN_TIDAK_DIKENAL",
+  /**
+   * The host has no browser binary, so a server-side PDF cannot be produced.
+   *
+   * A 503, and its own code, because it is a property of the DEPLOYMENT and
+   * not of the request: retrying will not help, changing the filter will not
+   * help, and the operator's actual next step (export HTML and print it) has
+   * to be in the message. Reporting it as a 500 would send somebody looking
+   * for a bug in the report.
+   */
+  EKSPOR_PDF_TIDAK_TERSEDIA: "EKSPOR_PDF_TIDAK_TERSEDIA",
+  /** The browser is there and the render failed, timed out, or was queued out. */
+  EKSPOR_PDF_GAGAL: "EKSPOR_PDF_GAGAL",
 } as const;
 
 export type KodeLaporan = (typeof KODE_LAPORAN)[keyof typeof KODE_LAPORAN];

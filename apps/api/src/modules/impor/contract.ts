@@ -64,6 +64,22 @@ export const KODE_IMPOR = {
   JENIS_TIDAK_DIKENAL: "JENIS_TIDAK_DIKENAL",
   BERKAS_KOSONG: "BERKAS_KOSONG",
   BERKAS_TERLALU_BESAR: "BERKAS_TERLALU_BESAR",
+  /**
+   * An .xlsx this system refuses to parse: not a ZIP, too many entries, a
+   * decompression bomb, a DTD or entity declaration, an unsafe entry name,
+   * password protection, ZIP64, an unsupported compression method, or a sheet
+   * past one of the row/column/cell caps.
+   *
+   * ONE CODE FOR ALL OF THEM AT THE HTTP BOUNDARY, and the specific reason in
+   * the MESSAGE, which core/xlsx writes in Indonesian for an operator. The
+   * distinction that matters to a caller is "your file was refused whole and
+   * nothing was written"; the distinction between a bomb and a 3 MB sheet
+   * matters to whoever reads the log, and `KesalahanXlsx.kode` carries it
+   * there. Splitting it into fourteen HTTP codes would also tell an attacker
+   * precisely which cap they hit.
+   */
+  BERKAS_XLSX_DITOLAK: "BERKAS_XLSX_DITOLAK",
+  FORMAT_TIDAK_DIKENAL: "FORMAT_TIDAK_DIKENAL",
   TERLALU_BANYAK_BARIS: "TERLALU_BANYAK_BARIS",
   HEADER_TIDAK_LENGKAP: "HEADER_TIDAK_LENGKAP",
   /**
@@ -117,20 +133,46 @@ export const JENIS_IMPOR = ["MITRA", "ANGSURAN"] as const;
 export type JenisImpor = (typeof JENIS_IMPOR)[number];
 
 /**
- * CSV, NOT XLSX, AND THAT IS A REPORTED GAP RATHER THAN A DESIGN CHOICE.
- * Spec 9.6 says "dari Excel". Parsing a real .xlsx needs a third-party
- * dependency, and adding one is a decision for the repository owner, not for
- * this module. The engine below takes TEXT and the column contract is the
- * same either way, so an xlsx front end is a parser swapped in front of
- * `parseCsv` and nothing else.
+ * CSV AND XLSX, and the gap this comment used to report is closed.
+ *
+ * It used to say: "CSV, NOT XLSX, AND THAT IS A REPORTED GAP RATHER THAN A
+ * DESIGN CHOICE. Spec 9.6 says 'dari Excel'. Parsing a real .xlsx needs a
+ * third-party dependency ... an xlsx front end is a parser swapped in front of
+ * `parseCsv` and nothing else." That is exactly what ./xlsx.ts is, and it
+ * needed no third-party dependency after all: core/xlsx reads the container
+ * itself, because the one thing an .xlsx reader MUST have here -- a hard cap
+ * on the number of bytes decompression is allowed to produce -- is not
+ * exposed by any of the libraries.
+ *
+ * `MAKS_ISI_BYTE` IS THE SAME NUMBER FOR BOTH and is measured on the DECODED
+ * bytes, not on the base64 the .xlsx arrives as. The rest of the .xlsx caps
+ * (entry count, decompressed total, rows, columns, cell length, string table)
+ * are in ./xlsx.ts and core/xlsx/batas.ts, each with the reason for its value.
  */
 export const MAKS_ISI_BYTE = 512 * 1024;
 export const MAKS_BARIS = 2000;
 
+/**
+ * How `BerkasImpor.isi` is encoded.
+ *
+ * CSV  -> `isi` is the file's TEXT, exactly as uploaded.
+ * XLSX -> `isi` is the file's BYTES, base64. It cannot be text: an .xlsx is a
+ *         ZIP, and putting arbitrary bytes through a JSON string would corrupt
+ *         them at the first invalid UTF-8 sequence.
+ *
+ * The checksum is taken over `isi` either way, so it is still a hash of the
+ * exact bytes uploaded and `impor_berkas_checksum_uq` still refuses the same
+ * file twice.
+ */
+export const FORMAT_IMPOR = ["CSV", "XLSX"] as const;
+export type FormatImpor = (typeof FORMAT_IMPOR)[number];
+
 export interface BerkasImpor {
   namaFile: string;
-  /** The file's text, exactly as uploaded. The checksum is taken over this. */
+  /** CSV text, or base64 of an .xlsx. See `FORMAT_IMPOR`. */
   isi: string;
+  /** Absent means CSV, so every existing caller is unchanged. */
+  format?: FormatImpor;
 }
 
 /** One refused line, with the line number the operator sees in their sheet. */

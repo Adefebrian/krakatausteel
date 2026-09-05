@@ -34,6 +34,7 @@ import { buatEngineOperasional } from "./engine-operasional";
 import type { LaporanOperasionalEngine } from "./kontrak-operasional";
 import { createLaporanRoutes } from "./routes";
 import type { Guards } from "../../core/principal";
+import type { PdfPort } from "../../core/ports/pdf";
 
 export {
   createLaporanEngine,
@@ -202,6 +203,15 @@ export type {
   StatusPortal,
 } from "./kontrak-operasional";
 
+export {
+  FORMAT_EKSPOR,
+  TIPE_KONTEN,
+  berkasEkspor,
+  namaBerkasEkspor,
+} from "./ekspor";
+export type { BerkasEkspor, FormatEkspor } from "./ekspor";
+export { KATALOG_LAPORAN } from "./baca";
+
 export type { LaporanBaca };
 export type {
   EntriKatalogLaporan,
@@ -212,6 +222,16 @@ export type {
 
 export interface LaporanModuleDeps extends LaporanEngineDeps {
   guards: Guards;
+  /**
+   * Server-side PDF rendering, or null/absent on a host with no browser.
+   *
+   * IT IS NOT A WRITE PORT AND THE PARAGRAPH ABOVE STILL HOLDS. It turns an
+   * HTML string into bytes; it has no database, no object store and no
+   * network (core/adapters/pdf-chromium.ts aborts every request the page
+   * makes). Nothing reachable from this module can still insert, update or
+   * delete.
+   */
+  pdf?: PdfPort | null;
 }
 
 /**
@@ -237,6 +257,12 @@ export function createLaporanHttpModule(deps: LaporanModuleDeps): {
     engine,
     operasional,
     baca,
-    routes: createLaporanRoutes({ engine, operasional, baca, guards: deps.guards }),
+    routes: createLaporanRoutes({
+      engine,
+      operasional,
+      baca,
+      guards: deps.guards,
+      pdf: deps.pdf ?? null,
+    }),
   };
 }

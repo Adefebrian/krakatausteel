@@ -33,6 +33,7 @@ import { createDbAdapter } from "./adapters/db";
 import { createKeyValueAdapter } from "./adapters/keyvalue";
 import { createRateLimiterAdapter } from "./adapters/ratelimit";
 import { createS3ObjectStoreAdapter } from "./adapters/s3";
+import { createPdfChromiumAdapter } from "./adapters/pdf-chromium";
 import { applyHardening } from "./hardening";
 import { createErrorHandler } from "./http";
 import type { DbPort } from "./ports/db";
@@ -235,7 +236,15 @@ export function createApp(overrides: AppOverrides = {}) {
   // period (ADR 0010) and `saldo_akun_periode` for a CLOSED one, and says in
   // every report header which of the two produced the figures. Nothing in the
   // request can override that choice.
-  const laporan = createLaporanHttpModule({ db, guards: auth.guards });
+  //
+  // THE PDF PORT IS THE ONLY INFRASTRUCTURE THIS MODULE TOUCHES BEYOND THE
+  // DATABASE, and it is still not a write capability: it turns an HTML string
+  // into bytes. `createPdfChromiumAdapter` reports `tersedia() === false` on a
+  // host with no browser binary (which is every host this repo ships today),
+  // and the export route answers `pdf` with a 503 that tells the operator to
+  // print the HTML export instead. Excel and HTML export work regardless.
+  const pdf = createPdfChromiumAdapter();
+  const laporan = createLaporanHttpModule({ db, guards: auth.guards, pdf });
 
   // Fase 7 (spec 9.6), the diagnostic tools: the integrity health check and the
   // receivable reconciliation.

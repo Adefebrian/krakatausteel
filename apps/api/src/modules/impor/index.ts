@@ -13,10 +13,12 @@ import type { Guards } from "../../core/principal";
 import type { ImporEngine, ImporEngineDeps } from "./contract";
 
 export { createImporEngine } from "./service";
-export { parseCsv, checksumTeks, KesalahanCsv } from "./csv";
+export { parseCsv, dariMatriks, checksumTeks, KesalahanCsv } from "./csv";
+export { parseXlsx, dariBase64, BATAS_IMPOR_XLSX, KesalahanXlsx } from "./xlsx";
 export {
   ImporError,
   KODE_IMPOR,
+  FORMAT_IMPOR,
   JENIS_IMPOR,
   KOLOM_MITRA,
   KOLOM_ANGSURAN,
@@ -29,6 +31,7 @@ export type {
   BarisDiterima,
   BarisDitolak,
   BerkasImpor,
+  FormatImpor,
   HasilKomit,
   HasilPratinjau,
   ImporContext,

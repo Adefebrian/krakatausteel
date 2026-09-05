@@ -16,7 +16,9 @@
 // The validation pass is the SAME FUNCTION in both paths (`periksaBerkas`), so
 // a preview that says "ready" and a commit that refuses cannot disagree.
 import { checksumTeks, KesalahanCsv, parseCsv, type BarisCsv } from "./csv";
+import { dariBase64, KesalahanXlsx, parseXlsx } from "./xlsx";
 import {
+  FORMAT_IMPOR,
   ImporError,
   KODE_IMPOR,
   kolomUntuk,
@@ -44,6 +46,7 @@ const PESAN: Readonly<Record<string, string>> = {
   JENIS_TIDAK_DIKENAL: "Jenis impor tidak dikenal.",
   BERKAS_KOSONG: "Berkas tidak berisi baris data apa pun.",
   BERKAS_TERLALU_BESAR: `Berkas melebihi ${Math.floor(MAKS_ISI_BYTE / 1024)} KB.`,
+  FORMAT_TIDAK_DIKENAL: `Format berkas harus salah satu dari: ${FORMAT_IMPOR.join(", ")}.`,
   TERLALU_BANYAK_BARIS: `Berkas melebihi ${MAKS_BARIS} baris data.`,
   HEADER_TIDAK_LENGKAP: "Baris header tidak sesuai dengan format yang diminta.",
   // The message names the offending columns, because core/http.ts does not
@@ -243,17 +246,56 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
     angsuran: BarisAngsuran[];
   }> {
     const jenis = permintaan.jenis;
+    const format = permintaan.berkas.format ?? "CSV";
+    if (!(FORMAT_IMPOR as readonly string[]).includes(format)) {
+      throw tolak("FORMAT_TIDAK_DIKENAL", { format });
+    }
     const isi = permintaan.berkas.isi ?? "";
-    const ukuranBytes = new TextEncoder().encode(isi).length;
-    if (ukuranBytes === 0) throw tolak("BERKAS_KOSONG");
-    if (ukuranBytes > MAKS_ISI_BYTE) throw tolak("BERKAS_TERLALU_BESAR", { ukuranBytes });
+    if (isi.length === 0) throw tolak("BERKAS_KOSONG");
 
+    // THE SIZE IS MEASURED ON THE REAL BYTES IN BOTH PATHS. For CSV that is
+    // the UTF-8 encoding of the text; for XLSX it is the DECODED archive, not
+    // the base64 that carried it, or a 683 KB body would pass a 512 KB cap.
     let parsed;
-    try {
-      parsed = parseCsv(isi);
-    } catch (err) {
-      if (err instanceof KesalahanCsv) throw tolak("BERKAS_KOSONG", { alasan: err.alasan });
-      throw err;
+    let ukuranBytes: number;
+    if (format === "XLSX") {
+      let data: Uint8Array;
+      try {
+        data = dariBase64(isi);
+      } catch {
+        throw new ImporError(
+          KODE_IMPOR.BERKAS_XLSX_DITOLAK,
+          "Isi berkas .xlsx tidak terkirim dengan benar (bukan base64 yang sah). Unggah ulang berkasnya.",
+        );
+      }
+      ukuranBytes = data.length;
+      if (ukuranBytes === 0) throw tolak("BERKAS_KOSONG");
+      if (ukuranBytes > MAKS_ISI_BYTE) throw tolak("BERKAS_TERLALU_BESAR", { ukuranBytes });
+      try {
+        parsed = parseXlsx(data);
+      } catch (err) {
+        if (err instanceof KesalahanXlsx) {
+          // Translated at the ONE call site, exactly as `KesalahanCsv` is. The
+          // MESSAGE is core/xlsx's, already written for an operator; the
+          // machine-readable cap that fired travels in `detail` for the log.
+          throw new ImporError(KODE_IMPOR.BERKAS_XLSX_DITOLAK, err.message, {
+            sebab: err.kode,
+            ...(err.batas === undefined ? {} : { batas: err.batas }),
+          });
+        }
+        if (err instanceof KesalahanCsv) throw tolak("BERKAS_KOSONG", { alasan: err.alasan });
+        throw err;
+      }
+    } else {
+      ukuranBytes = new TextEncoder().encode(isi).length;
+      if (ukuranBytes === 0) throw tolak("BERKAS_KOSONG");
+      if (ukuranBytes > MAKS_ISI_BYTE) throw tolak("BERKAS_TERLALU_BESAR", { ukuranBytes });
+      try {
+        parsed = parseCsv(isi);
+      } catch (err) {
+        if (err instanceof KesalahanCsv) throw tolak("BERKAS_KOSONG", { alasan: err.alasan });
+        throw err;
+      }
     }
     if (parsed.baris.length === 0 && parsed.cacat.length === 0) throw tolak("BERKAS_KOSONG");
     if (parsed.baris.length + parsed.cacat.length > MAKS_BARIS) {

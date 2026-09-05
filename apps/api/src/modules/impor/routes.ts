@@ -32,9 +32,11 @@ import type { Context } from "hono";
 import { badRequest, notFound } from "../../core/http";
 import { requirePrincipal, type Guards, type Principal } from "../../core/principal";
 import {
+  FORMAT_IMPOR,
   JENIS_IMPOR,
   KODE_IMPOR,
   MAKS_ISI_BYTE,
+  type FormatImpor,
   type ImporContext,
   type ImporEngine,
   type JenisImpor,
@@ -70,9 +72,35 @@ async function permintaan(c: Context): Promise<PermintaanImpor> {
   if (!jenis) galat.jenis = [`wajib salah satu dari: ${JENIS_IMPOR.join(", ")}`];
 
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+
+  // ABSENT IS CSV, so every existing client is unchanged and no caller has to
+  // learn a new field to keep working.
+  const formatMentah = body.format === undefined ? "CSV" : body.format;
+  const format = (FORMAT_IMPOR as readonly unknown[]).includes(formatMentah)
+    ? (formatMentah as FormatImpor)
+    : null;
+  if (!format) galat.format = [`wajib salah satu dari: ${FORMAT_IMPOR.join(", ")}`];
+
   const isi = typeof body.isi === "string" ? body.isi : null;
-  if (isi === null || isi.length === 0) galat.isi = ["wajib diisi dengan isi berkas CSV"];
-  else if (new TextEncoder().encode(isi).length > MAKS_ISI_BYTE) {
+  if (isi === null || isi.length === 0) {
+    galat.isi = ["wajib diisi dengan isi berkas CSV, atau base64 berkas .xlsx"];
+  } else if (format === "XLSX") {
+    // A CHEAP, COARSE BOUND HERE; THE EXACT CAP IS THE ENGINE'S.
+    //
+    // The authoritative check is on the DECODED byte count and lives in
+    // ./service.ts, so there is ONE definition of "too big" and it is the one
+    // that reports `BERKAS_TERLALU_BESAR` with the operator's number. This
+    // check exists only so a deliberately enormous body never reaches a
+    // decoder: base64 carries 3 bytes per 4 characters, so anything past
+    // twice the cap cannot decode to a legal file and is refused without
+    // allocating. Making this one exact would put the cap in two places and
+    // guarantee they eventually disagree.
+    if (isi.length > MAKS_ISI_BYTE * 2) {
+      galat.isi = [`maksimal ${Math.floor(MAKS_ISI_BYTE / 1024)} KB`];
+    } else if (!/^[A-Za-z0-9+/\r\n]*={0,2}$/.test(isi)) {
+      galat.isi = ["wajib berupa base64 berkas .xlsx"];
+    }
+  } else if (new TextEncoder().encode(isi).length > MAKS_ISI_BYTE) {
     galat.isi = [`maksimal ${Math.floor(MAKS_ISI_BYTE / 1024)} KB`];
   }
 
@@ -84,7 +112,11 @@ async function permintaan(c: Context): Promise<PermintaanImpor> {
 
   if (Object.keys(galat).length > 0) throw badRequest("Data yang dikirim belum valid", galat);
 
-  return { jenis: jenis!, berkas: { namaFile, isi: isi! }, cabangId };
+  return {
+    jenis: jenis!,
+    berkas: { namaFile, isi: isi!, format: format! },
+    cabangId,
+  };
 }
 
 export function createImporRoutes({ engine, guards }: ImporRoutesDeps) {
