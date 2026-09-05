@@ -286,14 +286,14 @@ describe("spec 8.4: setiap prasyarat menolak sendiri sendiri", () => {
     // Unconfirmed, the close is refused: a confirmation that can be skipped by
     // not passing a flag is not a confirmation.
     await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
       KODE_CLOSING.KONFIRMASI_KAS_NEGATIF_WAJIB,
     );
     expect((await d.bacaPeriode(p.id)).status).toBe("OPEN");
 
     const hasil = await d.engine.tutupPeriode(
       { periodeId: p.id, konfirmasiKasNegatif: true },
-      d.ctx.approver,
+      d.ctx.adminPusat,
     );
     expect(hasil.periode.status).toBe("CLOSED");
     // The confirmation is evidence, so it lands in the audit trail rather than
@@ -356,7 +356,7 @@ describe("spec 16 skenario 12: DRAFT memblokir, lalu diposting, lalu closing ber
 
     // 1. Refused, with a reason an accountant can act on: which document.
     const err = await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
       KODE_CLOSING.PRASYARAT_GAGAL,
     );
     const gagal = err.detail.gagal as Array<{ kode: string; alasan: string }>;
@@ -373,7 +373,7 @@ describe("spec 16 skenario 12: DRAFT memblokir, lalu diposting, lalu closing ber
     //    accrual were computed before this journal existed, and this journal
     //    touches neither receivables nor the allowance, so nothing has to be
     //    re-run; but the checklist is re-evaluated INSIDE the close either way.
-    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     expect(hasil.periode.status).toBe("CLOSED");
     expect(
       hasil.prasyarat.hasil.filter((h) => h.status === "GAGAL"),
@@ -391,14 +391,18 @@ describe("spec 8.4: eksekusi", () => {
     const p = await siapkan();
     d.audit.reset();
 
-    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     expect(hasil.periode.status).toBe("CLOSED");
-    expect(hasil.periode.closedBy).toBe(d.userId.approver);
+    // Admin Pusat, because closing a period is Admin Pusat's alone since
+    // OPEN-QUESTIONS 29. `closed_by` names whoever declared the month
+    // finished, and this asserts it is the caller and not the role that
+    // prepared it.
+    expect(hasil.periode.closedBy).toBe(d.userId.adminPusat);
     expect(hasil.periode.closedAt).not.toBeNull();
     const row = await d.bacaPeriode(p.id);
     expect(row.status).toBe("CLOSED");
-    expect(row.closed_by).toBe(d.userId.approver);
+    expect(row.closed_by).toBe(d.userId.adminPusat);
 
     // spec 8.4: "tulis audit log". The checklist as it stood travels with it,
     // so the record says what was true when the decision was made rather than
@@ -424,7 +428,7 @@ describe("spec 8.4: eksekusi", () => {
     const draft = await d.buatJurnalDraft(p.tanggalAkhir, rp(90_000));
 
     const err = await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
       KODE_CLOSING.PRASYARAT_GAGAL,
     );
     expect(JSON.stringify(err.detail)).toContain(draft.noJurnal);
@@ -433,11 +437,11 @@ describe("spec 8.4: eksekusi", () => {
 
   test("periode yang sudah CLOSED tidak bisa ditutup lagi", async () => {
     const p = await siapkan();
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     const saldoPertama = await d.bacaSaldoAkunPeriode(p.id);
 
     await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
       KODE_CLOSING.PERIODE_SUDAH_CLOSED,
     );
     // A second close that silently rewrote the frozen balances would be
@@ -481,8 +485,8 @@ describe("spec 8.4: eksekusi", () => {
     const dua = d.buatEngine();
 
     const hasil = await Promise.allSettled([
-      satu.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
-      dua.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      satu.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
+      dua.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
     ]);
 
     const berhasil = hasil.filter((h) => h.status === "fulfilled");
@@ -519,7 +523,7 @@ describe("spec 8.4: eksekusi", () => {
       () =>
         d.engine.tutupPeriode(
           { periodeId: "00000000-0000-4000-8000-000000000000" },
-          d.ctx.approver,
+          d.ctx.adminPusat,
         ),
       KODE_CLOSING.PERIODE_TIDAK_DITEMUKAN,
     );
@@ -535,7 +539,7 @@ describe("spec 8.4: reopen", () => {
       if (bulan === 1) await d.postingAlokasiDana(p.tanggalMulai, rp(200_000_000));
       d.setelJam(p.tanggalAkhir);
       await d.siapkanTutup(p);
-      await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+      await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
       hasil.push(p);
     }
     return hasil;
@@ -693,7 +697,7 @@ describe("spec 8.4: reopen", () => {
     await d.postingBebanOperasional(mar.tanggalAkhir, rp(4_000_000));
 
     await d.siapkanTutup(mar);
-    const hasil = await d.engine.tutupPeriode({ periodeId: mar.id }, d.ctx.approver);
+    const hasil = await d.engine.tutupPeriode({ periodeId: mar.id }, d.ctx.adminPusat);
     expect(hasil.periode.status).toBe("CLOSED");
 
     const saldo = await d.bacaSaldoAkunPeriode(mar.id);

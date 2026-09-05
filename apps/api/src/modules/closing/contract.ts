@@ -144,7 +144,24 @@ export type SumberRate = "TABEL_KONFIGURASI" | "KOLEKTIF_HISTORIS";
 export const PERMISSION_CLOSING = {
   /** spec 9.3 "Closing Kolektibilitas": jalankan, preview, riwayat. */
   KOLEKTIBILITAS: "admin.closing.kolektibilitas",
-  /** spec 9.3 "Closing Periode": eksekusi, and the penyisihan/akrual steps. */
+  /**
+   * spec 8.2 penyisihan and spec 8.3 akrual jasa administrasi: the month-end
+   * ARITHMETIC, which is not the same act as declaring the month closed.
+   *
+   * SPLIT OUT OF `PERIODE` (OPEN-QUESTIONS 29, decided by the repo owner
+   * 2026-09-02). One code gated all three, so "closing a period is Admin Pusat
+   * only" could not be implemented without also moving both branch computations
+   * to head office. Both steps are repeatable while the period is OPEN
+   * (invariant 13) and everything they produce is re-derivable from the ledger;
+   * the close freezes a trial balance and is undone only by a reopen. Held by
+   * APPROVER and therefore by ADMIN_CABANG.
+   */
+  HITUNG: "admin.closing.hitung",
+  /**
+   * spec 9.3 "Closing Periode": the EXECUTION of the close and nothing else.
+   * ADMIN_PUSAT only. What is centralised is the declaration that the month is
+   * finished, not the arithmetic that prepares it; see `HITUNG`.
+   */
   PERIODE: "admin.closing.periode",
   /** spec 8.4 reopen: Admin Pusat only, with a written reason. */
   REOPEN: "admin.periode.reopen",

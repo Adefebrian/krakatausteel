@@ -63,15 +63,24 @@ describe("fixture closing: dunia", () => {
     // the two findings that this mechanism caught (`pumk.cluster`,
     // `nonpumk.lpj.verifikasi`) become invisible again.
     expect(d.ctx.approver.permissions).toContain(PERMISSION_CLOSING.KOLEKTIBILITAS);
-    expect(d.ctx.approver.permissions).toContain(PERMISSION_CLOSING.PERIODE);
-    expect(d.ctx.maker.permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
-    expect(d.ctx.checker.permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
+    // The month-end ARITHMETIC is the Approver's; the CLOSE is not
+    // (OPEN-QUESTIONS 29, decided 2026-09-02). Both halves asserted, because
+    // the two used to be one code and the value of splitting them is exactly
+    // that one role can hold the first without the second.
+    expect(d.ctx.approver.permissions).toContain(PERMISSION_CLOSING.HITUNG);
+    expect(d.ctx.adminCabang.permissions).toContain(PERMISSION_CLOSING.HITUNG);
+    expect(d.ctx.approver.permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
+    expect(d.ctx.adminCabang.permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
+    expect(d.ctx.adminPusat.permissions).toContain(PERMISSION_CLOSING.PERIODE);
+    expect(d.ctx.maker.permissions).not.toContain(PERMISSION_CLOSING.HITUNG);
+    expect(d.ctx.checker.permissions).not.toContain(PERMISSION_CLOSING.HITUNG);
     // spec 2: reopen is Admin Pusat only, and the shipped matrix agrees.
     expect(d.ctx.adminPusat.permissions).toContain(PERMISSION_CLOSING.REOPEN);
     expect(d.ctx.approver.permissions).not.toContain(PERMISSION_CLOSING.REOPEN);
     expect(d.ctx.adminCabang.permissions).not.toContain(PERMISSION_CLOSING.REOPEN);
     // spec 2: the Auditor changes nothing.
     expect(d.ctx.auditor.permissions).not.toContain(PERMISSION_CLOSING.KOLEKTIBILITAS);
+    expect(d.ctx.auditor.permissions).not.toContain(PERMISSION_CLOSING.HITUNG);
     expect(d.ctx.auditor.permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
   });
 

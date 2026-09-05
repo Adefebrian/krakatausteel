@@ -22,11 +22,16 @@
 //   AUTHORISE with `requirePermission`, using CANONICAL codes from modules/auth's
 //   catalogue. An unknown code throws at ROUTE-REGISTRATION time
 //   (`resolveRequiredPermissions`), so a typo is a boot failure and never a 403
-//   that reads like policy. All four codes this file names are SHIPPED and each
+//   that reads like policy. All five codes this file names are SHIPPED and each
 //   is deliberate:
 //     `admin.closing.kolektibilitas`  runs and previews the classification;
-//     `admin.closing.periode`         runs the allowance, the accrual and the
-//                                     close;
+//     `admin.closing.hitung`          runs and previews the allowance and the
+//                                     accrual: the month-end ARITHMETIC, which
+//                                     is branch work (OPEN-QUESTIONS 29);
+//     `admin.closing.periode`         closes the period, and nothing else.
+//                                     ADMIN_PUSAT only: what is centralised is
+//                                     the declaration that the month is
+//                                     finished, not the arithmetic before it;
 //     `admin.periode.reopen`          reopens a closed period, ADMIN_PUSAT only;
 //     `admin.closing.view`            READS the checklist, the run history, the
 //                                     snapshot and the frozen balances, WITHOUT
@@ -465,7 +470,7 @@ export function createClosingRoutes({ engine, baca, guards }: ClosingRoutesDeps)
      * second one; inventing `admin.closing.penyisihan` would be this module
      * answering an authorisation question the specification already answered.
      */
-    .post("/periode/:id/penyisihan/pratinjau", ...ubah("admin.closing.periode"), async (c) => {
+    .post("/periode/:id/penyisihan/pratinjau", ...ubah("admin.closing.hitung"), async (c) => {
       const p = requirePrincipal(c);
       const id = periodeId(c);
       const b = await tubuh(c);
@@ -481,7 +486,7 @@ export function createClosingRoutes({ engine, baca, guards }: ClosingRoutesDeps)
      * `penyisihan_periode` row is the explicit statement that the movement was
      * nil, which is what prerequisite check 5 reads.
      */
-    .post("/periode/:id/penyisihan", ...ubah("admin.closing.periode"), async (c) => {
+    .post("/periode/:id/penyisihan", ...ubah("admin.closing.hitung"), async (c) => {
       const p = requirePrincipal(c);
       const id = periodeId(c);
       const b = await tubuh(c);
@@ -505,7 +510,7 @@ export function createClosingRoutes({ engine, baca, guards }: ClosingRoutesDeps)
      * that overrode it per request would let one month be closed on a policy
      * nobody adopted.
      */
-    .post("/periode/:id/akrual", ...ubah("admin.closing.periode"), async (c) => {
+    .post("/periode/:id/akrual", ...ubah("admin.closing.hitung"), async (c) => {
       const p = requirePrincipal(c);
       const id = periodeId(c);
       const b = await tubuh(c);

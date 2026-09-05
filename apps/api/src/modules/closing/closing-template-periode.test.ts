@@ -132,7 +132,7 @@ describe("tutupPeriode menulis template laporan yang dipakai (migrasi 0028)", ()
     const p = await siapkan(2026, 1);
     expect(await stempel(p.id)).toBeNull();
 
-    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     // Both the row and the value the engine hands back, because a caller that
     // trusts the return value must not have to re-read the period to learn
@@ -153,7 +153,7 @@ describe("tutupPeriode menulis template laporan yang dipakai (migrasi 0028)", ()
     // case in a finance department, not an exotic one.
     d.setelJam("2026-08-20");
 
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     expect(await stempel(p.id)).toBe(bawaan.id);
   });
@@ -161,7 +161,7 @@ describe("tutupPeriode menulis template laporan yang dipakai (migrasi 0028)", ()
   test("memberlakukan template baru tidak mengubah stempel periode yang sudah ditutup", async () => {
     const bawaan = await templateBawaan();
     const jan = await siapkan(2026, 1);
-    await d.engine.tutupPeriode({ periodeId: jan.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: jan.id }, d.ctx.adminPusat);
     expect(await stempel(jan.id)).toBe(bawaan.id);
 
     // The adoption. Nothing about January is edited, and nothing about January
@@ -174,7 +174,7 @@ describe("tutupPeriode menulis template laporan yang dipakai (migrasi 0028)", ()
     // NEXT period does pick the new template up. Without this, an engine that
     // simply never wrote the column would pass the assertion above.
     const feb = await siapkan(2026, 2);
-    await d.engine.tutupPeriode({ periodeId: feb.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: feb.id }, d.ctx.adminPusat);
 
     expect(await stempel(feb.id)).toBe(baru);
     expect(await stempel(jan.id)).toBe(bawaan.id);
@@ -193,7 +193,7 @@ describe("tutupPeriode menulis template laporan yang dipakai (migrasi 0028)", ()
     );
 
     const p = await siapkan(2026, 1);
-    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     expect(hasil.periode.status).toBe("CLOSED");
     expect(hasil.periode.templateLaporanId).toBeNull();
@@ -210,7 +210,7 @@ describe("tutupPeriode menulis template laporan yang dipakai (migrasi 0028)", ()
     );
 
     const p = await siapkan(2026, 1);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     expect(await stempel(p.id)).toBeNull();
   });
@@ -220,7 +220,7 @@ describe("bukaKembaliPeriode menghapus stempel, dan menyimpannya di audit", () =
   test("periode yang dibuka kembali tidak lagi mengaku ditutup di bawah template mana pun", async () => {
     const bawaan = await templateBawaan();
     const p = await siapkan(2026, 1);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     expect(await stempel(p.id)).toBe(bawaan.id);
 
     const dibuka = await d.engine.bukaKembaliPeriode(
@@ -242,7 +242,7 @@ describe("bukaKembaliPeriode menghapus stempel, dan menyimpannya di audit", () =
     // the right object.
     const bawaan = await templateBawaan();
     const p = await siapkan(2026, 1);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     await d.engine.bukaKembaliPeriode(
       { periodeId: p.id, alasan: "Koreksi jurnal Januari" },
       d.ctx.adminPusat,
@@ -269,7 +269,7 @@ describe("bukaKembaliPeriode menghapus stempel, dan menyimpannya di audit", () =
     // of being masked by the previous close's stamp.
     const bawaan = await templateBawaan();
     const p = await siapkan(2026, 1);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     expect(await stempel(p.id)).toBe(bawaan.id);
 
     await d.engine.bukaKembaliPeriode(
@@ -284,7 +284,7 @@ describe("bukaKembaliPeriode menghapus stempel, dan menyimpannya di audit", () =
     // fixture, not the stamp.
     const baru = await berlakukanTemplateBaru("ISAK335", "2026-01-01");
     d.setelJam(p.tanggalAkhir);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     expect(await stempel(p.id)).toBe(baru);
   });

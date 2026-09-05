@@ -65,14 +65,22 @@ type Role = (typeof SEMUA_ROLE)[number];
  * Roles that hold each permission, straight from spec 2's wewenang column.
  *
  * `admin.closing.view` is held by the AUDITOR and by nobody who inputs: it is
- * evidence, not a work queue. `admin.periode.reopen` is held by ADMIN_PUSAT
- * ALONE -- not even by the Approver who is allowed to close -- because
- * reopening rewrites a month that has already been reported on.
+ * evidence, not a work queue.
+ *
+ * `admin.closing.periode` AND `admin.periode.reopen` ARE BOTH ADMIN_PUSAT ALONE
+ * (OPEN-QUESTIONS 29, decided by the repo owner 2026-09-02). Closing a month
+ * and reopening one are both declarations about a month the entity reports on,
+ * and neither belongs to a branch. What DOES stay with the branch is
+ * `admin.closing.hitung`, the month-end arithmetic: the provision and the
+ * accrual are repeatable while the period is OPEN and re-derivable from the
+ * ledger, and they used to share a code with the close, which is the only
+ * reason the close ever looked like an Approver's act.
  */
 const PEMEGANG: Readonly<Record<string, readonly Role[]>> = {
   "admin.closing.view": ["APPROVER", "ADMIN_CABANG", "ADMIN_PUSAT", "AUDITOR"],
   "admin.closing.kolektibilitas": ["APPROVER", "ADMIN_CABANG", "ADMIN_PUSAT"],
-  "admin.closing.periode": ["APPROVER", "ADMIN_CABANG", "ADMIN_PUSAT"],
+  "admin.closing.hitung": ["APPROVER", "ADMIN_CABANG", "ADMIN_PUSAT"],
+  "admin.closing.periode": ["ADMIN_PUSAT"],
   "admin.periode.reopen": ["ADMIN_PUSAT"],
 };
 
@@ -159,21 +167,21 @@ const KASUS: readonly Kasus[] = [
     metode: "POST",
     path: () => `/closing/periode/${periodeId}/penyisihan/pratinjau`,
     body: () => ({}),
-    izin: ["admin.closing.periode"],
+    izin: ["admin.closing.hitung"],
   },
   {
     nama: "POST /closing/periode/:id/penyisihan",
     metode: "POST",
     path: () => `/closing/periode/${periodeId}/penyisihan`,
     body: () => ({}),
-    izin: ["admin.closing.periode"],
+    izin: ["admin.closing.hitung"],
   },
   {
     nama: "POST /closing/periode/:id/akrual",
     metode: "POST",
     path: () => `/closing/periode/${periodeId}/akrual`,
     body: () => ({}),
-    izin: ["admin.closing.periode"],
+    izin: ["admin.closing.hitung"],
   },
   {
     nama: "POST /closing/periode/:id/tutup",
@@ -345,6 +353,21 @@ describe("spec 16 skenario 24: cabang di luar scope ditolak, bukan dikosongkan",
     const jalur = baris.map((b) => (b.nilai_baru_json as { path?: string } | null)?.path);
     // The path in the row is the pathname; the query string is not part of it.
     expect(jalur).toContain(`/closing/periode/${periodeId}/saldo`);
+  });
+
+  test("penolakan tutup periode oleh Approver meninggalkan baris DITOLAK", async () => {
+    // OPEN-QUESTIONS 29's decision, asserted where its consequence is visible
+    // to an auditor. An Approver who has done the whole month's work and is
+    // refused the last step must leave a record of the attempt: a control whose
+    // breaches are invisible is a control nobody can review, and this is the
+    // heaviest single operation in the month.
+    for (const role of ["APPROVER", "ADMIN_CABANG"] as const) {
+      const res = await d.panggil(role, `/closing/periode/${periodeId}/tutup`, { body: {} });
+      expect(`${role}=${res.status}`).toBe(`${role}=403`);
+      const baris = await d.f.auditRows({ hasil: "DITOLAK", userId: d.f.users[role].id });
+      const jalur = baris.map((b) => (b.nilai_baru_json as { path?: string } | null)?.path);
+      expect(jalur).toContain(`/closing/periode/${periodeId}/tutup`);
+    }
   });
 });
 

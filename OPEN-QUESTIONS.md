@@ -583,33 +583,54 @@ sesudah itu cacat ini bisa masuk ke data produksi.
 
 ---
 
-## 29. Siapa boleh menutup buku bulanan? DIPUTUSKAN 2026-09-02, TAPI PELAKSANAANNYA LEBIH LUAS DARI YANG DIPUTUSKAN
+## 29. Siapa boleh menutup buku bulanan? DIPUTUSKAN 2026-09-02, SELESAI 2026-09-05
+
+> Catatan penomoran: ada DUA butir bernomor 29 di berkas ini. Yang di atas soal akrual jasa yang
+> diulang; yang ini soal izin. Keduanya dibiarkan bernomor sama supaya rujukan yang sudah
+> terlanjur dipakai di komit dan komentar kode tidak jadi menunjuk butir yang salah.
 
 **Keputusan pemilik repo:** menutup periode jadi wewenang **Admin Pusat saja**. Cabang tetap
-membaca checklist dan menjalankan penilaian kolektibilitas.
+membaca checklist, menjalankan penilaian kolektibilitas, dan **menjalankan perhitungan bulanan**.
 
-**Keadaan sekarang:** `ADMIN_CABANG` mewarisi `admin.closing.periode` dari `APPROVER`, jadi
-admin cabang bisa menjalankan tutup buku selingkup entitas. Membuka kembali sudah hanya Admin
-Pusat (`admin.periode.reopen`).
+**SELESAI.** Kodenya dipisah, persis seperti yang diusulkan di bawah:
 
-**Kenapa belum dikerjakan.** Saat mencoba menerapkannya, `admin.closing.periode` ternyata bukan
-hanya menjaga tutup buku. Kode yang sama menjaga **jalankan penyisihan** dan **jalankan akrual
-jasa administrasi** (`modules/closing/service.ts`, tiga `wajibIzin` yang sama). Mencabutnya dari
-cabang, apa adanya, ikut memindahkan kedua perhitungan bulanan itu ke pusat, dan itu bukan yang
-diputuskan: yang mau dipusatkan adalah **pernyataan bahwa bulannya selesai**, bukan aritmetikanya.
+| Kode | Menjaga | Dipegang |
+|---|---|---|
+| `admin.closing.view` | membaca checklist, riwayat, snapshot, saldo beku | APPROVER, ADMIN_CABANG, ADMIN_PUSAT, AUDITOR |
+| `admin.closing.kolektibilitas` | spec 8.1, termasuk pratinjaunya. **Tidak berubah** | APPROVER, ADMIN_CABANG, ADMIN_PUSAT |
+| `admin.closing.hitung` | **baru.** spec 8.2 penyisihan dan spec 8.3 akrual, termasuk pratinjau penyisihan | APPROVER, ADMIN_CABANG, ADMIN_PUSAT |
+| `admin.closing.periode` | **hanya `tutupPeriode`** | ADMIN_PUSAT |
+| `admin.periode.reopen` | `bukaKembaliPeriode`. **Tidak berubah** | ADMIN_PUSAT |
 
-Mencabutnya apa adanya bikin 108 test merah, dan semuanya merah karena alasan yang sama:
-fixture menjalankan penyisihan dan akrual sebagai Approver.
+**Kenapa dipisah, bukan dicabut apa adanya.** `admin.closing.periode` dulu menjaga tiga hal
+sekaligus: tutup buku, penyisihan, dan akrual jasa administrasi. Mencabutnya dari cabang, apa
+adanya, ikut memindahkan kedua perhitungan bulanan itu ke pusat, dan itu bukan yang diputuskan:
+yang dipusatkan adalah **pernyataan bahwa bulannya selesai**, bukan aritmetika yang menyiapkannya.
+Penyisihan dan akrual boleh diulang selama periodenya masih OPEN (invarian 13) dan seluruh
+hasilnya bisa diturunkan ulang dari buku besar; tutup buku membekukan neraca saldo dan hanya bisa
+dibatalkan lewat reopen Admin Pusat. Bentuknya sama dengan pemisahan `admin.rka` dan
+`admin.rka.approve`: kalau satu kode menjaga tindakan rutin dan tindakan yang tidak bisa
+dibatalkan sekaligus, yang rutinlah yang menentukan siapa memegang yang tidak bisa dibatalkan.
 
-**Yang perlu dikerjakan:** pisahkan kodenya. `admin.closing.periode` hanya untuk `tutupPeriode`,
-dan satu kode baru (usulan `admin.closing.hitung`) untuk penyisihan dan akrual, dipegang
-APPROVER dan ADMIN_CABANG. Kolektibilitas sudah punya kodenya sendiri dan tidak berubah.
+**Yang ikut berubah, dan sengaja:** setiap fixture dan test closing yang dulu menutup periode
+sebagai Approver sekarang menutup sebagai Admin Pusat, dan `periode.closed_by` pada test itu
+ikut berpindah. Fixture dashboard, seed demo, dan `modules/tools` sudah menutup sebagai Admin
+Pusat sejak awal, jadi tidak tersentuh.
 
-Perubahan ini menyentuh `modules/auth/permissions.ts`, `modules/closing/service.ts`,
-`apps/web/src/permissions.ts`, seed RBAC, dan fixture closing. Ditunda karena ada agen lain yang
-sedang bekerja di dalam `modules/closing` saat keputusan ini masuk, dan mengubah katalog izin di
-bawah kaki agen yang sedang menulis di modul yang sama adalah cara termurah untuk merusak
-dua pekerjaan sekaligus.
+**Buktinya:** `modules/closing/closing-otorisasi.test.ts` (Approver dan Admin Cabang menjalankan
+kolektibilitas, penyisihan dan akrual, lalu DITOLAK `tutupPeriode`; Admin Pusat lolos keempatnya;
+tidak ada selain Admin Pusat yang bisa reopen), `closing-fixture.test.ts` (matriks terkirim, dibaca
+dari database bukan diketik di fixture), dan `closing-rute-otorisasi.test.ts` (matriks per endpoint,
+plus penolakan `POST /closing/periode/:id/tutup` oleh Approver dan Admin Cabang yang meninggalkan
+baris `DITOLAK` di `audit_log`, spec 2 aturan 5).
 
-**Pemilik:** pemilik `modules/closing`. **Batas waktu:** sebelum role dibagikan ke pengguna nyata,
-karena mencabut izin yang sudah dipakai orang jauh lebih mahal daripada tidak pernah memberikannya.
+**Berkas:** `modules/auth/permissions.ts`, `modules/closing/{contract,service,routes}.ts`,
+`apps/web/src/permissions.ts`. `seed/rbac.ts` tidak perlu diubah: ia membaca
+`PERMISSIONS_BY_ROLE` dengan semantik himpunan, jadi kode yang dicabut ikut tercabut saat seed
+dijalankan ulang.
+
+**Sisa pekerjaan yang BUKAN milik butir ini:** `apps/web/src/closing.test.tsx` dan
+`apps/web/src/nav.ts` masih menyusun sesi Approver dengan `admin.closing.periode` dan masih
+menjelaskan tombol closing dengan kode itu. Keduanya tetap hijau karena kodenya masih ada di
+katalog, tetapi keduanya sekarang menggambarkan kebijakan yang sudah tidak berlaku. Diserahkan ke
+pemilik `apps/web`.

@@ -76,7 +76,7 @@ describe("ADR 0010: saldo_akun_periode dihitung dari v_ledger_baris, bukan statu
 
     d.setelJam(p.tanggalAkhir);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     const saldo = await d.bacaSaldoAkunPeriode(p.id);
     const beban = saldo.find((s) => s.akun_kode === d.akun.bebanOperasional.kode);
@@ -111,7 +111,7 @@ describe("ADR 0010: saldo_akun_periode dihitung dari v_ledger_baris, bukan statu
 
     d.setelJam(p.tanggalAkhir);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     const saldo = await d.bacaSaldoAkunPeriode(p.id);
     expect(saldo.length).toBeGreaterThan(2);
@@ -138,7 +138,7 @@ describe("ADR 0010: saldo_akun_periode dihitung dari v_ledger_baris, bukan statu
 
     d.setelJam(p.tanggalAkhir);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     const saldo = await d.bacaSaldoAkunPeriode(p.id);
     // Debit-positive for every account type, so a trial balance is a SUM that
@@ -168,7 +168,7 @@ describe("spec 8.4: saldo awal menyambung ke saldo akhir periode sebelumnya", ()
     await d.postingAlokasiDana("2026-01-02", rp(80_000_000));
     d.setelJam(p.tanggalAkhir);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     for (const s of await d.bacaSaldoAkunPeriode(p.id)) {
       // Nothing precedes the earliest period of a bumn, so every opening
@@ -222,7 +222,7 @@ describe("BUILD-PLAN Fase 5 exit criterion: tiga periode berurutan dengan angka 
 
       d.setelJam(p.tanggalAkhir);
       await d.siapkanTutup(p);
-      const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+      const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
       expect(hasil.periode.status).toBe("CLOSED");
     }
 
@@ -281,7 +281,7 @@ describe("BUILD-PLAN Fase 5 exit criterion: tiga periode berurutan dengan angka 
     for (const p of bulanan) {
       d.setelJam(p.tanggalAkhir);
       await d.siapkanTutup(p);
-      await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+      await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     }
 
     for (const p of bulanan) {

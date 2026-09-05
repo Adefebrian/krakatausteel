@@ -72,18 +72,21 @@ describe("spec 2: siapa boleh menjalankan langkah closing", () => {
     );
   });
 
-  test("penyisihan dan akrual memakai izin closing periode, bukan izin bebas", async () => {
+  test("penyisihan dan akrual memakai admin.closing.hitung, bukan izin tutup periode", async () => {
+    // OPEN-QUESTIONS 29, decided by the repo owner 2026-09-02. These two steps
+    // used to sit behind `admin.closing.periode`, the same code as the close
+    // itself, so making the close Admin Pusat's would have moved both monthly
+    // computations to head office as a side effect. They now have their own
+    // code, held by APPROVER and inherited by ADMIN_CABANG: what is centralised
+    // is the DECLARATION that the month is finished, not the arithmetic that
+    // prepares it.
     const p = d.periode(2027, 6);
     d.setelJam(p.tanggalAkhir);
     await d.buatAkad({ hariTunggakan: 45, padaTanggal: p.tanggalAkhir });
     await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.approver);
 
-    // Both post real journals that move the allowance and recognise income, so
-    // they sit behind the same code as the closing they are steps of. Spec 9.3
-    // lists two closing screens, not four, which is why this module does not
-    // invent codes of its own for them.
     for (const nama of ["maker", "checker", "auditor"] as const) {
-      expect(d.ctx[nama].permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
+      expect(d.ctx[nama].permissions).not.toContain(PERMISSION_CLOSING.HITUNG);
       await tolakDengan(
         () => d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx[nama]),
         KODE_CLOSING.TIDAK_BERWENANG,
@@ -95,25 +98,61 @@ describe("spec 2: siapa boleh menjalankan langkah closing", () => {
     }
     expect(await d.bacaPenyisihan(p.id)).toHaveLength(0);
     expect(await d.bacaAkrual(p.id)).toHaveLength(0);
+
+    // AND THE POSITIVE HALF, which is the half the decision was at risk of
+    // taking away. Holding the computing code WITHOUT the closing code is
+    // enough to run both steps.
+    for (const nama of ["approver", "adminCabang"] as const) {
+      expect(d.ctx[nama].permissions).toContain(PERMISSION_CLOSING.HITUNG);
+      expect(d.ctx[nama].permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
+    }
+    await d.engine.jalankanPenyisihan({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.jalankanAkrualJasaAdm({ periodeId: p.id }, d.ctx.adminCabang);
+    expect((await d.bacaPenyisihan(p.id)).length).toBeGreaterThan(0);
   });
 
-  test("Approver boleh eksekusi closing periode; Maker dan Checker tidak", async () => {
+  test("kolektibilitas tetap boleh dijalankan Approver dan Admin Cabang", async () => {
+    // `admin.closing.kolektibilitas` already had its own code and did NOT
+    // change. Asserted here so a future edit to the catalogue cannot quietly
+    // sweep spec 8.1 along with spec 8.4.
+    const p = d.periode(2027, 6);
+    d.setelJam(p.tanggalAkhir);
+    await d.buatAkad({ hariTunggakan: 45, padaTanggal: p.tanggalAkhir });
+
+    for (const nama of ["approver", "adminCabang"] as const) {
+      expect(d.ctx[nama].permissions).toContain(PERMISSION_CLOSING.KOLEKTIBILITAS);
+    }
+    await d.engine.jalankanKolektibilitas({ periodeId: p.id }, d.ctx.adminCabang);
+    expect(await d.jumlahSnapshot(p.id)).toBeGreaterThan(0);
+  });
+
+  test("HANYA Admin Pusat boleh eksekusi closing periode, dan penolakannya tercatat", async () => {
+    // OPEN-QUESTIONS 29's actual decision. `admin.closing.periode` now gates
+    // `tutupPeriode` and nothing else, and ADMIN_PUSAT is the only role that
+    // holds it. An Approver prepares the month and reads the ten-item
+    // checklist; head office declares it finished.
     const p = d.periode(2026, 1);
     d.setelJam(p.tanggalMulai);
     await d.postingAlokasiDana(p.tanggalMulai, rp(50_000_000));
     d.setelJam(p.tanggalAkhir);
     await d.siapkanTutup(p);
 
-    for (const nama of ["maker", "checker", "auditor"] as const) {
+    for (const nama of ["approver", "adminCabang", "maker", "checker", "auditor"] as const) {
+      expect(d.ctx[nama].permissions).not.toContain(PERMISSION_CLOSING.PERIODE);
       await tolakDengan(
         () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx[nama]),
         KODE_CLOSING.TIDAK_BERWENANG,
       );
+      // Spec 2 rule 1: refused, and nothing written.
       expect((await d.bacaPeriode(p.id)).status).toBe("OPEN");
     }
 
-    // spec 2: the Approver's row literally says "eksekusi closing".
-    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    // The DITOLAK row spec 2 rule 5 requires is written by the HTTP error
+    // handler, not by the engine, so it is asserted where it is produced:
+    // ./closing-rute-otorisasi.test.ts, "penolakan tutup periode oleh Approver
+    // meninggalkan baris DITOLAK". Asserting it here would need this file to
+    // reach past the engine it is testing.
+    const hasil = await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     expect(hasil.periode.status).toBe("CLOSED");
   });
 });
@@ -125,11 +164,12 @@ describe("spec 8.4: reopen adalah wewenang Admin Pusat saja", () => {
     await d.postingAlokasiDana(p.tanggalMulai, rp(50_000_000));
     d.setelJam(p.tanggalAkhir);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
-    // The asymmetry is the control. Closing a period is an operational act;
-    // reopening one rewrites a period that has already been reported on, which
-    // is why spec 2 puts it with Admin Pusat and nowhere else.
+    // Since OPEN-QUESTIONS 29 both acts are Admin Pusat's, so the asymmetry is
+    // now one of degree rather than of kind: a reopen additionally demands a
+    // written reason and refuses unless this is the latest closed period. The
+    // Approver holds neither code.
     for (const nama of ["approver", "adminCabang", "maker", "auditor"] as const) {
       expect(d.ctx[nama].permissions).not.toContain(PERMISSION_CLOSING.REOPEN);
       await tolakDengan(
@@ -150,12 +190,17 @@ describe("spec 8.4: reopen adalah wewenang Admin Pusat saja", () => {
     expect(dibuka.status).toBe("OPEN");
   });
 
-  test("matriks hibah terkirim memang memberi closing ke Approver dan reopen hanya ke Admin Pusat", () => {
+  test("matriks hibah terkirim memberi perhitungan ke Approver dan tutup buku hanya ke Admin Pusat", () => {
     // Asserted against the SHIPPED matrix rather than against the fixture's
     // contexts, so a change to the grant table is a failing test here and not a
     // silent widening discovered in production.
     expect(PERMISSIONS_BY_ROLE.APPROVER).toContain(PERMISSION_CLOSING.KOLEKTIBILITAS);
-    expect(PERMISSIONS_BY_ROLE.APPROVER).toContain(PERMISSION_CLOSING.PERIODE);
+    expect(PERMISSIONS_BY_ROLE.APPROVER).toContain(PERMISSION_CLOSING.HITUNG);
+    // OPEN-QUESTIONS 29. The Approver runs spec 8.1, 8.2 and 8.3 and reads the
+    // checklist; it does not declare the month finished.
+    expect(PERMISSIONS_BY_ROLE.APPROVER).not.toContain(PERMISSION_CLOSING.PERIODE);
+    expect(PERMISSIONS_BY_ROLE.ADMIN_CABANG).not.toContain(PERMISSION_CLOSING.PERIODE);
+    expect(PERMISSIONS_BY_ROLE.ADMIN_PUSAT).toContain(PERMISSION_CLOSING.PERIODE);
     expect(PERMISSIONS_BY_ROLE.APPROVER).not.toContain(PERMISSION_CLOSING.REOPEN);
     expect(PERMISSIONS_BY_ROLE.ADMIN_CABANG).not.toContain(PERMISSION_CLOSING.REOPEN);
     expect(PERMISSIONS_BY_ROLE.ADMIN_PUSAT).toContain(PERMISSION_CLOSING.REOPEN);

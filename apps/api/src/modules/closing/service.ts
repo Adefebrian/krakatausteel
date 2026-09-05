@@ -1303,7 +1303,10 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
 
     hitungPenyisihan(input, ctx): Promise<PenyisihanPeriode[]> {
       return bersihkan(async () => {
-        wajibIzin(ctx, PERMISSION_CLOSING.PERIODE);
+        // The PREVIEW of spec 8.2, gated with the step it previews. Whoever may
+        // run the provision may see what it would post first; a preview behind
+        // a heavier code than the act is a control nobody can use.
+        wajibIzin(ctx, PERMISSION_CLOSING.HITUNG);
         const { periode, hitungan } = await siapkanPenyisihan(db, input, ctx);
         return hitungan.map((h) => ({
           id: null,
@@ -1328,7 +1331,13 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
 
     jalankanPenyisihan(input, ctx): Promise<PenyisihanPeriode[]> {
       return bersihkan(async () => {
-        wajibIzin(ctx, PERMISSION_CLOSING.PERIODE);
+        // `HITUNG`, NOT `PERIODE` (OPEN-QUESTIONS 29). Spec 8.2 is monthly
+        // branch arithmetic: repeatable while the period is OPEN (invariant
+        // 13), re-derivable from the ledger, and corrected by running it again.
+        // Closing the month is the irreversible declaration and is Admin
+        // Pusat's; this is not, and sharing one code made the second decide
+        // who held the first.
+        wajibIzin(ctx, PERMISSION_CLOSING.HITUNG);
         return db.transaction(async (tx) => {
           const { periode, hitungan } = await siapkanPenyisihan(tx, input, ctx);
           const keluaran: PenyisihanPeriode[] = [];
@@ -1442,7 +1451,8 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
 
     jalankanAkrualJasaAdm(input, ctx): Promise<HasilAkrual> {
       return bersihkan(async () => {
-        wajibIzin(ctx, PERMISSION_CLOSING.PERIODE);
+        // `HITUNG`, for the same reason as spec 8.2 above.
+        wajibIzin(ctx, PERMISSION_CLOSING.HITUNG);
         return db.transaction(async (tx) => {
           const h = await hitungAkrual(tx, input, ctx);
           if (h.metode === "CASH_BASIS") {
@@ -1578,6 +1588,12 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
 
     tutupPeriode(input: TutupPeriodeInput, ctx): Promise<HasilTutupPeriode> {
       return bersihkan(async () => {
+        // THE ONLY REMAINING HOLDER OF `PERIODE`, and ADMIN_PUSAT is the only
+        // role that holds it (OPEN-QUESTIONS 29, decided 2026-09-02). An
+        // Approver prepares the month and reads the ten-item checklist; head
+        // office declares it finished. The asymmetry with `bukaKembaliPeriode`
+        // is now one of degree rather than of kind: both are Admin Pusat, and
+        // the reopen additionally demands a written reason.
         wajibIzin(ctx, PERMISSION_CLOSING.PERIODE);
         return db.transaction(async (tx) => {
           // THE ROW LOCK, taken before the checklist and held to COMMIT.
@@ -1636,6 +1652,50 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
           await repo.hapusSaldoAkunPeriode(tx, periode.id);
           await repo.tulisSaldoAkunPeriode(tx, periode.id, ctx.userId, saldo);
 
+          // THE FROZEN DECOMPOSITION (migrations/0027 and 0032, ADR 0016).
+          //
+          // 0027 created the child table, wrote its totality rule into two
+          // triggers, and said in its own header that nothing wrote the rows
+          // yet. This is that write. Without it a CLOSED period has a frozen
+          // figure per ACCOUNT and none per sektor or per bidang, so spec 10's
+          // rule ("periode CLOSED dibaca dari snapshot") cannot be satisfied
+          // for RKA PUMK or RKA Non PUMK at all and modules/rka refuses report
+          // 24 for both rather than re-deriving them from editable master data.
+          //
+          // AFTER THE PARENT ROWS, NECESSARILY: the residual on each axis is
+          // the parent's own movement minus the buckets, computed in the same
+          // statement (repo.bekukanDimensi*), so the parents have to exist. And
+          // no explicit delete beside `hapusSaldoAkunPeriode`, because that
+          // delete already cascades to them (0027) and to the partner sets
+          // hanging off them (0032). A re-close therefore cannot leave a stale
+          // bucket reconciling against a fresh parent.
+          //
+          // ORDER BETWEEN THE THREE IS NOT COSMETIC: the partner set hangs off
+          // the SEKTOR bucket rows, so it has nothing to attach to until they
+          // are written.
+          const jumlahDimensi =
+            (await repo.bekukanDimensiSektor(tx, {
+              periodeId: periode.id,
+              bumnId: periode.bumn_id,
+              mulai: periode.tanggal_mulai,
+              akhir: periode.tanggal_akhir,
+              userId: ctx.userId,
+            })) +
+            (await repo.bekukanDimensiBidang(tx, {
+              periodeId: periode.id,
+              bumnId: periode.bumn_id,
+              mulai: periode.tanggal_mulai,
+              akhir: periode.tanggal_akhir,
+              userId: ctx.userId,
+            }));
+          const jumlahMitraDimensi = await repo.bekukanMitraDimensi(tx, {
+            periodeId: periode.id,
+            bumnId: periode.bumn_id,
+            mulai: periode.tanggal_mulai,
+            akhir: periode.tanggal_akhir,
+            userId: ctx.userId,
+          });
+
           // THE TEMPLATE STAMP (migrations/0028, ADR 0017), resolved from the
           // period's OWN END DATE and not from wall clock time: the effective
           // range of a template is over the period being reported on, so a
@@ -1692,6 +1752,13 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
                 })),
                 konfirmasiKasNegatif: input.konfirmasiKasNegatif === true,
                 jumlahSaldoDibekukan: saldo.length,
+                // The decomposition's own two counts, beside the trial
+                // balance's. `dimensi_dibekukan_at` says the decomposition RAN;
+                // these say what it produced, which is the difference between a
+                // month where nothing carried a dimension and a month where the
+                // freeze silently wrote nothing.
+                jumlahDimensiDibekukan: jumlahDimensi,
+                jumlahMitraDimensiDibekukan: jumlahMitraDimensi,
                 // Which layout this statement was issued under, in the same
                 // record as the figures' count. A reprint that later disagrees
                 // with the archive is then answerable rather than arguable.

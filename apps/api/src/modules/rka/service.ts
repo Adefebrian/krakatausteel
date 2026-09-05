@@ -704,22 +704,72 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
     ctx: RkaContext,
     jenis: JenisRka,
     cabangIds: readonly string[],
-    dari: string,
-    sampai: string,
+    periode: ReadonlyArray<PeriodeRow>,
   ): Promise<Agregat> {
-    const rows =
-      jenis === "PUMK"
-        ? await repo.realisasiSektorLedger(tx, { bumnId: ctx.bumnId, cabangIds, dari, sampai })
-        : await repo.realisasiBidangLedger(tx, { bumnId: ctx.bumnId, cabangIds, dari, sampai });
     const hasil = kosong();
-    for (const r of rows) {
-      if (!r.dimensi_id) continue;
-      tambahkan(
-        hasil,
-        r.dimensi_id,
-        keSen(uangDariDb(r.nilai)),
-        r.unit ? Number.parseInt(r.unit, 10) : 0,
-      );
+    // THE PARTNER COUNT IS A SET UNION, NOT A SUM OF COUNTS.
+    //
+    // Spec 9.3 budgets PUMK in two units, rupiah and "jumlah mitra", and the
+    // second one does not add up: a partner funded in January and again in
+    // March is ONE partner over the year and two over the two months. The money
+    // is accumulated per month because it is additive; the partners are
+    // collected into a set and counted once at the end, so a cumulative window
+    // gives the same answer as the same window read as one query used to. It is
+    // also what makes a MIXED window answerable at all: the frozen months
+    // contribute frozen partners (migrations/0032 stores the SET for exactly
+    // this reason) and the live months contribute live ones, into one set.
+    const mitraPerSektor = new Map<string, Set<string>>();
+
+    for (const p of periode) {
+      const beku = p.status === "CLOSED";
+      const rows =
+        jenis === "PUMK"
+          ? beku
+            ? await repo.realisasiSektorBeku(tx, { periodeId: p.id, cabangIds })
+            : await repo.realisasiSektorLedger(tx, {
+                bumnId: ctx.bumnId,
+                cabangIds,
+                dari: p.tanggal_mulai,
+                sampai: p.tanggal_akhir,
+              })
+          : beku
+            ? await repo.realisasiBidangBeku(tx, { periodeId: p.id, cabangIds })
+            : await repo.realisasiBidangLedger(tx, {
+                bumnId: ctx.bumnId,
+                cabangIds,
+                dari: p.tanggal_mulai,
+                sampai: p.tanggal_akhir,
+              });
+      for (const r of rows) {
+        if (!r.dimensi_id) continue;
+        tambahkan(hasil, r.dimensi_id, keSen(uangDariDb(r.nilai)), 0);
+      }
+
+      if (jenis !== "PUMK") continue;
+      const mitra = beku
+        ? await repo.mitraSektorBeku(tx, { periodeId: p.id, cabangIds })
+        : await repo.mitraSektorLedger(tx, {
+            bumnId: ctx.bumnId,
+            cabangIds,
+            dari: p.tanggal_mulai,
+            sampai: p.tanggal_akhir,
+          });
+      for (const m of mitra) {
+        let himpunan = mitraPerSektor.get(m.sektor_id);
+        if (!himpunan) {
+          himpunan = new Set<string>();
+          mitraPerSektor.set(m.sektor_id, himpunan);
+        }
+        himpunan.add(m.mitra_id);
+      }
+    }
+
+    for (const [sektorId, himpunan] of mitraPerSektor) {
+      // A sector with partners but no money, or the reverse, is a real state
+      // (a disbursement reversed in the same month nets to zero and the partner
+      // was still funded), so the unit is set independently of the amount.
+      if (!hasil.nilai.has(sektorId)) hasil.nilai.set(sektorId, 0n);
+      hasil.unit.set(sektorId, himpunan.size);
     }
     return hasil;
   }
@@ -1056,16 +1106,32 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
           sumber: p.status === "CLOSED" ? "SALDO_AKUN_PERIODE" : "V_LEDGER_BARIS",
         }));
 
-        const adaTertutup = periode.some((p) => p.status === "CLOSED");
-        if (adaTertutup && filter.jenis !== "KEUANGAN") {
-          // THE REFUSAL, NOT A WORKAROUND. See this file's header: there is no
-          // frozen per-sektor or per-bidang figure to read, and re-deriving one
-          // from live master data would make a closed month's report change
-          // when somebody reclassifies a partner.
+        // THE REFUSAL, NARROWED TO WHAT IT WAS ALWAYS ABOUT.
+        //
+        // It used to be "any CLOSED month, for PUMK and Non PUMK, always",
+        // because nothing had ever written `saldo_akun_dimensi_periode` and the
+        // only remaining way to produce a per-sektor or per-bidang figure was
+        // to re-derive it from live master data. `modules/closing` now freezes
+        // that decomposition at the close, so the refusal shrinks to the case
+        // it always described: a CLOSED period that carries NO decomposition.
+        //
+        // ASKED OF `dimensi_dibekukan_at` AND NOT OF THE ROW COUNT. Zero rows
+        // has two meanings and only the stamp separates them. A period closed
+        // before the engine wrote decompositions had disbursements and has no
+        // frozen record of them: reading it as zero would report a month of
+        // real lending as a month of none, so it is refused, which is the
+        // fail-closed handover migrations/0032 chose over a backfill that would
+        // have had to invent the figures from editable master data. A period
+        // closed BY that engine in a month where nothing carried a sektor is
+        // completely decomposed into zero rows, and it is answered.
+        const tanpaDimensi = periode.filter(
+          (p) => p.status === "CLOSED" && p.dimensi_dibekukan_at === null,
+        );
+        if (tanpaDimensi.length > 0 && filter.jenis !== "KEUANGAN") {
           throw tolak("SKEMA_BELUM_LENGKAP", {
             jenis: filter.jenis,
             dimensi,
-            periode: periode.filter((p) => p.status === "CLOSED").map((p) => p.id),
+            periode: tanpaDimensi.map((p) => p.id),
           });
         }
         for (const p of periode) {
@@ -1089,14 +1155,7 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
         const realisasi =
           filter.jenis === "KEUANGAN"
             ? await realisasiKeuangan(db, ctx, cabangIds, periode)
-            : await realisasiDimensi(
-                db,
-                ctx,
-                filter.jenis,
-                cabangIds,
-                periode[0].tanggal_mulai,
-                periode[periode.length - 1].tanggal_akhir,
-              );
+            : await realisasiDimensi(db, ctx, filter.jenis, cabangIds, periode);
 
         // --- budget --------------------------------------------------------
         const bulanDalamJendela = new Set(bulanJendela.map((b) => b.bulan));
@@ -1226,13 +1285,11 @@ export function buatEngineRka(deps: RkaEngineDeps): RkaEngine {
         if (input.jenis === "KEUANGAN") return "SALDO_AKUN_PERIODE";
         // The gap, made inspectable rather than only observable as an
         // exception, so a screen can grey the button instead of showing an
-        // error after the click. Asked of the DATA: the day modules/closing
-        // starts writing `saldo_akun_dimensi_periode`, this answers
-        // SALDO_AKUN_PERIODE without a second change here.
-        const sumbu = input.jenis === "PUMK" ? "SEKTOR" : "BIDANG";
-        return (await repo.adaSaldoBekuDimensi(db, p.id, sumbu))
-          ? "SALDO_AKUN_PERIODE"
-          : "TIDAK_TERSEDIA";
+        // error after the click. Asked of the STAMP the close writes, not of
+        // the row count, and `laporanRkaVsRealisasi` refuses on exactly the
+        // same predicate: a screen that greys the button and a report that
+        // answers would be worse than either alone.
+        return p.dimensi_dibekukan_at === null ? "TIDAK_TERSEDIA" : "SALDO_AKUN_PERIODE";
       });
     },
   };

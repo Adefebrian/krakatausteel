@@ -65,6 +65,7 @@ import { SQL } from "bun";
 import { expect } from "bun:test";
 import { createAngsuranModule, type AngsuranContext, type HasilAlokasi } from "../angsuran/index";
 import { createJurnalModule, type Jurnal, type JurnalContext } from "../jurnal/index";
+import { createRkaModule, type RkaEngine } from "../rka/index";
 import { createDbAdapter } from "../../core/adapters/db";
 import { createAuditService } from "../audit/index";
 import { KATALOG, tipeDataUntuk } from "../konfigurasi/index";
@@ -407,6 +408,13 @@ export interface OpsiAkad {
   pokok?: Uang;
   tenor?: number;
   rate?: Rate;
+  /**
+   * Which sektor the partner and the proposal are filed under. Defaults to the
+   * world's first sektor. `PENCAIRAN_PUMK` puts NO `sektorId` on the journal
+   * line (ADR 0016), so this IS the only route from a disbursement to a sector
+   * and therefore the thing the freeze has to copy.
+   */
+  sektorId?: string;
   /** Date of the PENCAIRAN_PUMK journal. Must be inside an OPEN period. */
   tanggalPencairan?: string;
   /** Leave the akad BELUM_CAIR: no journal, no outstanding, and therefore
@@ -507,6 +515,39 @@ export interface SaldoAkunDb {
   saldo_akhir: string;
 }
 
+/**
+ * One frozen decomposition row (migrations/0027), projected WITHOUT its id and
+ * without its timestamps.
+ *
+ * That projection is the point rather than a convenience: invariant 14's
+ * reproducibility claim is about the FIGURES a re-close produces, and
+ * `gen_random_uuid()` and `now()` differ on every run by design. Comparing the
+ * raw rows would therefore always differ and could never fail for the reason
+ * anyone cares about.
+ */
+export interface SaldoDimensiDb {
+  akun_kode: string;
+  cabang_id: string;
+  sumbu: "SEKTOR" | "BIDANG";
+  /** The bucket's own code, or the literal "SISA" for the residual row. */
+  bucket: string;
+  mutasi_debit: string;
+  mutasi_kredit: string;
+}
+
+/** One frozen partner row (migrations/0032), by sector code and partner code. */
+export interface MitraDimensiDb {
+  akun_kode: string;
+  sektor_kode: string;
+  kode_mitra: string;
+}
+
+export interface DimensiFixture {
+  id: string;
+  kode: string;
+  nama: string;
+}
+
 export interface PanggilanJurnal {
   metode: "postingEvent";
   eventCode: string;
@@ -540,6 +581,15 @@ export interface DuniaClosing {
   cabangId: string;
   cabangLainId: string;
   sektorId: string;
+  /**
+   * A SECOND sektor, so a per-sektor assertion is a SPLIT and not a total
+   * wearing a sector's name. With one sector every decomposition is trivially
+   * the whole account and an implementation that ignored the dimension
+   * entirely would pass.
+   */
+  sektorLainId: string;
+  /** Two Non PUMK bidang, for the same reason there are two sektor. */
+  bidang: { a: DimensiFixture; b: DimensiFixture };
   akun: Record<KunciAkun, AkunFixture>;
 
   /** The engine under test, wired the way the composition root wires it. */
@@ -550,6 +600,22 @@ export interface DuniaClosing {
   audit: PencatatAuditUji;
   /** Builds a SECOND engine, e.g. one whose ledger is armed to fail. */
   buatEngine(opsi?: { jurnal?: PorterJurnalClosing; audit?: PencatatAuditClosing }): ClosingEngine;
+
+  /**
+   * The REAL RKA engine, over this world's database, reached through
+   * `modules/rka/index.ts` like any other cross-module call.
+   *
+   * Here so ONE test can ask the question the freeze exists to answer: does
+   * report 24 give the same figures over a CLOSED period as it gave over the
+   * same window while it was OPEN. A double could not answer it, because the
+   * whole claim is about which SQL the report ran; and re-implementing the
+   * report's queries inside this folder would prove only that two copies of a
+   * query agree.
+   *
+   * This module still writes nothing through it and it appears in no other
+   * test: modules/rka's own suite specifies modules/rka.
+   */
+  rka: RkaEngine;
 
   jam(): Date;
   /** Moves the injected clock. Every engine in this world reads it live, so a
@@ -668,6 +734,28 @@ export interface DuniaClosing {
    * engine is the thing under test rather than a way of arranging the world.
    */
   postingBebanPenyisihan(tanggal: string, nilai: Uang): Promise<Jurnal>;
+  /**
+   * A Non PUMK grant, posted through the REAL ledger engine, carrying
+   * `bidangId` on the expense leg exactly as `PENYALURAN_NON_PUMK`'s mapping
+   * makes it (the cash leg carries no dimension: modules/jurnal puts analytic
+   * dimensions on the leg with the economics).
+   *
+   * Deliberately NOT driven through modules/nonpumk's state machine. What the
+   * freeze reads is the LEDGER LINE, so the fixture's job is to produce the
+   * line the shipped event mapping produces and nothing more; a proposal,
+   * approval and LPJ would add three engines to a test about arithmetic.
+   */
+  postingPenyaluranNonPumk(tanggal: string, nilai: Uang, bidangId: string): Promise<Jurnal>;
+  /**
+   * The refund leg, also per bidang. A CREDIT on the same expense account, so
+   * the bidang's realisation is disbursement MINUS refund; a freeze that stored
+   * one net figure could not tell a month with both from a month with neither.
+   */
+  postingPengembalianSisaNonPumk(
+    tanggal: string,
+    nilai: Uang,
+    bidangId: string,
+  ): Promise<Jurnal>;
   reversalJurnal(jurnalId: string, alasan: string): Promise<Jurnal>;
   jumlahJurnalPeriode(periodeId: string): Promise<number>;
   jurnalPeriode(periodeId: string): Promise<
@@ -701,6 +789,12 @@ export interface DuniaClosing {
   bacaPenyisihan(periodeId: string): Promise<PenyisihanDb[]>;
   bacaAkrual(periodeId: string): Promise<AkrualDb[]>;
   bacaSaldoAkunPeriode(periodeId: string): Promise<SaldoAkunDb[]>;
+  /** The frozen decomposition (migrations/0027), ordered so two runs compare. */
+  bacaDimensiBeku(periodeId: string): Promise<SaldoDimensiDb[]>;
+  /** The frozen partner sets (migrations/0032), ordered the same way. */
+  bacaMitraDimensiBeku(periodeId: string): Promise<MitraDimensiDb[]>;
+  /** `periode.dimensi_dibekukan_at`: did the close run the decomposition? */
+  dimensiDibekukanAt(periodeId: string): Promise<string | null>;
 
   // --- configuration knobs -------------------------------------------------
   setelKonfigurasi(grup: string, kunciKonfig: string, nilai: string): Promise<void>;
@@ -1004,11 +1098,57 @@ export async function buatDunia(): Promise<DuniaClosing> {
     `insert into sektor_pumk (bumn_id, kode, nama) values ($1, $2, 'Perdagangan (fixture)') returning id::text as id`,
     [bumn.id, kunci("SEK")],
   );
+  // A SECOND sektor and TWO bidang, so every per-dimension assertion in this
+  // folder is a split rather than a total that happens to carry one bucket's
+  // name. With a single bucket per axis, an implementation that ignored the
+  // dimension and wrote the account's whole movement into one row would satisfy
+  // both the totality trigger and every equality assertion.
+  const sektorLain = await satu<{ id: string }>(
+    db,
+    `insert into sektor_pumk (bumn_id, kode, nama) values ($1, $2, 'Jasa (fixture)') returning id::text as id`,
+    [bumn.id, kunci("SEK")],
+  );
+  const bidangRow = async (nama: string): Promise<DimensiFixture> => {
+    const kode = kunci("BDG");
+    const row = await satu<{ id: string }>(
+      db,
+      `insert into bidang_non_pumk (bumn_id, kode, nama) values ($1, $2, $3) returning id::text as id`,
+      [bumn.id, kode, nama],
+    );
+    return { id: row.id, kode, nama };
+  };
+  const bidang = {
+    a: await bidangRow("Pendidikan (fixture)"),
+    b: await bidangRow("Kesehatan (fixture)"),
+  };
 
   // The two engines this module drives, wired the way the composition root
   // wires them, and used by the fixture for the preconditions that must be
   // REAL (a generated schedule, a posted disbursement, an allocated deposit).
-  const { engine: jurnalEngine } = createJurnalModule({ db, jam });
+  const { engine: jurnalEngine } = createJurnalModule({
+    db,
+    jam,
+    // A BUSINESS-STATE REVERSER FOR `pumk_pencairan`, because the fixture now
+    // stamps that back-reference onto every disbursement it posts (see
+    // `cairkan`) and `reversalJurnal` REFUSES to reverse a journal whose
+    // `referensi_tipe` has no registered handler. Refusing is correct: a half
+    // reversal, accounting undone and `pumk_akad` left AKTIF, is worse than
+    // none.
+    //
+    // A NO-OP, and the same no-op modules/laporan's operational fixture
+    // registers for the same reason. modules/pumk owns the real handler; this
+    // folder's reversal test asserts on the LEDGER and then restates the
+    // sub-ledger itself with `rusakSubLedger`, so a handler that also touched
+    // the akad would be a second writer of the very row the test is setting.
+    pembalikStateBisnis: [
+      {
+        referensiTipe: "pumk_pencairan",
+        async balikkan() {
+          /* the akad state these tests assert on is written by the test itself */
+        },
+      },
+    ],
+  });
   const { engine: angsuranEngine } = createAngsuranModule({ db, jurnal: jurnalEngine, jam });
 
   const porterJurnal = porterJurnalUji(db, jam);
@@ -1039,6 +1179,10 @@ export async function buatDunia(): Promise<DuniaClosing> {
   } satisfies Record<keyof typeof userId, ClosingContext>;
 
   const engine = createClosingEngine({ db, jurnal: porterJurnal, jam, audit: porterAudit });
+  // Through modules/rka's index.ts, its only door, and given the same injected
+  // clock so a report dated inside this world's period range is dated by the
+  // same hand that dated the journals.
+  const { engine: rkaEngine } = createRkaModule({ db, jam, audit: porterAudit });
 
   // --- helpers -------------------------------------------------------------
 
@@ -1088,6 +1232,47 @@ export async function buatDunia(): Promise<DuniaClosing> {
         where akad_id = $1 and is_active_version and deleted_at is null`,
       [akadId],
     );
+
+    // CALLING THIS TWICE ON ONE AKAD IS A RE-DISBURSEMENT, AND A
+    // RE-DISBURSEMENT IS A CORRECTION (spec 6.3).
+    //
+    // It cannot be a second net advance and the DATABASE is what says so, in
+    // two places at once: `pumk_akad_outstanding_pokok_max_ck` refuses an
+    // outstanding above the contract amount (ADR 0011: the contract amount is
+    // immutable), and `pumk_akad_satu_aktif_per_mitra_uq` refuses the second
+    // live akad that a genuine second advance would need. Posting a second
+    // PENCAIRAN and leaving it at that would put two pokok in the ledger
+    // against one in the card, which is spec 8.4 check 10 (SUB_LEDGER_TIDAK_
+    // COCOK) failing the close over an inconsistency only the fixture believes
+    // in.
+    //
+    // So the live disbursement is REVERSED first, exactly as this system
+    // corrects anything: the original stays in the ledger as REVERSED, its
+    // pembalik carries the offsetting credit, and the fresh entry restores the
+    // balance. Three ledger lines on the akad, netting to one pokok, and a
+    // reconciliation that passes. The pembalik inherits `referensi_tipe`,
+    // `mitra_id` and `akad_id` (modules/jurnal), so it is still a disbursement
+    // line for the freeze's purposes and still names the same partner, which is
+    // exactly the population the frozen partner SET has to survive: several
+    // disbursement lines for one mitra inside one bucket must still be ONE row.
+    const hidup = await db.query<{ id: string }>(
+      `select j.id::text as id
+         from jurnal j
+         join jurnal_baris b on b.jurnal_id = j.id and b.deleted_at is null
+        where b.akad_id = $1 and j.referensi_tipe = 'pumk_pencairan'
+          and j.status = 'POSTED' and j.reversal_of_jurnal_id is null
+          and j.deleted_at is null
+        group by j.id`,
+      [akadId],
+    );
+    for (const h of hidup) {
+      await jurnalEngine.reversalJurnal(
+        h.id,
+        `Pencairan ulang akad ${a.no_akad}, pencairan sebelumnya dibalik (fixture)`,
+        ctx.adminPusat as JurnalContext,
+      );
+    }
+
     // DRIVEN WITH A CONTEXT WHOSE BRANCH MATCHES THE ROW. Admin Pusat is scoped
     // to both branches, so a cross-branch fixture akad does not die in setup
     // with the ledger's own CABANG_DILUAR_SCOPE wearing the costume of the
@@ -1102,14 +1287,26 @@ export async function buatDunia(): Promise<DuniaClosing> {
         akunKasId: akun.kas.id,
         mitraId: a.mitra_id,
         akadId,
-        referensiTipe: null,
+        // THE LEDGER'S OWN BACK-REFERENCE, and what modules/pumk sends. It is
+        // not decoration here: the frozen per-sektor decomposition attributes a
+        // sector to DISBURSEMENT lines only (repayments and accruals move the
+        // same receivable account and are not realisation), and
+        // `referensi_tipe` is how both modules/rka and modules/closing tell
+        // them apart. A fixture that left it null would produce a ledger this
+        // system does not produce and a decomposition of nothing.
+        referensiTipe: "pumk_pencairan",
         referensiId: null,
       },
       ctx.adminPusat as JurnalContext,
     );
+    // The sub-ledger is RESTATED to the contract amount, never accumulated.
+    // After a re-disbursement the akad's ledger balance is one pokok (the
+    // original, its pembalik and the new entry net to exactly that), and
+    // `pumk_akad_outstanding_pokok_max_ck` forbids anything larger anyway.
     await db.query(
       `update pumk_akad
-          set status = 'AKTIF', outstanding_pokok = $2, outstanding_jasa = $3, updated_by = $4
+          set status = 'AKTIF', outstanding_pokok = $2,
+              outstanding_jasa = $3, updated_by = $4
         where id = $1`,
       [akadId, a.pokok_pinjaman, jasa[0]?.jasa ?? "0.00", userId.maker],
     );
@@ -1137,6 +1334,7 @@ export async function buatDunia(): Promise<DuniaClosing> {
     const tanggalAkad = tambahHari(mulaiAngsuran, -30);
     const jatuhTempoAkhir = tambahBulan(mulaiAngsuran, tenor - 1);
 
+    const sektorAkad = opsi.sektorId ?? sektor.id;
     const kodeMitra = kunci("MTR");
     const mitra = await satu<{ id: string }>(
       db,
@@ -1147,7 +1345,7 @@ export async function buatDunia(): Promise<DuniaClosing> {
         kodeMitra,
         `Mitra ${kodeMitra}`,
         kunci("NIK").replace(/\D/g, "").padEnd(16, "0").slice(0, 16),
-        sektor.id,
+        sektorAkad,
         `Usaha ${kodeMitra}`,
       ],
     );
@@ -1160,7 +1358,7 @@ export async function buatDunia(): Promise<DuniaClosing> {
        values ($1, $2, $3, $3, $4, $5, $6, $7, 'Modal kerja (fixture closing)', 'INTERNAL',
                'DICAIRKAN', $8, $8)
        returning id::text as id`,
-      [cabangId, kunci("PRP"), tanggalAkad, mitra.id, sektor.id, pokok, tenor, userId.maker],
+      [cabangId, kunci("PRP"), tanggalAkad, mitra.id, sektorAkad, pokok, tenor, userId.maker],
     );
     const noAkad = kunci("AKD");
     const akad = await satu<{ id: string }>(
@@ -1243,8 +1441,11 @@ export async function buatDunia(): Promise<DuniaClosing> {
     cabangId: cabang.id,
     cabangLainId: cabangLain.id,
     sektorId: sektor.id,
+    sektorLainId: sektorLain.id,
+    bidang,
     akun,
     engine,
+    rka: rkaEngine,
     jurnal: porterJurnal,
     audit: porterAudit,
     buatEngine(opsi = {}) {
@@ -1435,6 +1636,40 @@ export async function buatDunia(): Promise<DuniaClosing> {
         ctx.adminPusat as JurnalContext,
       );
     },
+    async postingPenyaluranNonPumk(tanggal, nilai, bidangId) {
+      return jurnalEngine.postingEvent(
+        "PENYALURAN_NON_PUMK",
+        {
+          cabangId: cabang.id,
+          tanggalTransaksi: tanggal,
+          nilai,
+          keterangan: "Penyaluran Non PUMK (fixture closing)",
+          // `debit_dari_payload`: spec 6.4 puts the expense account on the form,
+          // per bidang. This world has one expense account, so the bidang lives
+          // ONLY in `dimensi_json` and the decomposition has nothing else to
+          // read, which is the harder and more honest case.
+          akunDebitId: akun.bebanOperasional.id,
+          akunKasId: akun.kas.id,
+          dimensi: { bidangId },
+        },
+        ctx.adminPusat as JurnalContext,
+      );
+    },
+    async postingPengembalianSisaNonPumk(tanggal, nilai, bidangId) {
+      return jurnalEngine.postingEvent(
+        "PENGEMBALIAN_SISA_NON_PUMK",
+        {
+          cabangId: cabang.id,
+          tanggalTransaksi: tanggal,
+          nilai,
+          keterangan: "Pengembalian sisa dana Non PUMK (fixture closing)",
+          akunKreditId: akun.bebanOperasional.id,
+          akunKasId: akun.kas.id,
+          dimensi: { bidangId },
+        },
+        ctx.adminPusat as JurnalContext,
+      );
+    },
     async reversalJurnal(jurnalId, alasan) {
       return jurnalEngine.reversalJurnal(jurnalId, alasan, ctx.adminPusat as JurnalContext);
     },
@@ -1555,6 +1790,49 @@ export async function buatDunia(): Promise<DuniaClosing> {
           order by a.kode, s.cabang_id`,
         [periodeId],
       );
+    },
+    bacaDimensiBeku(periodeId) {
+      // `coalesce(kode, 'SISA')` rather than a null: the residual is a real
+      // bucket with a meaning ("movement on this account that carried no value
+      // on this axis"), and an assertion reads better against a name than
+      // against the absence of one. Ordered by the projected columns so two
+      // runs of the same close compare row by row.
+      return db.query<SaldoDimensiDb>(
+        `select a.kode as akun_kode, s.cabang_id::text as cabang_id, d.sumbu,
+                coalesce(sk.kode, bd.kode, 'SISA') as bucket,
+                d.mutasi_debit::text as mutasi_debit, d.mutasi_kredit::text as mutasi_kredit
+           from saldo_akun_dimensi_periode d
+           join saldo_akun_periode s on s.id = d.saldo_akun_periode_id
+           join akun a on a.id = s.akun_id
+           left join sektor_pumk sk on sk.id = d.sektor_id
+           left join bidang_non_pumk bd on bd.id = d.bidang_id
+          where s.periode_id = $1 and s.deleted_at is null and d.deleted_at is null
+          order by d.sumbu, a.kode, s.cabang_id, coalesce(sk.kode, bd.kode, 'SISA')`,
+        [periodeId],
+      );
+    },
+    bacaMitraDimensiBeku(periodeId) {
+      return db.query<MitraDimensiDb>(
+        `select a.kode as akun_kode, sk.kode as sektor_kode, m.kode_mitra
+           from saldo_dimensi_mitra_periode dm
+           join saldo_akun_dimensi_periode d on d.id = dm.saldo_akun_dimensi_periode_id
+           join saldo_akun_periode s on s.id = d.saldo_akun_periode_id
+           join akun a on a.id = s.akun_id
+           join sektor_pumk sk on sk.id = d.sektor_id
+           join mitra m on m.id = dm.mitra_id
+          where s.periode_id = $1 and s.deleted_at is null and d.deleted_at is null
+            and dm.deleted_at is null
+          order by a.kode, sk.kode, m.kode_mitra`,
+        [periodeId],
+      );
+    },
+    async dimensiDibekukanAt(periodeId) {
+      const row = await satu<{ pada: string | null }>(
+        db,
+        `select dimensi_dibekukan_at::text as pada from periode where id = $1`,
+        [periodeId],
+      );
+      return row.pada;
     },
 
     async setelKonfigurasi(grup, kunciKonfig, nilai) {

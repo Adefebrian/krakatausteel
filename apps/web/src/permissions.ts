@@ -58,6 +58,14 @@ export const PERMISSIONS = [
   // write code to a role that must never write.
   "admin.closing.view",
   "admin.closing.kolektibilitas",
+  // Running the month-end arithmetic (penyisihan, akrual jasa administrasi),
+  // which is NOT the same act as declaring the month closed. Mirrors the
+  // server's split (OPEN-QUESTIONS 29): one code used to gate all three, so
+  // making the close Admin Pusat only would have moved both branch computations
+  // to head office as a side effect.
+  "admin.closing.hitung",
+  // Declaring the month closed. Admin Pusat only, which is why it is absent
+  // from the Approver list below.
   "admin.closing.periode",
   "admin.periode.reopen",
   "admin.rka",
@@ -170,10 +178,15 @@ const APPROVER: Permission[] = [
   "jurnal.post",
   "jurnal.reversal",
   // Reading the checklist is a separate act from executing the close, and the
-  // Approver does the first before deciding whether to do the second.
+  // Approver does the first before deciding whether to do the second. Reading
+  // and preparing is now all it does.
   "admin.closing.view",
   "admin.closing.kolektibilitas",
-  "admin.closing.periode",
+  // The month-end arithmetic, and NOT the close (OPEN-QUESTIONS 29, decided
+  // 2026-09-02: closing a period is Admin Pusat only). `admin.closing.periode`
+  // is deliberately absent, so a screen that offers "Tutup Periode" to an
+  // Approver would be offering a button the server refuses.
+  "admin.closing.hitung",
 ];
 
 const ADMIN_CABANG: Permission[] = [

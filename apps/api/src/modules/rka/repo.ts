@@ -77,6 +77,21 @@ export interface PeriodeRow {
   tanggal_mulai: string;
   tanggal_akhir: string;
   status: StatusPeriode;
+  /**
+   * When the close froze this period's per-dimension decomposition
+   * (migrations/0032). NULL means NOBODY DECOMPOSED IT, which is a different
+   * statement from "it decomposed to nothing".
+   *
+   * That distinction is the whole reason this column is read here instead of
+   * counting rows in `saldo_akun_dimensi_periode`. Two states produce zero
+   * rows and only one of them is answerable: a period closed before the
+   * closing engine wrote decompositions HAD disbursements and has no frozen
+   * record of them, so reading it as zero realisation would report a month of
+   * real lending as a month of none; a period closed by the engine in a month
+   * where nothing carried a sektor is completely and correctly decomposed into
+   * zero rows, and refusing it would refuse a quiet January forever.
+   */
+  dimensi_dibekukan_at: string | null;
 }
 
 export interface AkunRow {
@@ -114,6 +129,23 @@ export interface AgregatRow {
   dimensi_id: string | null;
   nilai: string;
   unit: string | null;
+}
+
+/**
+ * One partner in one sector, for spec 9.3's "jumlah mitra".
+ *
+ * A PAIR AND NOT A COUNT, from BOTH sources, and that is the whole design.
+ * The figure is a COUNT DISTINCT over the window the report asks for, and a
+ * partner funded in January and again in March is one partner over the year and
+ * two over the two months. A per-period count could not be summed across a
+ * cumulative window without double counting, and a window that mixes a frozen
+ * January with a live February could not be counted at all. Returning the SET
+ * from both sides makes the union honest for every window, which is the same
+ * reason migrations/0032 freezes rows rather than a number.
+ */
+export interface MitraSektorRow {
+  sektor_id: string;
+  mitra_id: string;
 }
 
 const KOLOM_RKA = `id::text as id, bumn_id::text as bumn_id, cabang_id::text as cabang_id,
@@ -215,7 +247,6 @@ export interface RepoRka {
   ): Promise<PeriodeRow[]>;
   periodeById(tx: QueryRunner, periodeId: string, bumnId: string): Promise<PeriodeRow | null>;
   adaSaldoBeku(tx: QueryRunner, periodeId: string): Promise<boolean>;
-  adaSaldoBekuDimensi(tx: QueryRunner, periodeId: string, sumbu: "SEKTOR" | "BIDANG"): Promise<boolean>;
 
   realisasiAkunLedger(
     tx: QueryRunner,
@@ -233,6 +264,24 @@ export interface RepoRka {
     tx: QueryRunner,
     q: { bumnId: string; cabangIds: readonly string[]; dari: string; sampai: string },
   ): Promise<AgregatRow[]>;
+  realisasiBidangBeku(
+    tx: QueryRunner,
+    q: { periodeId: string; cabangIds: readonly string[] },
+  ): Promise<AgregatRow[]>;
+  realisasiSektorBeku(
+    tx: QueryRunner,
+    q: { periodeId: string; cabangIds: readonly string[] },
+  ): Promise<AgregatRow[]>;
+  /** The PARTNERS behind each sector, live: one row per (sektor, mitra). */
+  mitraSektorLedger(
+    tx: QueryRunner,
+    q: { bumnId: string; cabangIds: readonly string[]; dari: string; sampai: string },
+  ): Promise<MitraSektorRow[]>;
+  /** The same set, frozen (migrations/0032). */
+  mitraSektorBeku(
+    tx: QueryRunner,
+    q: { periodeId: string; cabangIds: readonly string[] },
+  ): Promise<MitraSektorRow[]>;
 
   konfigurasi(tx: QueryRunner, bumnId: string, grup: string, kunci: string): Promise<string | null>;
 
@@ -481,7 +530,8 @@ export function buatRepoRka(): RepoRka {
         .join(" or ");
       return tx.query<PeriodeRow>(
         `select id::text as id, tahun::int as tahun, bulan::int as bulan,
-                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, status
+                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, status,
+                dimensi_dibekukan_at::text as dimensi_dibekukan_at
            from periode
           where bumn_id = $1::uuid and deleted_at is null and (${cocok})`,
         params,
@@ -492,7 +542,8 @@ export function buatRepoRka(): RepoRka {
       return satu<PeriodeRow>(
         tx,
         `select id::text as id, tahun::int as tahun, bulan::int as bulan,
-                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, status
+                tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, status,
+                dimensi_dibekukan_at::text as dimensi_dibekukan_at
            from periode
           where id = $1::uuid and bumn_id = $2::uuid and deleted_at is null`,
         [periodeId, bumnId],
@@ -505,28 +556,6 @@ export function buatRepoRka(): RepoRka {
         `select count(*)::text as n from saldo_akun_periode
           where periode_id = $1::uuid and deleted_at is null`,
         [periodeId],
-      );
-      return Number.parseInt(row?.n ?? "0", 10) > 0;
-    },
-
-    /**
-     * Is there a FROZEN per-dimension decomposition for this period?
-     *
-     * migrations/0027 (ADR 0016) added `saldo_akun_dimensi_periode` to hold it,
-     * but the closing engine does not yet WRITE it. Asking the data rather than
-     * asking the schema is what makes the refusal in `metodeRealisasi` lift by
-     * itself the day the close starts producing the rows, instead of needing a
-     * second change here that somebody has to remember.
-     */
-    async adaSaldoBekuDimensi(tx, periodeId, sumbu) {
-      const row = await satu<{ n: string }>(
-        tx,
-        `select count(*)::text as n
-           from saldo_akun_dimensi_periode sd
-           join saldo_akun_periode s on s.id = sd.saldo_akun_periode_id
-          where s.periode_id = $1::uuid and s.deleted_at is null
-            and sd.sumbu = $2 and sd.deleted_at is null`,
-        [periodeId, sumbu],
       );
       return Number.parseInt(row?.n ?? "0", 10) > 0;
     },
@@ -633,8 +662,12 @@ export function buatRepoRka(): RepoRka {
      * `akad_id` on the pembalik), so a reversed disbursement nets to zero
      * instead of being counted or double counted.
      *
-     * `unit` is DISTINCT mitra, spec 9.3's "jumlah mitra target": a second
-     * tranche to the same partner is not a second partner.
+     * `unit` IS NULL HERE. Spec 9.3's "jumlah mitra target" is a COUNT
+     * DISTINCT over the window the report asks for, and the caller now reads
+     * month by month so that a window mixing a frozen month with a live one can
+     * be answered; per-month counts summed would count a partner funded twice
+     * in a year twice. `mitraSektorLedger` returns the SET instead, and the
+     * caller unions it with `mitraSektorBeku` before counting once.
      */
     realisasiSektorLedger(tx, q) {
       const params: unknown[] = [q.bumnId, q.dari, q.sampai];
@@ -642,7 +675,13 @@ export function buatRepoRka(): RepoRka {
       return tx.query<AgregatRow>(
         `select p.sektor_id::text as dimensi_id,
                 coalesce(sum(l.debit - l.kredit), 0)::numeric(20,2)::text as nilai,
-                count(distinct l.mitra_id)::text as unit
+                -- NULL, and the partner count comes from mitraSektorLedger
+                -- instead. A count taken here would be a count for THIS window
+                -- only, and the caller now reads month by month so that a
+                -- window mixing a frozen January with a live February can be
+                -- answered at all. Summing per-month counts would count a
+                -- partner funded twice in the year twice.
+                null::text as unit
            from v_ledger_baris l
            join jurnal j on j.id = l.jurnal_id
            join pumk_akad ak on ak.id = l.akad_id
@@ -653,6 +692,108 @@ export function buatRepoRka(): RepoRka {
             and j.referensi_tipe = 'pumk_pencairan'
             and p.sektor_id is not null
           group by p.sektor_id`,
+        params,
+      );
+    },
+
+    /**
+     * RKA Non PUMK, CLOSED period: the FROZEN per-bidang movement.
+     *
+     * The same arithmetic as `realisasiBidangLedger` over the same lines, but
+     * evaluated ONCE, at the close, by `modules/closing` (migrations/0027, ADR
+     * 0016) instead of every time the report is run. `sum(debit - kredit)` over
+     * the bidang buckets is disbursement minus refund, exactly as live, because
+     * the freeze stores both sides gross.
+     *
+     * THE RESIDUAL BUCKET IS EXCLUDED, and that is not a filter for tidiness:
+     * `bidang_id IS NULL` is movement on the account that carried no bidang, so
+     * it belongs to no budget line. Including it would attribute an ordinary
+     * operating expense to whichever bidang happened to sort first. The live
+     * query drops the same rows with `dimensi_json ->> 'bidangId' is not null`.
+     */
+    realisasiBidangBeku(tx, q) {
+      const params: unknown[] = [q.periodeId];
+      const inList = daftar(params, q.cabangIds);
+      return tx.query<AgregatRow>(
+        `select d.bidang_id::text as dimensi_id,
+                coalesce(sum(d.mutasi_debit - d.mutasi_kredit), 0)::numeric(20,2)::text as nilai,
+                null::text as unit
+           from saldo_akun_dimensi_periode d
+           join saldo_akun_periode s on s.id = d.saldo_akun_periode_id
+          where s.periode_id = $1::uuid and s.deleted_at is null and d.deleted_at is null
+            and s.cabang_id in (${inList})
+            and d.sumbu = 'BIDANG' and d.bidang_id is not null
+          group by d.bidang_id`,
+        params,
+      );
+    },
+
+    /**
+     * RKA PUMK, CLOSED period: the FROZEN per-sektor movement.
+     *
+     * Invariant 14 in one query. The live reading reaches its sector through
+     * `akad -> proposal.sektor_id`, which is EDITABLE master data; this one
+     * reads the classification as it stood when the period was closed, so a
+     * reclassification months later cannot move a month that has already been
+     * reported. Residual excluded for the same reason as the bidang axis.
+     */
+    realisasiSektorBeku(tx, q) {
+      const params: unknown[] = [q.periodeId];
+      const inList = daftar(params, q.cabangIds);
+      return tx.query<AgregatRow>(
+        `select d.sektor_id::text as dimensi_id,
+                coalesce(sum(d.mutasi_debit - d.mutasi_kredit), 0)::numeric(20,2)::text as nilai,
+                null::text as unit
+           from saldo_akun_dimensi_periode d
+           join saldo_akun_periode s on s.id = d.saldo_akun_periode_id
+          where s.periode_id = $1::uuid and s.deleted_at is null and d.deleted_at is null
+            and s.cabang_id in (${inList})
+            and d.sumbu = 'SEKTOR' and d.sektor_id is not null
+          group by d.sektor_id`,
+        params,
+      );
+    },
+
+    /** The live partner set, from the same disbursement lines as the money. */
+    mitraSektorLedger(tx, q) {
+      const params: unknown[] = [q.bumnId, q.dari, q.sampai];
+      const inList = daftar(params, q.cabangIds);
+      return tx.query<MitraSektorRow>(
+        `select distinct p.sektor_id::text as sektor_id, l.mitra_id::text as mitra_id
+           from v_ledger_baris l
+           join jurnal j on j.id = l.jurnal_id
+           join pumk_akad ak on ak.id = l.akad_id
+           join pumk_proposal p on p.id = ak.proposal_id
+          where l.bumn_id = $1::uuid
+            and l.tanggal_transaksi between $2::date and $3::date
+            and l.cabang_id in (${inList})
+            and j.referensi_tipe = 'pumk_pencairan'
+            and p.sektor_id is not null
+            and l.mitra_id is not null`,
+        params,
+      );
+    },
+
+    /**
+     * The frozen partner set (migrations/0032). One row per (sector bucket,
+     * mitra), written by the close, swept by a reopen through two cascades.
+     *
+     * `distinct` even though a unique index already forbids a duplicate INSIDE
+     * one bucket: one partner can be frozen against the SAME sector on two
+     * different accounts, and this read is per sector, not per account.
+     */
+    mitraSektorBeku(tx, q) {
+      const params: unknown[] = [q.periodeId];
+      const inList = daftar(params, q.cabangIds);
+      return tx.query<MitraSektorRow>(
+        `select distinct d.sektor_id::text as sektor_id, dm.mitra_id::text as mitra_id
+           from saldo_dimensi_mitra_periode dm
+           join saldo_akun_dimensi_periode d on d.id = dm.saldo_akun_dimensi_periode_id
+           join saldo_akun_periode s on s.id = d.saldo_akun_periode_id
+          where s.periode_id = $1::uuid and s.deleted_at is null
+            and d.deleted_at is null and dm.deleted_at is null
+            and s.cabang_id in (${inList})
+            and d.sumbu = 'SEKTOR' and d.sektor_id is not null`,
         params,
       );
     },

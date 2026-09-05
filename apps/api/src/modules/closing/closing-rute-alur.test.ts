@@ -275,7 +275,7 @@ describe("spec 8.4 butir 8: kas negatif adalah PERINGATAN yang wajib dikonfirmas
     expect(daftar.boleh).toBe(true);
     expect(daftar.perluKonfirmasi).toBe(true);
 
-    const res = await d.panggil("APPROVER", `/closing/periode/${jan.id}/tutup`, { body: {} });
+    const res = await d.panggil("ADMIN_PUSAT", `/closing/periode/${jan.id}/tutup`, { body: {} });
     expect(res.status).toBe(409);
     const body = (await res.json()) as { kodeDomain: string; error: string };
     expect(body.kodeDomain).toBe("KONFIRMASI_KAS_NEGATIF_WAJIB");
@@ -306,7 +306,7 @@ describe("spec 16 skenario 12: jurnal DRAFT memblokir closing, diposting, lalu c
     noJurnalDraft = draft.noJurnal;
     idJurnalDraft = draft.id;
 
-    const res = await d.panggil("APPROVER", `/closing/periode/${jan.id}/tutup`, { body: {} });
+    const res = await d.panggil("ADMIN_PUSAT", `/closing/periode/${jan.id}/tutup`, { body: {} });
     // 409, not 400: the request was well formed and the BOOKS refuse it. An
     // identical retry would refuse identically, which is what the status says.
     expect(res.status).toBe(409);
@@ -343,7 +343,7 @@ describe("spec 16 skenario 12: jurnal DRAFT memblokir closing, diposting, lalu c
 
   test("3. closing BERHASIL, membekukan saldo, dan mencatat siapa yang menutup", async () => {
     const jan = d.periode.get(1)!;
-    const res = await d.panggil("APPROVER", `/closing/periode/${jan.id}/tutup`, { body: {} });
+    const res = await d.panggil("ADMIN_PUSAT", `/closing/periode/${jan.id}/tutup`, { body: {} });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       periode: { status: string; closedBy: string | null; closedAt: string | null };
@@ -352,8 +352,10 @@ describe("spec 16 skenario 12: jurnal DRAFT memblokir closing, diposting, lalu c
     };
 
     expect(body.periode.status).toBe("CLOSED");
-    // `closed_by` is the SESSION's user. Nothing in the request could name it.
-    expect(body.periode.closedBy).toBe(d.f.users.APPROVER.id);
+    // `closed_by` is the SESSION's user, and since OPEN-QUESTIONS 29 that user
+    // is an Admin Pusat: the branch prepares the month, head office declares it
+    // finished. Nothing in the request could name it either way.
+    expect(body.periode.closedBy).toBe(d.f.users.ADMIN_PUSAT.id);
     expect(body.periode.closedAt).not.toBeNull();
 
     // The checklist AS IT STOOD travels with the answer, so the record says what
@@ -390,7 +392,7 @@ describe("spec 16 skenario 12: jurnal DRAFT memblokir closing, diposting, lalu c
       jumlahSaldoBeku: number;
     }>("AUDITOR", `/closing/periode/${jan.id}`);
     expect(periode.status).toBe("CLOSED");
-    expect(periode.closedOleh).toBe(`Uji APPROVER ${d.f.suffix}`);
+    expect(periode.closedOleh).toBe(`Uji ADMIN_PUSAT ${d.f.suffix}`);
     expect(periode.jumlahSaldoBeku).toBe(dibaca.data.length);
   });
 });
@@ -423,7 +425,7 @@ describe("spec 16 skenario 13: periode CLOSED menolak posting baru dan menolak d
   test("closing kedua atas periode yang sama ditolak, dan saldo beku tidak ditulis ulang", async () => {
     const jan = d.periode.get(1)!;
     const sebelum = await d.jumlahSaldoBeku(jan.id);
-    const res = await d.panggil("APPROVER", `/closing/periode/${jan.id}/tutup`, { body: {} });
+    const res = await d.panggil("ADMIN_PUSAT", `/closing/periode/${jan.id}/tutup`, { body: {} });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { kodeDomain: string }).kodeDomain).toBe("PERIODE_SUDAH_CLOSED");
     expect(await d.jumlahSaldoBeku(jan.id)).toBe(sebelum);
@@ -473,7 +475,7 @@ describe("spec 8.4: reopen adalah hak paling berat di sistem ini", () => {
   test("Februari ditutup, sehingga ada periode CLOSED yang lebih baru dari Januari", async () => {
     const feb = d.periode.get(2)!;
     await d.siapkanTutup(feb.id);
-    const res = await d.panggil("APPROVER", `/closing/periode/${feb.id}/tutup`, { body: {} });
+    const res = await d.panggil("ADMIN_PUSAT", `/closing/periode/${feb.id}/tutup`, { body: {} });
     expect(res.status).toBe(200);
     expect(await d.statusPeriode(feb.id)).toBe("CLOSED");
   });
@@ -578,8 +580,8 @@ describe("dua closing bersamaan menghasilkan TEPAT SATU keberhasilan", () => {
     expect(await d.statusPeriode(feb.id)).toBe("OPEN");
 
     const [a, b] = await Promise.all([
-      d.panggil("APPROVER", `/closing/periode/${feb.id}/tutup`, { body: {} }),
-      d.panggil("APPROVER", `/closing/periode/${feb.id}/tutup`, { body: {} }),
+      d.panggil("ADMIN_PUSAT", `/closing/periode/${feb.id}/tutup`, { body: {} }),
+      d.panggil("ADMIN_PUSAT", `/closing/periode/${feb.id}/tutup`, { body: {} }),
     ]);
 
     const status = [a.status, b.status].sort();

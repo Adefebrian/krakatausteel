@@ -310,7 +310,7 @@ describe("spec 8.5 butir 8-12: closing periode", () => {
     expect(draft.status).toBe("DRAFT");
 
     const err = await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
       KODE_CLOSING.PRASYARAT_GAGAL,
     );
 
@@ -344,7 +344,7 @@ describe("spec 8.5 butir 8-12: closing periode", () => {
     expect((await d.rekonsiliasi(akad.akadId)).selisih).not.toBe("0.00");
 
     const err = await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat),
       KODE_CLOSING.PRASYARAT_GAGAL,
     );
     const gagal = err.detail.gagal as Array<{ kode: string; nomor: number; alasan: string; detail: Record<string, unknown> }>;
@@ -370,7 +370,7 @@ describe("spec 8.5 butir 8-12: closing periode", () => {
     await d.siapkanTutup(mar);
 
     const err = await tolakDengan(
-      () => d.engine.tutupPeriode({ periodeId: mar.id }, d.ctx.approver),
+      () => d.engine.tutupPeriode({ periodeId: mar.id }, d.ctx.adminPusat),
       KODE_CLOSING.PRASYARAT_GAGAL,
     );
     const gagal = err.detail.gagal as Array<{ kode: string; nomor: number; alasan: string }>;
@@ -390,7 +390,7 @@ describe("spec 8.5 butir 8-12: closing periode", () => {
   test("8.5.11 setelah periode CLOSED, mencoba posting jurnal bertanggal di periode itu ditolak", async () => {
     const p = await siapkan(2026, 1);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     expect((await d.bacaPeriode(p.id)).status).toBe("CLOSED");
 
     // Invariant 5, and spec 16 scenario 13. Asserted against the REAL ledger
@@ -419,7 +419,7 @@ describe("spec 8.5 butir 8-12: closing periode", () => {
   test("8.5.12 reopen lalu close ulang menghasilkan snapshot saldo yang identik kalau tidak ada perubahan data", async () => {
     const p = await siapkan(2026, 1);
     await d.siapkanTutup(p);
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
 
     const sebelum = await d.bacaSaldoAkunPeriode(p.id);
     expect(sebelum.length).toBeGreaterThan(0);
@@ -433,7 +433,7 @@ describe("spec 8.5 butir 8-12: closing periode", () => {
     expect(await d.bacaSaldoAkunPeriode(p.id)).toHaveLength(0);
     expect((await d.bacaPeriode(p.id)).status).toBe("OPEN");
 
-    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.approver);
+    await d.engine.tutupPeriode({ periodeId: p.id }, d.ctx.adminPusat);
     const sesudah = await d.bacaSaldoAkunPeriode(p.id);
 
     // IDENTICAL, to the sen, row for row. This is invariant 14 stated as an

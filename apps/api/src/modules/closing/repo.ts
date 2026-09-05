@@ -51,6 +51,19 @@ export interface PeriodeRow {
    * and has to say that it did.
    */
   template_laporan_id: string | null;
+  /**
+   * When this close froze the per-dimension decomposition (migrations/0032).
+   * NULL on an open period, and NULL on a period closed before the closing
+   * engine wrote decompositions at all.
+   *
+   * IT IS NOT THE SAME QUESTION AS "does the period have dimensioned rows".
+   * A month in which nothing carried a sektor or a bidang is decomposed
+   * COMPLETELY into zero rows, and a month closed by the old engine has zero
+   * rows because nobody looked. Only this column separates them, which is why
+   * modules/rka reads it rather than counting rows: without it, a quiet January
+   * is refused forever and a January full of lending reads as zero.
+   */
+  dimensi_dibekukan_at: string | null;
 }
 
 export interface RangeRow {
@@ -177,7 +190,8 @@ const KOLOM_PERIODE = `
   p.tanggal_mulai::text as tanggal_mulai, p.tanggal_akhir::text as tanggal_akhir,
   p.status, p.closed_by::text as closed_by, p.closed_at::text as closed_at,
   p.reopened_by::text as reopened_by, p.reopened_at::text as reopened_at, p.alasan_reopen,
-  p.template_laporan_id::text as template_laporan_id`;
+  p.template_laporan_id::text as template_laporan_id,
+  p.dimensi_dibekukan_at::text as dimensi_dibekukan_at`;
 
 // ---------------------------------------------------------------------------
 // The repo
@@ -305,11 +319,17 @@ export function buatRepoClosing() {
       saatIni: string,
       templateLaporanId: string | null,
     ): Promise<PeriodeRow | null> {
+      // `dimensi_dibekukan_at` is stamped HERE and not by the three statements
+      // that wrote the decomposition, for the same reason `template_laporan_id`
+      // is: it is a fact about the CLOSE, and a close that rolls back must not
+      // leave a period claiming its figures were decomposed. One statement, one
+      // transaction, one truth.
       return satu<PeriodeRow>(
         tx,
         `update periode p
             set status = 'CLOSED', closed_by = $2::uuid, closed_at = $3::timestamptz,
-                template_laporan_id = $4::uuid, updated_by = $2::uuid
+                template_laporan_id = $4::uuid, dimensi_dibekukan_at = $3::timestamptz,
+                updated_by = $2::uuid
           where p.id = $1::uuid and p.status <> 'CLOSED'
         returning ${KOLOM_PERIODE}`,
         [periodeId, userId, saatIni, templateLaporanId],
@@ -346,9 +366,17 @@ export function buatRepoClosing() {
       // today.
       return satu<PeriodeRow>(
         tx,
+        // `dimensi_dibekukan_at` is cleared alongside `template_laporan_id`,
+        // and for exactly the same reason: the rows it vouches for are deleted
+        // two lines up in the service (`saldo_akun_periode`, which cascades to
+        // `saldo_akun_dimensi_periode`), so a stamp left behind would say a
+        // decomposition is complete and present when there is none. That is the
+        // one state in which a report reads zero realisation and calls it
+        // frozen.
         `update periode p
             set status = 'OPEN', reopened_by = $2::uuid, reopened_at = $4::timestamptz,
-                alasan_reopen = $3, template_laporan_id = null, updated_by = $2::uuid
+                alasan_reopen = $3, template_laporan_id = null,
+                dimensi_dibekukan_at = null, updated_by = $2::uuid
           where p.id = $1::uuid and p.status = 'CLOSED'
         returning ${KOLOM_PERIODE}`,
         [periodeId, userId, alasan, saatIni],
@@ -1307,6 +1335,229 @@ export function buatRepoClosing() {
          values ${values.join(", ")}`,
         params,
       );
+    },
+
+    // --- the frozen decomposition (migrations/0027, 0032, ADR 0016) --------
+    //
+    // THREE STATEMENTS, ONE IDEA. `saldo_akun_periode` says how much an account
+    // moved; these say how that movement was distributed across ONE axis. They
+    // run inside `tutupPeriode`'s transaction, immediately after the parent
+    // rows are written, because the totality rule 0027 installed
+    // (TJSL-SDP-002) is a DEFERRED constraint trigger: the children are checked
+    // against the parent at COMMIT, so an order that wrote them first would
+    // still be correct and an order that wrote them in a different transaction
+    // would not be checked at all.
+    //
+    // WHY `INSERT ... SELECT` AND NOT "read into TypeScript, then write".
+    // Reading the ledger and the frozen parents into the process and matching
+    // them there would put the arithmetic that has to agree with
+    // `saldo_akun_periode` into a second language, with a second rounding
+    // story. The residual is the parent's own column minus a sum taken over the
+    // same rows in the same statement, in NUMERIC, so "the parts add up" is not
+    // a property the engine tries to maintain: it is how the number is
+    // computed. The trigger then checks it anyway, which is the point of having
+    // both.
+    //
+    // THE WINDOW IS `saldoAkunUntukPeriode`'s WINDOW, TO THE DAY. That query
+    // counts as movement everything with `tanggal_transaksi >= mulai` and
+    // `<= akhir`, so these use `between $3 and $4` and read the same
+    // `v_ledger_baris` (ADR 0010: POSTED and REVERSED). A narrower or wider
+    // window here would produce a residual that silently absorbed the
+    // difference, and the totality trigger would pass, because the residual is
+    // defined as whatever is left over.
+
+    /**
+     * SUMBU SEKTOR: the per-sector decomposition, from PUMK DISBURSEMENT lines.
+     *
+     * WHICH LINES CARRY A SECTOR, and why it is not "every line with an akad".
+     * `PENCAIRAN_PUMK` puts no `sektorId` in `dimensi_json` (ADR 0016 item 2,
+     * handed to modules/pumk and not done), so the only route from a
+     * disbursement to a sector is `akad -> proposal.sektor_id`. The rows that
+     * count are selected by `jurnal.referensi_tipe = 'pumk_pencairan'`, which
+     * is the LEDGER'S OWN back-reference rather than this module's opinion, and
+     * is the identical predicate `modules/rka`'s `realisasiSektorLedger` uses
+     * over an OPEN period. That is deliberate and it is the whole reason report
+     * 24 can be shown to give the same figures either side of a close: the
+     * freeze is that query, evaluated once, at the close.
+     *
+     * A REVERSAL IS COUNTED, GROSS, ON BOTH SIDES. modules/jurnal copies
+     * `referensi_tipe`, `mitra_id` and `akad_id` onto the pembalik, so a
+     * reversed disbursement contributes its debit AND its credit to the same
+     * sector's bucket. A POSTED-only read would freeze the credit alone and
+     * state a sector that un-lent money it never lent, permanently, with the
+     * parent still balancing.
+     *
+     * EVERYTHING ELSE ON THE SAME ACCOUNT IS THE RESIDUAL, and a repayment is
+     * the ordinary case of it: it moves the receivable and it is not
+     * realisation. Written only when it is non-zero, because a residual of zero
+     * omits nothing, and 0027 is explicit that an account nobody decomposes
+     * gets no rows rather than a row of zeroes.
+     */
+    async bekukanDimensiSektor(
+      tx: QueryRunner,
+      q: { periodeId: string; bumnId: string; mulai: string; akhir: string; userId: string },
+    ): Promise<number> {
+      const rows = await tx.query<{ id: string }>(
+        `with pencairan as (
+           select l.cabang_id, l.akun_id, pr.sektor_id,
+                  coalesce(sum(l.debit), 0)::numeric(20,2) as mutasi_debit,
+                  coalesce(sum(l.kredit), 0)::numeric(20,2) as mutasi_kredit
+             from v_ledger_baris l
+             join jurnal j on j.id = l.jurnal_id
+             join pumk_akad ak on ak.id = l.akad_id
+             join pumk_proposal pr on pr.id = ak.proposal_id
+            where l.bumn_id = $2::uuid
+              and l.tanggal_transaksi between $3::date and $4::date
+              and j.referensi_tipe = 'pumk_pencairan'
+              and pr.sektor_id is not null
+            group by l.cabang_id, l.akun_id, pr.sektor_id
+         ),
+         induk as (
+           select s.id, s.cabang_id, s.akun_id, s.mutasi_debit, s.mutasi_kredit
+             from saldo_akun_periode s
+            where s.periode_id = $1::uuid and s.deleted_at is null
+         ),
+         ember as (
+           select i.id as induk_id, p.sektor_id, p.mutasi_debit, p.mutasi_kredit
+             from pencairan p
+             join induk i on i.cabang_id = p.cabang_id and i.akun_id = p.akun_id
+         ),
+         sisa as (
+           select e.induk_id, null::uuid as sektor_id,
+                  (i.mutasi_debit - sum(e.mutasi_debit))::numeric(20,2) as mutasi_debit,
+                  (i.mutasi_kredit - sum(e.mutasi_kredit))::numeric(20,2) as mutasi_kredit
+             from ember e
+             join induk i on i.id = e.induk_id
+            group by e.induk_id, i.mutasi_debit, i.mutasi_kredit
+         )
+         insert into saldo_akun_dimensi_periode
+           (saldo_akun_periode_id, sumbu, sektor_id, mutasi_debit, mutasi_kredit,
+            created_by, updated_by)
+         select induk_id, 'SEKTOR', sektor_id, mutasi_debit, mutasi_kredit, $5::uuid, $5::uuid
+           from ember
+         union all
+         select induk_id, 'SEKTOR', sektor_id, mutasi_debit, mutasi_kredit, $5::uuid, $5::uuid
+           from sisa
+          where mutasi_debit <> 0 or mutasi_kredit <> 0
+         returning id::text as id`,
+        [q.periodeId, q.bumnId, q.mulai, q.akhir, q.userId],
+      );
+      return rows.length;
+    },
+
+    /**
+     * SUMBU BIDANG: the per-bidang decomposition, from the LINE'S OWN
+     * dimension.
+     *
+     * The honest half of ADR 0016. `PENYALURAN_NON_PUMK` writes
+     * `dimensi.bidangId` onto the expense leg and
+     * `PENGEMBALIAN_SISA_NON_PUMK` writes it onto the expense leg of the
+     * refund, which is a CREDIT on that same account. Both sides are frozen
+     * gross, so a bidang that received 4.000.000 and returned 1.000.000 reads
+     * `D 4.000.000 K 1.000.000` and a reader computes whichever of the two
+     * figures it needs; a single netted column would make that month
+     * indistinguishable from a 3.000.000 grant that was never refunded.
+     *
+     * No account filter and no event filter: the axis is whatever the LINE
+     * says, which is the same predicate `realisasiBidangLedger` reads live.
+     * Movement on the same account carrying no bidang (an ordinary operating
+     * expense, or a manual journal that forgot) lands in the residual, which is
+     * exactly the detection mechanism ADR 0016 item 3 asked for: unattributed
+     * money becomes a visible line instead of a missing one.
+     */
+    async bekukanDimensiBidang(
+      tx: QueryRunner,
+      q: { periodeId: string; bumnId: string; mulai: string; akhir: string; userId: string },
+    ): Promise<number> {
+      const rows = await tx.query<{ id: string }>(
+        `with berdimensi as (
+           select l.cabang_id, l.akun_id, (l.dimensi_json ->> 'bidangId')::uuid as bidang_id,
+                  coalesce(sum(l.debit), 0)::numeric(20,2) as mutasi_debit,
+                  coalesce(sum(l.kredit), 0)::numeric(20,2) as mutasi_kredit
+             from v_ledger_baris l
+            where l.bumn_id = $2::uuid
+              and l.tanggal_transaksi between $3::date and $4::date
+              and l.dimensi_json ->> 'bidangId' is not null
+            group by l.cabang_id, l.akun_id, (l.dimensi_json ->> 'bidangId')::uuid
+         ),
+         induk as (
+           select s.id, s.cabang_id, s.akun_id, s.mutasi_debit, s.mutasi_kredit
+             from saldo_akun_periode s
+            where s.periode_id = $1::uuid and s.deleted_at is null
+         ),
+         ember as (
+           select i.id as induk_id, b.bidang_id, b.mutasi_debit, b.mutasi_kredit
+             from berdimensi b
+             join induk i on i.cabang_id = b.cabang_id and i.akun_id = b.akun_id
+         ),
+         sisa as (
+           select e.induk_id, null::uuid as bidang_id,
+                  (i.mutasi_debit - sum(e.mutasi_debit))::numeric(20,2) as mutasi_debit,
+                  (i.mutasi_kredit - sum(e.mutasi_kredit))::numeric(20,2) as mutasi_kredit
+             from ember e
+             join induk i on i.id = e.induk_id
+            group by e.induk_id, i.mutasi_debit, i.mutasi_kredit
+         )
+         insert into saldo_akun_dimensi_periode
+           (saldo_akun_periode_id, sumbu, bidang_id, mutasi_debit, mutasi_kredit,
+            created_by, updated_by)
+         select induk_id, 'BIDANG', bidang_id, mutasi_debit, mutasi_kredit, $5::uuid, $5::uuid
+           from ember
+         union all
+         select induk_id, 'BIDANG', bidang_id, mutasi_debit, mutasi_kredit, $5::uuid, $5::uuid
+           from sisa
+          where mutasi_debit <> 0 or mutasi_kredit <> 0
+         returning id::text as id`,
+        [q.periodeId, q.bumnId, q.mulai, q.akhir, q.userId],
+      );
+      return rows.length;
+    },
+
+    /**
+     * THE FROZEN PARTNER SET (migrations/0032), which is not a number.
+     *
+     * "Jumlah mitra" (spec 9.3) is a COUNT DISTINCT. A mitra funded in January
+     * and again in March is one partner over the year and two over the two
+     * months, so a frozen per-period count summed year-to-date double counts in
+     * a column that looks right next to a rupiah figure that is right. What is
+     * frozen is therefore the SET, one row per (bucket, mitra), and the count
+     * is taken at read time over whatever window is asked for.
+     *
+     * DISTINCT over the same disbursement lines the sector buckets came from,
+     * so a second tranche to a partner already funded this month adds no row.
+     * Runs AFTER `bekukanDimensiSektor`, because it hangs off the bucket rows
+     * that statement writes; there is nothing to attach to before it.
+     */
+    async bekukanMitraDimensi(
+      tx: QueryRunner,
+      q: { periodeId: string; bumnId: string; mulai: string; akhir: string; userId: string },
+    ): Promise<number> {
+      const rows = await tx.query<{ id: string }>(
+        `insert into saldo_dimensi_mitra_periode
+           (saldo_akun_dimensi_periode_id, mitra_id, created_by, updated_by)
+         select d.id, x.mitra_id, $5::uuid, $5::uuid
+           from (
+             select distinct l.cabang_id, l.akun_id, pr.sektor_id, l.mitra_id
+               from v_ledger_baris l
+               join jurnal j on j.id = l.jurnal_id
+               join pumk_akad ak on ak.id = l.akad_id
+               join pumk_proposal pr on pr.id = ak.proposal_id
+              where l.bumn_id = $2::uuid
+                and l.tanggal_transaksi between $3::date and $4::date
+                and j.referensi_tipe = 'pumk_pencairan'
+                and pr.sektor_id is not null
+                and l.mitra_id is not null
+           ) x
+           join saldo_akun_periode s
+             on s.periode_id = $1::uuid and s.deleted_at is null
+            and s.cabang_id = x.cabang_id and s.akun_id = x.akun_id
+           join saldo_akun_dimensi_periode d
+             on d.saldo_akun_periode_id = s.id and d.sumbu = 'SEKTOR'
+            and d.sektor_id = x.sektor_id and d.deleted_at is null
+         returning id::text as id`,
+        [q.periodeId, q.bumnId, q.mulai, q.akhir, q.userId],
+      );
+      return rows.length;
     },
 
     bacaSaldoAkunPeriode(

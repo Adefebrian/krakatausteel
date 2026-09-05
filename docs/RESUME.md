@@ -1,34 +1,58 @@
 # Titik lanjut
 
-## DIJEDA 2026-09-02 atas permintaan pemilik repo, tiga agen dihentikan di tengah jalan
+## DIJEDA 2026-09-02, DILANJUTKAN 2026-09-05
 
-**Working tree sedang di tengah perubahan yang sengaja merah. Jangan anggap kegagalan test
-sebagai kerusakan sampai membaca bagian ini.**
+**Bagian ini digantung dari keadaan jeda. Yang sudah selesai ditandai SELESAI; yang masih
+berjalan milik agen lain dan dibiarkan apa adanya.**
 
-Commit terakhir `6209557`, hijau saat di-commit. Yang belum di-commit adalah pekerjaan tiga agen
-yang dihentikan.
+| Gerbang | Saat dijeda | 2026-09-05 |
+|---|---|---|
+| `bun test` | 2571 lulus, 10 gagal | **2622 lulus, 1 gagal** (lihat di bawah, dan merahnya bukan implementasi) |
+| `bun run typecheck` | 1 error di `apps/web/src/pages/laporan/Matriks.tsx` | bersih |
+| `bun run check:boundaries` | PASS | PASS |
 
-| Gerbang | Keadaan saat dijeda |
-|---|---|
-| `bun test` | 2571 lulus, **10 gagal** |
-| `bun run typecheck` | **1 error**, `apps/web/src/pages/laporan/Matriks.tsx` |
-| `bun run check:boundaries` | PASS |
+### 1. Pembekuan saldo per dimensi, `modules/closing`. SELESAI, sembilan dari sepuluh
 
-### 1. Pembekuan saldo per dimensi, `modules/closing`, berhenti tepat sebelum implementasi
+`tutupPeriode` sekarang menulis `saldo_akun_dimensi_periode` (migrasi 0027) dan
+`saldo_dimensi_mitra_periode` (migrasi 0032), lewat tiga statement `insert ... select` di
+`modules/closing/repo.ts`: sumbu SEKTOR dari baris pencairan PUMK, sumbu BIDANG dari
+`dimensi_json`, lalu himpunan mitra beku yang menggantung pada bucket sektornya. Sisanya per
+sumbu ditulis sebagai baris SISA, dihitung sebagai mutasi induk dikurangi jumlah bucket di
+statement yang sama, jadi aturan totalitas 0027 (TJSL-SDP-002) tidak bisa gagal karena
+pembulatan. Reopen menyapu semuanya lewat dua CASCADE, tanpa perubahan di kode reopen.
 
-Kesepuluh test yang merah **semuanya milik agen ini, dan merahnya benar**. Agen menulis test
-lebih dulu (memang begitu aturannya di repo ini), lalu dihentikan tepat saat mau menulis tiga
-query pembekuannya. Jadi ini keadaan merah yang diharapkan, bukan regresi.
+Akibatnya **Laporan 24 sekarang bisa dibuat untuk PUMK dan NON PUMK di periode CLOSED**, dengan
+angka yang identik dengan bacaan jendela yang sama saat periodenya masih OPEN. Penolakan
+`SKEMA_BELUM_LENGKAP` di `modules/rka/service.ts` menyempit: sekarang hanya untuk periode CLOSED
+yang `dimensi_dibekukan_at`-nya NULL, yaitu periode yang ditutup sebelum mesin ini ada. Bukti:
+`modules/closing/closing-laporan-24-beku.test.ts`.
 
-Sudah ada di disk: `migrations/0032_beku_dimensi_ditulis.sql`,
-`apps/api/src/modules/closing/closing-saldo-dimensi.test.ts`, plus perubahan di `repo.ts` dan
-`test-support.ts`.
+**SATU TEST DIBIARKAN MERAH, DAN ITU BUKAN IMPLEMENTASINYA.**
+`closing-saldo-dimensi.test.ts`, "dua sumbu atas satu periode direkonsiliasi sendiri sendiri".
+Assertion-nya membandingkan `anak.split(": ")[1]`, yang selalu berawalan `"anak "`, dengan
+`indukSisi.replace("induk ", "")`, yang tidak pernah berawalan begitu. Kedua sisi tidak pernah
+bisa sama untuk nilai apa pun, jadi test ini tidak bisa dihijaukan dengan menulis kode apa pun.
+Perbaikannya satu kata (`split(": anak ")`), dan sengaja TIDAK dikerjakan: aturan repo ini
+melarang menghijaukan test dengan mengubah assertion-nya, dan yang ini milik pemilik test-nya.
+Sifat yang mau diuji sudah dijamin di tempat lain di berkas yang sama, oleh dua `toContain`
+terhadap `totalitas()` di test pertama dan test reversal.
 
-Yang dikerjakannya: mengisi `saldo_akun_dimensi_periode`, tabel yang dibuat migrasi 0027 dan
-**tidak pernah ditulis siapa pun**. Itu yang bikin Laporan 24 menolak jenis PUMK dan NON PUMK di
-periode tertutup, dan bikin dashboard tidak punya rincian per bidang untuk bulan tertutup.
+**Dua perubahan fixture yang perlu diketahui**, keduanya di `closing/test-support.ts`, karena
+keduanya menghasilkan ledger yang berbeda:
+- `cairkan` sekarang mendaftarkan pembalik state bisnis untuk `pumk_pencairan` (no-op, sama
+  seperti fixture operasional `modules/laporan`), karena fixture sudah mencap `referensi_tipe`
+  pada setiap pencairan dan `reversalJurnal` menolak jurnal yang tipenya tidak punya pembalik.
+- `cairkan` yang dipanggil dua kali atas satu akad sekarang **membalik pencairan yang hidup lebih
+  dulu**. Pencairan kedua yang murni tidak bisa direpresentasikan: `pumk_akad_outstanding_pokok_max_ck`
+  melarang outstanding melebihi pokok dan `pumk_akad_satu_aktif_per_mitra_uq` melarang akad hidup
+  kedua untuk satu mitra, jadi memaksakannya bikin prasyarat 10 (sub ledger vs buku besar) gagal.
 
-**Lanjutkan dengan membuat kesepuluh test itu hijau, jangan dengan mengubah test-nya.**
+### 1b. OPEN-QUESTIONS 29, izin tutup buku. SELESAI
+
+`admin.closing.periode` sekarang hanya menjaga `tutupPeriode` dan hanya dipegang ADMIN_PUSAT.
+Kode baru `admin.closing.hitung` menjaga penyisihan dan akrual (plus pratinjau penyisihan) dan
+dipegang APPROVER, jadi juga ADMIN_CABANG. Kolektibilitas dan reopen tidak berubah. Rinciannya,
+termasuk sisa pekerjaan di `apps/web` yang bukan milik butir ini, ada di `OPEN-QUESTIONS.md` 29.
 
 ### 2. Layar 23 laporan operasional dan portal, `apps/web`, berhenti di tengah berkas
 
@@ -50,11 +74,21 @@ masih berlaku: batas ukuran berkas, batas jumlah entri, batas ukuran terdekompre
 tidak ada resolusi entitas eksternal, dan setiap sel teks yang diekspor dinetralkan dari formula
 injection (`=`, `+`, `-`, `@`, tab, carriage return).
 
-### Yang harus dikerjakan lebih dulu saat lanjut
+### Yang tersisa saat lanjut
 
-OPEN-QUESTIONS 29, memisahkan `admin.closing.periode` dari perhitungan penyisihan dan akrual,
-**menunggu `modules/closing` bebas**. Sekarang modul itu sudah bebas karena agennya dihentikan,
-jadi ini bisa dikerjakan lebih dulu atau bersamaan.
+Butir 2 dan 3 di atas masih milik agennya masing masing. Butir 1, 1b dan OPEN-QUESTIONS 29 sudah
+selesai, jadi `modules/closing`, `modules/rka` dan katalog izin sudah bebas lagi.
+
+Yang ditemukan sambil jalan dan **tidak** dikerjakan, supaya tidak hilang:
+- `modules/dashboard` `REALISASI_NON_PUMK` masih tidak punya rincian per bidang untuk bulan
+  tertutup. Datanya sekarang ADA (`saldo_akun_dimensi_periode` sumbu BIDANG), jadi ini tinggal
+  pembacaan di modul dashboard; tidak disentuh karena bukan bagian dari Laporan 24.
+- `apps/web/src/closing.test.tsx` dan `apps/web/src/nav.ts` masih menggambarkan kebijakan izin
+  lama (Approver menutup buku). Hijau, tapi sudah tidak benar. Milik pemilik `apps/web`.
+- ADR 0016 butir 2 masih terbuka: `PENCAIRAN_PUMK` belum membawa `sektorId` di `dimensi_json`,
+  jadi sumbu SEKTOR yang dibekukan masih diturunkan lewat `pumk_proposal.sektor_id`. Bekunya
+  membuat angkanya tidak bisa bergerak SESUDAH tutup buku; ia tidak membuat sambungannya jadi
+  data ledger. Perbaikannya di `modules/pumk`.
 
 ---
 

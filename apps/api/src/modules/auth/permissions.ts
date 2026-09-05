@@ -101,6 +101,47 @@ export const PERMISSIONS = [
   "jurnal.reversal",
 
   "laporan.view",
+  // TAKING A REPORT OUT OF THE SYSTEM as a file: spec 10's "ekspor ke Excel
+  // dan PDF", on every one of the 31 reports.
+  //
+  // ITS OWN CODE, AND NOT `laporan.view`, BECAUSE READING AND EXPORTING ARE
+  // NOT THE SAME ACT. A screen is bounded: it is scoped to the caller's
+  // branches, it is paged, every open leaves a session behind it, and what
+  // leaves the building leaves one screenful at a time. An export is a FILE.
+  // It is a bulk extract of exactly the columns that make these reports
+  // sensitive -- `mitra.nik`, `alamat`, `telepon`, outstanding per named
+  // person -- in a form that is mailed, copied to a USB stick and opened on a
+  // machine this system has never heard of, with no scope check on the far
+  // side and no way to withdraw it. Merging the two would mean the system has
+  // no way to say "read the report, do not take a copy of it", which is a
+  // sentence a BUMN data owner has to be able to say.
+  //
+  // WHO HOLDS IT, and the answer is deliberately NOT "everyone who may read":
+  //
+  //   AUDITOR      yes. Spec 2 gives the role "read only penuh termasuk semua
+  //                laporan" and spec 16 scenario 23 opens all of them; an
+  //                auditor who may look at evidence but never take it away
+  //                cannot produce a working paper, and the whole point of the
+  //                role is to attest outside this application.
+  //   APPROVER     yes, and so ADMIN_CABANG and ADMIN_PUSAT by inheritance.
+  //                The Approver is the officer who signs what the entity
+  //                reports; the signed artefact is the export.
+  //   MAKER        no.
+  //   CHECKER      no.
+  //
+  // The two input roles are the ones with the least reason to hold a whole
+  // branch's partner register as a file and the most people in them, and spec
+  // 2 gives neither of them a reporting duty beyond reading. If that turns out
+  // to be wrong in practice -- a Maker who prepares the monthly disbursement
+  // pack is a plausible workflow nobody has described to us yet -- it is one
+  // line in `MAKER` below, and widening a grant later is a decision somebody
+  // makes on purpose. Narrowing one after everybody has the file is not.
+  // Filed as OPEN-QUESTIONS 30.
+  //
+  // Listed in `HANYA_BUKTI` so it is granted per role rather than inherited by
+  // anything that can log in, exactly as `audit.view`, `admin.closing.view`
+  // and `admin.rka.view` are.
+  "laporan.export",
 
   // READING the closing evidence: the prerequisite checklist, the run history,
   // the migration matrix and a closed period's frozen balances. No right to
@@ -126,6 +167,25 @@ export const PERMISSIONS = [
   // the Approver's.
   "admin.closing.view",
   "admin.closing.kolektibilitas",
+  // RUNNING THE MONTH-END ARITHMETIC: spec 8.2 penyisihan and spec 8.3 akrual
+  // jasa administrasi.
+  //
+  // ITS OWN CODE, SPLIT OUT OF `admin.closing.periode` (OPEN-QUESTIONS 29).
+  // One code used to gate three acts, so the decision that closing a period is
+  // Admin Pusat's could not be implemented without also moving both monthly
+  // computations to head office. That is not what was decided: what is
+  // centralised is the DECLARATION THAT THE MONTH IS FINISHED, not the
+  // arithmetic that prepares it. The provision and the accrual are recurring
+  // branch work, they are repeatable while the period is still OPEN (invariant
+  // 13), and everything they produce is re-derivable from the ledger; the close
+  // freezes a trial balance and is undone only by an Admin Pusat reopen.
+  //
+  // Same shape as the `admin.rka` / `admin.rka.approve` split below, and the
+  // same argument: when one code gates both a routine act and an irreversible
+  // one, whoever needs the routine act decides who holds the irreversible one.
+  "admin.closing.hitung",
+  // DECLARING THE MONTH CLOSED, and nothing else. Held by ADMIN_PUSAT alone,
+  // which is why it is absent from the APPROVER list below.
   "admin.closing.periode",
   "admin.periode.reopen",
   "admin.rka",
@@ -287,19 +347,25 @@ const READ_ONLY: Permission[] = [
   // version is not evidence of anything.
   "admin.closing.view",
   "admin.rka.view",
+  // Taking the evidence away. An auditor who may read every report but never
+  // export one cannot produce a working paper, and attesting outside this
+  // application is the entire function of the role.
+  "laporan.export",
 ];
 
 /**
  * Read access every operational role has: the whole Auditor list MINUS the
  * evidence codes that are not everybody's. `audit.view` is the audit trail,
  * `admin.closing.view` is the closing evidence, `admin.rka.view` is the budget
- * baseline, and each is granted deliberately per role below rather than
- * inherited by anyone who can log in.
+ * baseline, `laporan.export` is a report leaving the building as a file, and
+ * each is granted deliberately per role below rather than inherited by anyone
+ * who can log in.
  */
 const HANYA_BUKTI: readonly Permission[] = [
   "audit.view",
   "admin.closing.view",
   "admin.rka.view",
+  "laporan.export",
 ];
 
 const LIHAT: Permission[] = READ_ONLY.filter((p) => !HANYA_BUKTI.includes(p));
@@ -353,10 +419,30 @@ const APPROVER: Permission[] = [
   "jurnal.post",
   "jurnal.reversal",
   // Reading the checklist is a separate act from executing the close, and the
-  // Approver does the first before deciding whether to do the second.
+  // Approver does the first before deciding whether to do the second. Reading
+  // and preparing is now all it does: see the next comment.
   "admin.closing.view",
   "admin.closing.kolektibilitas",
-  "admin.closing.periode",
+  // THE MONTH-END ARITHMETIC, AND NOT THE CLOSE (OPEN-QUESTIONS 29, decided by
+  // the repo owner 2026-09-02: closing a period is Admin Pusat only).
+  //
+  // `admin.closing.periode` is deliberately NOT in this list any more, and that
+  // absence is the whole of the change. It used to be, and because the same
+  // code also gated `jalankanPenyisihan` and `jalankanAkrualJasaAdm`, removing
+  // it as-is would have moved both monthly computations to head office as a
+  // side effect of a decision that was only ever about who declares the month
+  // finished. The catalogue now carries two codes; this role holds the
+  // computing one, and ADMIN_CABANG inherits it through the spread below.
+  //
+  // Kolektibilitas already had its own code and is unchanged. So an Approver
+  // runs spec 8.1, 8.2 and 8.3, reads the ten-item checklist, and hands a green
+  // checklist to an Admin Pusat, who closes.
+  "admin.closing.hitung",
+  // The officer who signs what the entity reports is the officer who produces
+  // the signed artefact. ADMIN_CABANG and ADMIN_PUSAT inherit it from here,
+  // which is the intended reach: a branch admin exports their own branch, and
+  // the engine's branch scope is what keeps that true.
+  "laporan.export",
 ];
 
 // Everything the three operational roles can do, in ONE branch, plus branch
