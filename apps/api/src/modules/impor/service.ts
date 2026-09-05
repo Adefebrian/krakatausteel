@@ -36,9 +36,27 @@ import {
   type ImporEngine,
   type ImporEngineDeps,
   type JenisImpor,
+  type KomponenSaldoAwal,
   type PermintaanImpor,
+  type RingkasanSaldoAwal,
   type Uang,
 } from "./contract";
+import {
+  bacaBagian,
+  bacaDefinisiAkunBaru,
+  bedaDefinisiAkun,
+  dariSen,
+  definisiKosong,
+  EVENT_SALDO_AWAL_DEBIT,
+  EVENT_SALDO_AWAL_KREDIT,
+  jendelaSaldoAwal,
+  keSen,
+  rekonsiliasiBerkas,
+  type BarisAkadSaldoAwal,
+  type BarisAkunSaldoAwal,
+  type JendelaSaldoAwal,
+  type SisiSaldoAwal,
+} from "./saldo-awal";
 import { createImporRepo, type ImporRepo } from "./repo";
 import type { QueryRunner } from "../../core/ports/db";
 
@@ -58,6 +76,10 @@ const PESAN: Readonly<Record<string, string>> = {
   CABANG_TIDAK_DITEMUKAN: "Cabang tujuan impor tidak ditemukan.",
   CABANG_DILUAR_SCOPE: "Data ini berada di luar cabang Anda.",
   TIDAK_BERWENANG: "Anda tidak punya wewenang untuk tindakan ini.",
+  MAPPING_PIUTANG_TIDAK_ADA:
+    "Pemetaan jurnal PENCAIRAN_PUMK belum menyebut akun piutang, jadi saldo sub ledger tidak punya " +
+    "akun kontrol untuk dibandingkan. Perbaiki pemetaannya lebih dulu; impor ini menolak alih alih " +
+    "melaporkan tidak ada selisih atas perbandingan yang tidak pernah dilakukan.",
 };
 
 function tolak(kode: keyof typeof KODE_IMPOR, detail?: Record<string, unknown>): ImporError {
@@ -123,6 +145,92 @@ interface BarisMitra {
   namaUsaha: string | null;
   bidangUsaha: string | null;
   kodeMitraLama: string | null;
+}
+
+/**
+ * Everything the go-live pass produced: the two row lists, the window the
+ * journal will land in, and the reconciliation figures that were checked. All
+ * of it is derived from the file and the database, and none of it has been
+ * written anywhere; `pratinjau` returns the report built from it and `komit`
+ * goes on to use the same object, so the two cannot disagree.
+ */
+interface HasilPeriksaSaldoAwal {
+  diterima: BarisDiterima[];
+  akun: BarisAkunSaldoAwal[];
+  akad: BarisAkadSaldoAwal[];
+  jendela: JendelaSaldoAwal;
+  akunPiutangId: string;
+  kodeAkunPiutang: string;
+  tanggalEfektif: string;
+  keterangan: string | null;
+  totalDebit: Uang;
+  totalKredit: Uang;
+  saldoKontrolPiutang: Uang;
+  totalSubLedgerPiutang: Uang;
+}
+
+/** Columns that belong to one section only. A filled cell in the wrong section
+ * is REFUSED rather than ignored, for the reason the header check gives: a
+ * column that is silently dropped is how an import quietly loses a field. */
+const KOLOM_HANYA_AKUN = [
+  "kode_akun",
+  "nama_akun",
+  "tipe",
+  "saldo_normal",
+  "level",
+  "parent_kode",
+  "klasifikasi",
+  "is_postable",
+  "is_kas",
+  "is_kontra",
+  "klasifikasi_arus_kas",
+  "debit",
+  "kredit",
+] as const;
+
+const KOLOM_HANYA_AKAD = [
+  "no_akad",
+  "outstanding_pokok",
+  "outstanding_jasa",
+  "tunggakan_pokok",
+  "tunggakan_jasa",
+  "angsuran_ke_terakhir",
+  "hari_tunggakan",
+  "kolektibilitas",
+] as const;
+
+function tolakKolomAsing(
+  a: Alasan,
+  v: Record<string, string>,
+  kolom: readonly string[],
+  bagianLain: string,
+): void {
+  for (const k of kolom) {
+    if ((v[k] ?? "").trim().length > 0) {
+      a.tolak(k, `hanya berlaku untuk baris bagian ${bagianLain}, kosongkan di baris ini`);
+    }
+  }
+}
+
+/** A non-negative whole number in a bounded range, or a rejection. */
+function cacah(
+  a: Alasan,
+  nilai: string | undefined,
+  field: string,
+  maks: number,
+): number | null {
+  const v = (nilai ?? "").trim();
+  if (v.length === 0) return null;
+  if (!/^\d{1,9}$/.test(v)) {
+    a.tolak(field, "wajib bilangan bulat tidak negatif");
+    return null;
+  }
+  const n = Number(v);
+  if (n > maks) {
+    a.tolak(field, `maksimal ${maks}`);
+    return null;
+  }
+  return n;
 }
 
 interface BarisAngsuran {
@@ -244,6 +352,7 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
     ditolak: BarisDitolak[];
     mitra: BarisMitra[];
     angsuran: BarisAngsuran[];
+    saldoAwal: HasilPeriksaSaldoAwal | null;
   }> {
     const jenis = permintaan.jenis;
     const format = permintaan.berkas.format ?? "CSV";
@@ -334,6 +443,27 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
     // unique violation, which is a 409 the operator cannot act on.
     const kodeDalamBerkas = new Set<string>();
     const nikDalamBerkas = new Set<string>();
+
+    // --- SALDO_AWAL takes its own pass ------------------------------------
+    //
+    // Not a branch inside the loop below: the go-live file has two SECTIONS
+    // with different columns and different rules, and it has file-level
+    // reconciliation gates that only mean anything once every row has been
+    // read. Mixing that into the per-row loop of the other two kinds would
+    // make all three harder to read and none of them safer.
+    if (jenis === "SALDO_AWAL") {
+      const saldoAwal = await periksaSaldoAwal(tx, parsed.baris, permintaan, ctx, cabangId, ditolak);
+      return {
+        checksum: await checksumTeks(isi),
+        ukuranBytes,
+        jumlahBaris: parsed.baris.length + parsed.cacat.length,
+        diterima: saldoAwal.diterima,
+        ditolak,
+        mitra: [],
+        angsuran: [],
+        saldoAwal,
+      };
+    }
 
     for (const b of parsed.baris) {
       if (jenis === "MITRA") {
@@ -435,6 +565,356 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
       ditolak,
       mitra,
       angsuran,
+      saldoAwal: null,
+    };
+  }
+
+  /**
+   * The go-live pass: two sections, then the two file-level reconciliation
+   * gates. READS THE DATABASE, WRITES NOTHING, and is called by BOTH
+   * `pratinjau` and `komit`, so a preview that says "ready" and a commit that
+   * refuses cannot disagree.
+   *
+   * The reconciliation gates THROW rather than adding to `ditolak`, and that
+   * is the difference between "this line is wrong" and "this FILE is not an
+   * opening balance". A rejection list with a line number is actionable; "your
+   * trial balance is out by 1.250.000,00" is a statement about the whole
+   * document and belongs in the message, with the numbers in it.
+   */
+  async function periksaSaldoAwal(
+    tx: QueryRunner,
+    baris: readonly BarisCsv[],
+    permintaan: PermintaanImpor,
+    ctx: ImporContext,
+    cabangId: string,
+    ditolak: BarisDitolak[],
+  ): Promise<HasilPeriksaSaldoAwal> {
+    const tanggalEfektif = (permintaan.saldoAwal?.tanggalEfektif ?? "").trim();
+    if (!tanggalValid(tanggalEfektif)) {
+      throw new ImporError(
+        KODE_IMPOR.PERIODE_SALDO_AWAL_TIDAK_SIAP,
+        "Tanggal efektif saldo awal wajib diisi dengan tanggal YYYY-MM-DD, yaitu tanggal cut off " +
+          "pembukuan sistem lama.",
+        { tanggalEfektif },
+      );
+    }
+
+    // The window first, so a file dated at the wrong boundary is refused before
+    // a single lookup is spent on its rows.
+    const jendela = await jendelaSaldoAwal(tx, repo, ctx.bumnId, tanggalEfektif);
+
+    const piutang = await repo.akunPiutangKontrol(tx, ctx.bumnId);
+    if (!piutang) throw tolak("MAPPING_PIUTANG_TIDAK_ADA");
+
+    const diterima: BarisDiterima[] = [];
+    const akun: BarisAkunSaldoAwal[] = [];
+    const akad: BarisAkadSaldoAwal[] = [];
+    const kodeAkunDalamBerkas = new Set<string>();
+    const noAkadDalamBerkas = new Set<string>();
+    /** Accounts created by EARLIER lines of this same file, so a parent may be
+     *  defined one line above its child, which is how a legacy COA arrives. */
+    const akunBaruDalamBerkas = new Map<
+      string,
+      { level: number; tipe: string; isPostable: boolean }
+    >();
+
+    for (const b of baris) {
+      const a = new Alasan();
+      const v = b.nilai;
+      const bagian = bacaBagian(v.bagian);
+      if (!bagian) {
+        a.tolak("bagian", "wajib AKUN atau AKAD");
+        ditolak.push({ nomorBaris: b.nomorBaris, alasan: a.galat });
+        continue;
+      }
+
+      if (bagian === "AKUN") {
+        tolakKolomAsing(a, v, KOLOM_HANYA_AKAD, "AKAD");
+        const kodeAkun = teks(a, v.kode_akun, "kode_akun", { wajib: true, maks: 40 });
+
+        const debitMentah = (v.debit ?? "").trim();
+        const kreditMentah = (v.kredit ?? "").trim();
+        let debitSen = 0n;
+        let kreditSen = 0n;
+        if (debitMentah.length > 0) {
+          const sen = keSen(debitMentah);
+          if (sen === null) {
+            a.tolak("debit", "wajib desimal dengan dua angka di belakang koma, misal 250000.00");
+          } else debitSen = sen;
+        }
+        if (kreditMentah.length > 0) {
+          const sen = keSen(kreditMentah);
+          if (sen === null) {
+            a.tolak("kredit", "wajib desimal dengan dua angka di belakang koma, misal 250000.00");
+          } else kreditSen = sen;
+        }
+        // `akun_saldo_awal_satu_sisi_ck`, checked here so the operator gets a
+        // line number rather than a constraint name from mid-commit.
+        if (debitSen > 0n && kreditSen > 0n) {
+          a.tolak("debit", "isi debit atau kredit, tidak boleh keduanya");
+        }
+        const punyaSaldo = debitSen > 0n || kreditSen > 0n;
+
+        if (kodeAkun !== null) {
+          if (kodeAkunDalamBerkas.has(kodeAkun)) {
+            a.tolak("kode_akun", "duplikat di dalam berkas ini");
+          } else kodeAkunDalamBerkas.add(kodeAkun);
+        }
+
+        let akunId: string | null = null;
+        let buat: BarisAkunSaldoAwal["buat"] = null;
+        if (kodeAkun !== null && !a.gagal) {
+          const ada = await repo.akunByKode(tx, ctx.bumnId, kodeAkun);
+          if (ada) {
+            // DECISION 3 in ./saldo-awal.ts: blank means "take the definition
+            // from the database"; filled-in means "this is what I believe the
+            // account is", and a disagreement is refused rather than skipped
+            // or applied.
+            if (!definisiKosong(v)) {
+              for (const beda of bedaDefinisiAkun(ada, v)) {
+                a.tolak(
+                  beda.kolom,
+                  `akun ${kodeAkun} sudah ada dengan nilai "${beda.tersimpan}", berkas menyebut ` +
+                    `"${beda.diminta}". Impor saldo awal tidak mengubah akun yang sudah ada: ` +
+                    "kosongkan kolom ini untuk memakai definisi yang tersimpan, atau ubah akunnya " +
+                    "lewat layar COA lebih dulu.",
+                );
+              }
+            }
+            if (punyaSaldo && !ada.is_postable) {
+              a.tolak("kode_akun", "akun ini bukan akun postable, jadi tidak bisa membawa saldo");
+            }
+            if (punyaSaldo && !ada.aktif) a.tolak("kode_akun", "akun ini nonaktif");
+            akunId = ada.id;
+          } else if (definisiKosong(v)) {
+            a.tolak(
+              "kode_akun",
+              `akun ${kodeAkun} belum ada dan kolom definisinya kosong, jadi tidak ada yang bisa ` +
+                "dipakai untuk membuatnya. Isi nama_akun, tipe, saldo_normal, level, parent_kode " +
+                "dan klasifikasi, atau perbaiki kodenya.",
+            );
+          } else {
+            const parentKode = (v.parent_kode ?? "").trim();
+            const parentDiDb =
+              parentKode.length > 0 && !akunBaruDalamBerkas.has(parentKode)
+                ? await repo.akunByKode(tx, ctx.bumnId, parentKode)
+                : null;
+            const klas = (v.klasifikasi ?? "").trim();
+            const klasAda =
+              klas.length > 0 ? await repo.klasifikasiAkunAda(tx, ctx.bumnId, klas) : false;
+            buat = bacaDefinisiAkunBaru(
+              a,
+              kodeAkun,
+              v,
+              punyaSaldo,
+              akunBaruDalamBerkas,
+              parentDiDb,
+              klasAda,
+            );
+          }
+        }
+
+        if (!punyaSaldo && buat === null && !a.gagal) {
+          // Neither a balance nor a new account: the row states nothing. A
+          // definition-only row IS allowed (that is how a header account
+          // arrives), which is why this only fires when nothing is created.
+          a.tolak(
+            "debit",
+            "baris ini tidak membawa saldo dan tidak membuat akun baru, jadi tidak ada isinya",
+          );
+        }
+
+        // Read BEFORE the rejection check, not inside the push below: a
+        // `keterangan` that is too long or carries a control character has to
+        // be able to reject its own row.
+        const keteranganAkun = teks(a, v.keterangan, "keterangan", { wajib: false, maks: 240 });
+
+        if (a.gagal || kodeAkun === null) {
+          ditolak.push({ nomorBaris: b.nomorBaris, alasan: a.galat });
+          continue;
+        }
+        if (buat) {
+          akunBaruDalamBerkas.set(buat.kode, {
+            level: buat.level,
+            tipe: buat.tipe,
+            isPostable: buat.isPostable,
+          });
+        }
+        akun.push({
+          nomorBaris: b.nomorBaris,
+          kodeAkun,
+          akunId,
+          buat,
+          debitSen,
+          kreditSen,
+          keterangan: keteranganAkun,
+        });
+        diterima.push({
+          nomorBaris: b.nomorBaris,
+          ringkasan: {
+            bagian: "AKUN",
+            kode_akun: kodeAkun,
+            debit: dariSen(debitSen),
+            kredit: dariSen(kreditSen),
+            akun_baru: buat ? "Y" : "T",
+          },
+        });
+        continue;
+      }
+
+      // --- bagian = AKAD --------------------------------------------------
+      tolakKolomAsing(a, v, KOLOM_HANYA_AKUN, "AKUN");
+      const noAkad = teks(a, v.no_akad, "no_akad", { wajib: true, maks: 60 });
+
+      const pokokMentah = (v.outstanding_pokok ?? "").trim();
+      let outstandingPokokSen = 0n;
+      if (pokokMentah.length === 0) a.tolak("outstanding_pokok", "wajib diisi");
+      else {
+        const sen = keSen(pokokMentah);
+        if (sen === null) {
+          a.tolak(
+            "outstanding_pokok",
+            "wajib desimal dengan dua angka di belakang koma, misal 250000.00",
+          );
+        } else if (sen <= 0n) {
+          // An akad with nothing outstanding carries no opening balance and
+          // would need a LUNAS transition (with its `tanggal_lunas`) that this
+          // tool does not own. Refused rather than half-migrated.
+          a.tolak("outstanding_pokok", "wajib lebih besar dari nol");
+        } else outstandingPokokSen = sen;
+      }
+
+      const uangOpsional = (kolom: string): bigint => {
+        const mentah = (v[kolom] ?? "").trim();
+        if (mentah.length === 0) return 0n;
+        const sen = keSen(mentah);
+        if (sen === null) {
+          a.tolak(kolom, "wajib desimal dengan dua angka di belakang koma, misal 250000.00");
+          return 0n;
+        }
+        return sen;
+      };
+      const outstandingJasaSen = uangOpsional("outstanding_jasa");
+      const tunggakanPokokSen = uangOpsional("tunggakan_pokok");
+      const tunggakanJasaSen = uangOpsional("tunggakan_jasa");
+      // `akad_saldo_awal_tunggakan_ck`, ahead of the constraint.
+      if (tunggakanPokokSen > outstandingPokokSen) {
+        a.tolak("tunggakan_pokok", "tidak boleh melebihi outstanding_pokok");
+      }
+
+      const angsuranKeTerakhir = cacah(a, v.angsuran_ke_terakhir, "angsuran_ke_terakhir", 32767);
+      const hariTunggakan = cacah(a, v.hari_tunggakan, "hari_tunggakan", 100000);
+
+      const kolMentah = (v.kolektibilitas ?? "").trim().toUpperCase();
+      let kolektibilitas: string | null = null;
+      if (kolMentah.length > 0) {
+        if (!(await repo.kolektibilitasKelasAda(tx, kolMentah))) {
+          a.tolak("kolektibilitas", "kelas kolektibilitas ini tidak terdaftar");
+        } else kolektibilitas = kolMentah;
+      }
+
+      let akadId: string | null = null;
+      let mitraId: string | null = null;
+      if (noAkad !== null) {
+        if (noAkadDalamBerkas.has(noAkad)) a.tolak("no_akad", "duplikat di dalam berkas ini");
+        else noAkadDalamBerkas.add(noAkad);
+
+        const row = await repo.akadUntukSaldoAwal(tx, cabangId, noAkad);
+        // Same refusal for "no such akad" and "an akad in another branch": the
+        // lookup is scoped by branch IN THE QUERY, so an opening-balance file
+        // cannot be used to discover contract numbers elsewhere.
+        if (!row) a.tolak("no_akad", "akad tidak ditemukan di cabang ini");
+        else {
+          // AN OPENING BALANCE MAY ONLY OPEN AN AKAD THAT HAS NEVER MOVED IN
+          // THIS SYSTEM. Anything else and this import would be ADJUSTING a
+          // live receivable from a spreadsheet, which is a correction, not a
+          // migration, and corrections go through the operational screens with
+          // their own maker-checker.
+          if (row.status !== "BELUM_CAIR") {
+            a.tolak(
+              "no_akad",
+              `akad ini berstatus ${row.status}; saldo awal hanya untuk akad warisan yang belum ` +
+                "pernah dicairkan di sistem ini",
+            );
+          }
+          if (keSen(row.outstanding_pokok) !== 0n) {
+            a.tolak("no_akad", "akad ini sudah punya outstanding di sistem ini");
+          }
+          if (row.ada_di_ledger) {
+            a.tolak("no_akad", "akad ini sudah punya baris di buku besar sistem ini");
+          }
+          const pokok = keSen(row.pokok_pinjaman) ?? 0n;
+          if (outstandingPokokSen > pokok) {
+            a.tolak(
+              "outstanding_pokok",
+              `tidak boleh melebihi pokok pinjaman akad (${row.pokok_pinjaman})`,
+            );
+          }
+          akadId = row.id;
+          mitraId = row.mitra_id;
+        }
+      }
+
+      const keterangan = teks(a, v.keterangan, "keterangan", { wajib: false, maks: 240 });
+      if (a.gagal || noAkad === null || akadId === null || mitraId === null) {
+        ditolak.push({ nomorBaris: b.nomorBaris, alasan: a.galat });
+        continue;
+      }
+      akad.push({
+        nomorBaris: b.nomorBaris,
+        noAkad,
+        akadId,
+        mitraId,
+        outstandingPokokSen,
+        outstandingJasaSen,
+        tunggakanPokokSen,
+        tunggakanJasaSen,
+        angsuranKeTerakhir,
+        hariTunggakan,
+        kolektibilitas,
+        keterangan,
+      });
+      diterima.push({
+        nomorBaris: b.nomorBaris,
+        ringkasan: {
+          bagian: "AKAD",
+          no_akad: noAkad,
+          outstanding_pokok: dariSen(outstandingPokokSen),
+        },
+      });
+    }
+
+    // R1 and R2 (./saldo-awal.ts). Only meaningful over a file whose every row
+    // was read, so a file with rejections is answered with the rejection list
+    // and the totals are not claimed at all.
+    let rekon = {
+      totalDebitSen: 0n,
+      totalKreditSen: 0n,
+      saldoKontrolPiutangSen: 0n,
+      totalSubLedgerPiutangSen: 0n,
+    };
+    if (ditolak.length === 0) {
+      rekon = rekonsiliasiBerkas({
+        akun,
+        akad,
+        akunPiutangId: piutang.id,
+        kodeAkunPiutang: piutang.kode,
+      });
+    }
+
+    return {
+      diterima,
+      akun,
+      akad,
+      jendela,
+      akunPiutangId: piutang.id,
+      kodeAkunPiutang: piutang.kode,
+      tanggalEfektif,
+      keterangan: permintaan.saldoAwal?.keterangan?.trim() || null,
+      totalDebit: dariSen(rekon.totalDebitSen),
+      totalKredit: dariSen(rekon.totalKreditSen),
+      saldoKontrolPiutang: dariSen(rekon.saldoKontrolPiutangSen),
+      totalSubLedgerPiutang: dariSen(rekon.totalSubLedgerPiutangSen),
     };
   }
 
@@ -447,8 +927,38 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
   }
 
   function jenisValid(jenis: unknown): JenisImpor {
-    if (jenis === "MITRA" || jenis === "ANGSURAN") return jenis;
+    if (jenis === "MITRA" || jenis === "ANGSURAN" || jenis === "SALDO_AWAL") return jenis;
     throw tolak("JENIS_TIDAK_DIKENAL", { jenis });
+  }
+
+  /**
+   * Rule 3 for the go-live import. See `PERMISSION_IMPOR` in ./contract.ts:
+   * creating accounts is `konfigurasi.coa` and landing a POSTED journal is
+   * `jurnal.post`, so the file may not do either unless its operator could
+   * have done it by hand.
+   */
+  function izinSaldoAwal(ctx: ImporContext): void {
+    wajibIzin(ctx, PERMISSION_IMPOR.SALDO_AWAL_COA);
+    wajibIzin(ctx, PERMISSION_IMPOR.SALDO_AWAL_POSTING);
+  }
+
+  /** Refuses a scope whose books are already open. See `SALDO_AWAL_SUDAH_DIPOSTING`. */
+  async function wajibBelumDiposting(
+    tx: QueryRunner,
+    ctx: ImporContext,
+    cabangId: string,
+  ): Promise<void> {
+    const ada = await repo.batchDipostingAda(tx, ctx.bumnId, cabangId);
+    if (!ada) return;
+    throw new ImporError(
+      KODE_IMPOR.SALDO_AWAL_SUDAH_DIPOSTING,
+      `Saldo awal untuk cabang ini sudah pernah diposting (batch per ${ada.tanggal_efektif}, ` +
+        `dibuat ${ada.dibuat_pada}). Saldo awal hanya boleh diposting sekali; mengunggah ulang ` +
+        "berkas yang sama dengan nama lain, urutan baris lain, atau hasil simpan ulang dari Excel " +
+        "akan menggandakan seluruh pembukuan. Kalau isinya memang harus diperbaiki, batalkan batch " +
+        "yang lama lebih dulu.",
+      { batchId: ada.id, tanggalEfektif: ada.tanggal_efektif },
+    );
   }
 
   return {
@@ -456,7 +966,12 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
       wajibIzin(ctx, PERMISSION_IMPOR.UNGGAH);
       const jenis = jenisValid(permintaan.jenis);
       if (jenis === "MITRA") wajibIzin(ctx, PERMISSION_IMPOR.MITRA);
+      if (jenis === "SALDO_AWAL") izinSaldoAwal(ctx);
       const cabangId = await cabangTujuan(deps.db, permintaan, ctx);
+      // A PREVIEW OF AN OPENING BALANCE FOR A SCOPE THAT IS ALREADY OPEN MUST
+      // NOT SAY "READY". It writes nothing either way; what it must not do is
+      // tell an operator to go ahead with an upload the commit will refuse.
+      if (jenis === "SALDO_AWAL") await wajibBelumDiposting(deps.db, ctx, cabangId);
       const hasil = await periksaBerkas(deps.db, { ...permintaan, jenis }, ctx, cabangId);
       return {
         jenis,
@@ -474,6 +989,7 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
       wajibIzin(ctx, PERMISSION_IMPOR.UNGGAH);
       const jenis = jenisValid(permintaan.jenis);
       if (jenis === "MITRA") wajibIzin(ctx, PERMISSION_IMPOR.MITRA);
+      if (jenis === "SALDO_AWAL") izinSaldoAwal(ctx);
       const namaFile = namaFileBersih(permintaan.berkas.namaFile);
 
       // ONE TRANSACTION FOR THE WHOLE FILE. Everything below either commits
@@ -499,6 +1015,16 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
             diunggahPada: kembar.diunggah_pada,
           });
         }
+
+        // THE SECOND HALF OF THE DOUBLE-RUN REFUSAL, and the one that actually
+        // holds. `impor_berkas_checksum_uq` above refuses the same BYTES; it
+        // cannot refuse the same BALANCES arriving as different bytes, which is
+        // what a re-saved .xlsx, a reordered CSV or a renamed file all are. A
+        // nervous operator re-running the migration "just to be sure" would
+        // otherwise double every opening balance, and the accountant finds out
+        // weeks later. `saldo_awal_batch_diposting_uq` (migration 0033) makes
+        // this true under a race as well; this read makes it readable.
+        if (jenis === "SALDO_AWAL") await wajibBelumDiposting(tx, ctx, cabangId);
 
         const hasil = await periksaBerkas(tx, { ...permintaan, jenis }, ctx, cabangId);
 
@@ -537,8 +1063,333 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
 
         const jurnalIds: string[] = [];
         let jumlahDitulis = 0;
+        let ringkasanSaldoAwal: RingkasanSaldoAwal | undefined;
 
-        if (jenis === "MITRA") {
+        if (jenis === "SALDO_AWAL") {
+          const sa = hasil.saldoAwal;
+          if (!sa) throw new Error("impor: SALDO_AWAL tanpa hasil pemeriksaan");
+          const jurnal = deps.jurnal;
+          if (!jurnal) {
+            // Refuses rather than half-working. A batch written with no journal
+            // behind it is exactly the half-applied state rule 1 exists to
+            // prevent, and it would be invisible until the first close.
+            throw new Error(
+              "impor: port jurnal belum dipasang, jadi impor saldo awal tidak bisa memposting",
+            );
+          }
+
+          const batchId = await repo.buatBatchSaldoAwal(tx, {
+            bumnId: ctx.bumnId,
+            cabangId,
+            tanggalEfektif: sa.tanggalEfektif,
+            keterangan:
+              sa.keterangan ?? `Saldo awal go-live dari ${namaFile} per ${sa.tanggalEfektif}`,
+            userId: ctx.userId,
+          });
+
+          // 1. THE CHART OF ACCOUNTS FIRST, in file order, so a parent defined
+          //    one line above its child already exists when the child is
+          //    written and `trg_akun_10_hierarki` sees a complete picture.
+          const akunIdByKode = new Map<string, string>();
+          const akunDibuat: string[] = [];
+          for (const r of sa.akun) {
+            if (r.akunId) {
+              akunIdByKode.set(r.kodeAkun, r.akunId);
+              continue;
+            }
+            const def = r.buat;
+            if (!def) throw new Error("impor: baris akun tanpa id dan tanpa definisi");
+            const parentId = def.parentKode
+              ? (akunIdByKode.get(def.parentKode) ??
+                (await repo.akunByKode(tx, ctx.bumnId, def.parentKode))?.id ??
+                null)
+              : null;
+            const id = await repo.buatAkun(tx, {
+              bumnId: ctx.bumnId,
+              kode: def.kode,
+              nama: def.nama,
+              tipe: def.tipe,
+              saldoNormal: def.saldoNormal,
+              level: def.level,
+              parentId,
+              klasifikasi: def.klasifikasi,
+              isPostable: def.isPostable,
+              isKas: def.isKas,
+              isKontra: def.isKontra,
+              klasifikasiArusKas: def.klasifikasiArusKas,
+              userId: ctx.userId,
+            });
+            akunIdByKode.set(def.kode, id);
+            akunDibuat.push(def.kode);
+            r.akunId = id;
+          }
+
+          // 2. THE TWO HALVES OF THE BATCH. `akun_saldo_awal` only takes rows
+          //    that carry a balance (its one-side CHECK forbids a zero row), so
+          //    a definition-only line creates its account and nothing else.
+          for (const r of sa.akun) {
+            if (r.debitSen === 0n && r.kreditSen === 0n) {
+              await repo.catatBaris(tx, {
+                berkasId,
+                nomorBaris: r.nomorBaris,
+                entitas: "akun",
+                entitasId: r.akunId!,
+                jurnalId: null,
+                nilai: { kode_akun: r.kodeAkun, akun_baru: true },
+                userId: ctx.userId,
+              });
+              jumlahDitulis += 1;
+              continue;
+            }
+            const barisId = await repo.tulisAkunSaldoAwal(tx, {
+              batchId,
+              cabangId,
+              akunId: r.akunId!,
+              debit: dariSen(r.debitSen),
+              kredit: dariSen(r.kreditSen),
+              keterangan: r.keterangan,
+              userId: ctx.userId,
+            });
+            await repo.catatBaris(tx, {
+              berkasId,
+              nomorBaris: r.nomorBaris,
+              entitas: "akun_saldo_awal",
+              entitasId: barisId,
+              jurnalId: null,
+              nilai: {
+                kode_akun: r.kodeAkun,
+                debit: dariSen(r.debitSen),
+                kredit: dariSen(r.kreditSen),
+              },
+              userId: ctx.userId,
+            });
+            jumlahDitulis += 1;
+          }
+
+          for (const r of sa.akad) {
+            const barisId = await repo.tulisAkadSaldoAwal(tx, {
+              batchId,
+              akadId: r.akadId,
+              outstandingPokok: dariSen(r.outstandingPokokSen),
+              outstandingJasa: dariSen(r.outstandingJasaSen),
+              tunggakanPokok: dariSen(r.tunggakanPokokSen),
+              tunggakanJasa: dariSen(r.tunggakanJasaSen),
+              angsuranKeTerakhir: r.angsuranKeTerakhir,
+              hariTunggakan: r.hariTunggakan,
+              kolektibilitas: r.kolektibilitas,
+              keterangan: r.keterangan,
+              userId: ctx.userId,
+            });
+            // The live sub-ledger, without which spec 8.4 check 10 fails on
+            // every imported akad. See `setOutstandingAwalAkad` in ./repo.ts.
+            await repo.setOutstandingAwalAkad(tx, {
+              akadId: r.akadId,
+              outstandingPokok: dariSen(r.outstandingPokokSen),
+              outstandingJasa: dariSen(r.outstandingJasaSen),
+              userId: ctx.userId,
+            });
+            await repo.catatBaris(tx, {
+              berkasId,
+              nomorBaris: r.nomorBaris,
+              entitas: "akad_saldo_awal",
+              entitasId: barisId,
+              jurnalId: null,
+              nilai: {
+                no_akad: r.noAkad,
+                outstanding_pokok: dariSen(r.outstandingPokokSen),
+              },
+              userId: ctx.userId,
+            });
+            jumlahDitulis += 1;
+          }
+
+          // 3. THE JOURNAL, through the engine's own combined posting. The
+          //    receivable's control balance is replaced by ONE ENTRY PER AKAD,
+          //    carrying the sub-ledger dimensions, which is what makes
+          //    `v_rekonsiliasi_piutang` able to attribute the balance at all;
+          //    R2 has already proved the two add up to the same figure, so the
+          //    trial balance is unchanged by the substitution.
+          const debit: SisiSaldoAwal[] = [];
+          const kredit: SisiSaldoAwal[] = [];
+          for (const r of sa.akun) {
+            if (r.akunId === sa.akunPiutangId) continue;
+            if (r.debitSen > 0n) {
+              debit.push({
+                akunId: r.akunId!,
+                sen: r.debitSen,
+                mitraId: null,
+                akadId: null,
+                keterangan: `Saldo awal ${r.kodeAkun}`,
+              });
+            }
+            if (r.kreditSen > 0n) {
+              kredit.push({
+                akunId: r.akunId!,
+                sen: r.kreditSen,
+                mitraId: null,
+                akadId: null,
+                keterangan: `Saldo awal ${r.kodeAkun}`,
+              });
+            }
+          }
+          for (const r of sa.akad) {
+            debit.push({
+              akunId: sa.akunPiutangId,
+              sen: r.outstandingPokokSen,
+              mitraId: r.mitraId,
+              akadId: r.akadId,
+              keterangan: `Saldo awal piutang akad ${r.noAkad}`,
+            });
+          }
+
+          // ONE COMPONENT PER IMPORTED BALANCE, each against the clearing
+          // account its mapping row fixes. No balance is paired against
+          // another, because no such relationship exists; see the two
+          // SALDO_AWAL rows in seed/event-jurnal.ts. `postingEventGabungan`
+          // merges legs that agree, so the clearing account contributes
+          // exactly two lines to the whole journal and nets to zero.
+          const komponen: KomponenSaldoAwal[] = [
+            ...debit.map((x) => ({
+              eventCode: EVENT_SALDO_AWAL_DEBIT,
+              nilai: dariSen(x.sen),
+              akunDebitId: x.akunId,
+              mitraId: x.mitraId,
+              akadId: x.akadId,
+              keterangan: x.keterangan,
+            })),
+            ...kredit.map((x) => ({
+              eventCode: EVENT_SALDO_AWAL_KREDIT,
+              nilai: dariSen(x.sen),
+              akunKreditId: x.akunId,
+              mitraId: x.mitraId,
+              akadId: x.akadId,
+              keterangan: x.keterangan,
+            })),
+          ];
+          if (komponen.length === 0) throw tolak("BERKAS_KOSONG");
+
+          const jurnalSaldoAwal = await jurnal.postingEventGabungan(
+            {
+              cabangId,
+              // NOT `tanggalEfektif`. See decision 2 in ./saldo-awal.ts: the
+              // cut-off sits in the period BEFORE this system's books, which is
+              // absent or CLOSED, and invariant 5 refuses both.
+              tanggalTransaksi: sa.jendela.tanggalJurnal,
+              komponen,
+              keterangan: `Saldo awal go-live per ${sa.tanggalEfektif} (${namaFile})`,
+              referensiTipe: "saldo_awal_batch",
+              referensiId: batchId,
+              // Invariant 13, and a third layer under the double-run refusal: a
+              // second journal for this batch is refused by
+              // `jurnal_idempotensi_uq` even if everything above were bypassed.
+              kunciIdempotensi: `saldo_awal:${batchId}`,
+            },
+            tx,
+            {
+              userId: ctx.userId,
+              cabangId,
+              bumnId: ctx.bumnId,
+              permissions: ctx.permissions,
+              ...(ctx.cabangDalamScope ? { cabangDalamScope: ctx.cabangDalamScope } : {}),
+            },
+          );
+          jurnalIds.push(jurnalSaldoAwal.id);
+
+          // 4. R3: THE SHIPPED PREDICATE, ON THE ROWS THAT WERE ACTUALLY
+          //    WRITTEN, STILL INSIDE THIS TRANSACTION. R1 and R2 are arithmetic
+          //    on the file; this is spec 8.4 check 10 itself. If it disagrees
+          //    with them, it wins and the whole file rolls back, because it is
+          //    the check the monthly close will run.
+          const akadIds = sa.akad.map((r) => r.akadId);
+          // `numeric(20,2)::text` is exactly "0.00" for no difference and
+          // carries a sign otherwise, so the comparison is on the string the
+          // database produced rather than on a re-parse of it. `keSen` would
+          // refuse a negative difference and reach the same verdict for the
+          // wrong reason, which is the kind of accident that survives until
+          // somebody widens the parser.
+          const selisih = (await repo.rekonsiliasiPiutang(tx, akadIds)).filter(
+            (r) => r.selisih !== "0.00",
+          );
+          if (selisih.length > 0) {
+            throw new ImporError(
+              KODE_IMPOR.REKONSILIASI_PIUTANG_GAGAL,
+              `Setelah semuanya ditulis, v_rekonsiliasi_piutang masih melaporkan selisih pada ` +
+                `${selisih.length} akad (pemeriksaan tutup buku butir 10). Tidak ada satu baris pun ` +
+                `yang disimpan. Contoh: akad ${selisih[0]!.no_akad} sub ledger ` +
+                `${selisih[0]!.saldo_sub_ledger}, buku besar ${selisih[0]!.saldo_buku_besar}.`,
+              {
+                jumlahAkad: selisih.length,
+                contoh: selisih.slice(0, 5),
+              },
+            );
+          }
+
+          await repo.tandaiBatchDiposting(tx, {
+            batchId,
+            jurnalId: jurnalSaldoAwal.id,
+            // ADR 0006 calls these "the batch totals", i.e. the TRIAL BALANCE's
+            // own totals. The journal's gross is twice them (each balance is
+            // recorded once on its account and once on the clearing account),
+            // and writing that here would make the batch row disagree with the
+            // report the operator imported from.
+            totalDebit: sa.totalDebit,
+            totalKredit: sa.totalKredit,
+            catatan: {
+              checksumBerkas: hasil.checksum,
+              namaFile,
+              tanggalEfektif: sa.tanggalEfektif,
+              tanggalJurnal: sa.jendela.tanggalJurnal,
+              totalDebitBerkas: sa.totalDebit,
+              totalKreditBerkas: sa.totalKredit,
+              kodeAkunPiutang: sa.kodeAkunPiutang,
+              saldoKontrolPiutang: sa.saldoKontrolPiutang,
+              totalSubLedgerPiutang: sa.totalSubLedgerPiutang,
+              brutoJurnalDebit: jurnalSaldoAwal.totalDebit,
+              brutoJurnalKredit: jurnalSaldoAwal.totalKredit,
+              jumlahAkun: sa.akun.length,
+              jumlahAkad: sa.akad.length,
+              akunDibuat,
+            },
+            userId: ctx.userId,
+          });
+
+          // The batch, at line 1: the header line, which is the only line
+          // number no data row can claim, so `impor_baris_urutan_uq` still
+          // holds and the file as a whole has a provenance row of its own.
+          await repo.catatBaris(tx, {
+            berkasId,
+            nomorBaris: 1,
+            entitas: "saldo_awal_batch",
+            entitasId: batchId,
+            jurnalId: jurnalSaldoAwal.id,
+            nilai: {
+              tanggal_efektif: sa.tanggalEfektif,
+              tanggal_jurnal: sa.jendela.tanggalJurnal,
+              total_debit: sa.totalDebit,
+              total_kredit: sa.totalKredit,
+            },
+            userId: ctx.userId,
+          });
+
+          ringkasanSaldoAwal = {
+            batchId,
+            jurnalId: jurnalSaldoAwal.id,
+            noJurnal: jurnalSaldoAwal.noJurnal,
+            tanggalEfektif: sa.tanggalEfektif,
+            tanggalJurnal: sa.jendela.tanggalJurnal,
+            periodeId: jurnalSaldoAwal.periodeId,
+            totalDebit: sa.totalDebit,
+            totalKredit: sa.totalKredit,
+            brutoJurnalDebit: jurnalSaldoAwal.totalDebit,
+            brutoJurnalKredit: jurnalSaldoAwal.totalKredit,
+            jumlahAkun: sa.akun.length,
+            jumlahAkad: sa.akad.length,
+            akunDibuat,
+            kodeAkunPiutang: sa.kodeAkunPiutang,
+            saldoKontrolPiutang: sa.saldoKontrolPiutang,
+            totalSubLedgerPiutang: sa.totalSubLedgerPiutang,
+          };
+        } else if (jenis === "MITRA") {
           for (const m of hasil.mitra) {
             const mitraId = await repo.buatMitra(tx, { ...m, cabangId, userId: ctx.userId });
             await repo.catatBaris(tx, {
@@ -628,6 +1479,7 @@ export function createImporEngine(deps: ImporEngineDeps): ImporEngine {
             jumlahBaris: hasil.jumlahBaris,
             jumlahDitulis,
             jurnalIds,
+            ...(ringkasanSaldoAwal ? { saldoAwal: ringkasanSaldoAwal } : {}),
           },
         };
       });

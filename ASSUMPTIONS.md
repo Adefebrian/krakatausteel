@@ -918,3 +918,59 @@ jawaban itu data, bukan pilihan di layar.
 benar dan hanya berisi satu baris; tidak ada yang perlu dibongkar. Sebaliknya, kalau kita memilih
 satu template tunggal, satu satunya cara mengadopsi standar baru adalah UPDATE di tempat, dan
 UPDATE itu mengubah bentuk laporan setiap periode lampau tanpa ada yang memberi tahu.
+
+## A-53. Yang boleh keluar gedung saat asisten AI menyala: nama dan alamat, bukan identitas bernomor
+
+**Diasumsikan:** ketika `AI_ENABLED=true`, teks dokumen yang diunggah Maker boleh dikirim ke
+penyedia model dengan **nama orang, nama usaha, alamat, uraian bebas, jumlah uang, tanggal dan
+nomor dokumen pendek** apa adanya, sementara **NIK, NPWP, alamat email, nomor telepon, dan setiap
+rentetan sepuluh angka atau lebih** diganti penanda sebelum dikirim lalu dikembalikan lokal
+sesudah jawaban datang (`apps/api/src/modules/ai/redaksi.ts`). Angka buku besar dan saldo per orang
+tidak pernah bisa masuk prompt sama sekali, karena jalur ekstraksi tidak punya pembacaan data bisnis
+dan jalur anomali tidak memanggil model.
+
+**Kenapa:** identitas bernomor bisa dikenali pola, jadi bisa disamarkan tanpa kehilangan kegunaan:
+model membalas penandanya, server mengembalikan nilai aslinya, dan form Maker tetap terisi lengkap.
+Nama dan alamat tidak bisa dikenali pola tanpa model, sehingga menyamarkannya berarti tidak ada lagi
+yang bisa diekstraksi. Jadi garisnya ditarik di tempat yang membuat penyamaran gratis, dan dicek
+ulang pada byte terakhir sebelum panggilan (`masihMengandungIdentitas`), bukan sekadar dipercayai.
+
+**Dampak kalau salah:** kalau klien memutuskan nama dan alamat pun tidak boleh keluar, fiturnya
+tidak bisa diselamatkan dengan menambah pola: yang benar adalah mematikan `AI_ENABLED` sampai ada
+model yang berjalan di dalam jaringan sendiri. Kalau sebaliknya klien menganggap NIK boleh dikirim,
+tidak ada yang perlu dilonggarkan; penyamarannya tidak mengurangi kualitas hasil.
+
+## A-54. Foto dokumen (KTP, NPWP, foto usaha) BELUM dikirim ke model, dan itu keputusan, bukan kelalaian
+
+**Diasumsikan:** ekstraksi dokumen bekerja atas **teks**, bukan gambar. Spesifikasi bagian 12 butir 1
+menyebut "Upload KTP, NPWP, NIB, foto usaha", dan bagian gambarnya sengaja belum dibangun.
+
+**Kenapa:** mengirim foto KTP ke API pihak ketiga berarti mengirim NIK, alamat, nama orang tua, dan
+wajah pemohon sekaligus, dalam satu berkas yang tidak bisa disamarkan sebagian. Itu keputusan data
+pribadi yang jauh lebih besar daripada seluruh sisa fase ini, dan bukan keputusan yang pantas
+diambil diam diam di dalam sebuah commit.
+
+**Dampak kalau salah:** kalau pemilik menyetujui pengiriman gambar, yang perlu ditambah adalah satu
+opsi `images` pada `CompletionOptions` dan satu jalur unggah; bentuk hasil, verifikasi kutipan,
+penyimpanan `ai_saran` dan seluruh pagar lainnya tidak berubah. Sampai saat itu, Maker mengetik
+field dari KTP seperti sebelumnya, dan tidak ada yang lebih lambat daripada keadaan hari ini.
+
+## A-55. Ambang deteksi anomali adalah nilai awal yang perlu dikonfirmasi tim akuntansi
+
+**Diasumsikan:** antrean tinjauan memakai z-score termodifikasi dengan ambang **3,5** atas median dan
+MAD 24 bulan terakhir, "bulat" berarti kelipatan **Rp 1.000.000**, sebuah akun dianggap "jarang
+bulat" kalau kurang dari **1 dari 10** baris historisnya bulat, keterangan di bawah **10 karakter**
+dianggap tidak bermakna, dan bobot tiap aturan adalah bilangan bulat di `KATALOG_ANOMALI`.
+
+**Kenapa:** angka angka ini menentukan URUTAN BACA, bukan angka keuangan mana pun. Tidak satu pun
+dari mereka bisa menolak jurnal, menahan tutup buku, atau mengubah saldo; salah setel berarti
+seseorang membaca jurnal yang biasa saja lebih dulu, dan itu biaya yang bisa ditanggung sambil
+menunggu konfirmasi. Karena itu mereka tetap konstanta di kode dan belum menjadi baris konfigurasi:
+menambah tujuh sel parameter yang tidak berkonsekuensi keuangan hanya memperbesar permukaan yang
+harus dijaga.
+
+**Dampak kalau salah:** ambang terlalu ketat membuat antrean penuh sehingga tidak ada yang
+membacanya; terlalu longgar membuat antrean kosong sehingga tidak ada yang membukanya. Keduanya
+diperbaiki dengan mengubah konstanta di `apps/api/src/modules/ai/anomali.ts` dan
+`KATALOG_ANOMALI`, tanpa migrasi. Kalau tim akuntansi ternyata ingin menyetelnya sendiri per
+entitas, barulah ia pantas pindah ke tabel `konfigurasi`.

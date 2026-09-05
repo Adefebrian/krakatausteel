@@ -249,6 +249,15 @@ export const PERMISSIONS = [
   "tools.rekonsiliasi",
   "tools.integritas",
 
+  // Fase 8 (spec 12), THE ASSISTANT. Two codes rather than one, because the two
+  // features serve different people at different moments: `ai.ekstraksi` speeds
+  // up the Maker's data entry, `ai.anomali` orders the Checker's and Approver's
+  // reading. Neither is a right to DO anything -- the assistant writes no
+  // business state at all (modules/ai/index.ts) -- so both are read-shaped
+  // privileges over a suggestion, and holding one says nothing about the other.
+  "ai.ekstraksi",
+  "ai.anomali",
+
   "audit.view",
 ] as const;
 
@@ -351,6 +360,12 @@ const READ_ONLY: Permission[] = [
   // export one cannot produce a working paper, and attesting outside this
   // application is the entire function of the role.
   "laporan.export",
+  // The anomaly review queue (spec 12 priority 2). It is a GET over journals
+  // the Auditor may already open, and ordering them by which deserves reading
+  // first is exactly what an attestation does. Listed in `HANYA_BUKTI` below so
+  // it does NOT flow to every operational role through `LIHAT`: the queue
+  // orders somebody's review work, and a Maker does not review.
+  "ai.anomali",
 ];
 
 /**
@@ -366,6 +381,7 @@ const HANYA_BUKTI: readonly Permission[] = [
   "admin.closing.view",
   "admin.rka.view",
   "laporan.export",
+  "ai.anomali",
 ];
 
 const LIHAT: Permission[] = READ_ONLY.filter((p) => !HANYA_BUKTI.includes(p));
@@ -391,6 +407,11 @@ const MAKER: Permission[] = [
   "jurnal.delete",
   "portal.konversi",
   "tools.import",
+  // Spec 12 priority 1, and spec 12 says who it is for: "Manfaat terbesar bagi
+  // Maker". It buys a proposed set of form fields and nothing else -- no
+  // proposal is created, no mitra is created, nothing is saved from the
+  // extraction alone -- so it is safe on the role that files the paperwork.
+  "ai.ekstraksi",
 ];
 
 const CHECKER: Permission[] = [
@@ -409,6 +430,10 @@ const CHECKER: Permission[] = [
   "nonpumk.lpj.verifikasi",
   "jurnal.verify",
   "tools.rekonsiliasi",
+  // The review queue. A Checker deciding which entries to verify first is the
+  // exact use spec 12 describes, and the queue blocks nothing: a flagged
+  // journal is still a valid journal.
+  "ai.anomali",
 ];
 
 const APPROVER: Permission[] = [
@@ -443,6 +468,9 @@ const APPROVER: Permission[] = [
   // which is the intended reach: a branch admin exports their own branch, and
   // the engine's branch scope is what keeps that true.
   "laporan.export",
+  // The Approver reads the same queue before posting and before handing a green
+  // checklist to head office. It orders reading; it refuses nothing.
+  "ai.anomali",
 ];
 
 // Everything the three operational roles can do, in ONE branch, plus branch

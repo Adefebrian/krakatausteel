@@ -44,12 +44,14 @@ export {
   JENDELA_CEK_DETIK,
   JENDELA_PENGAJUAN_DETIK,
   MAKS_DOKUMEN,
+  MAKS_ENTITAS_PUBLIK,
 } from "./contract";
 export type {
   BatasPortal,
   CekStatusInput,
   DetailSubmission,
   DokumenPengajuan,
+  EntitasPublik,
   FilterSubmission,
   HasilPengajuan,
   JenisDokumen,

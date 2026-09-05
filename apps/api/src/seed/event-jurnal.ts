@@ -316,6 +316,50 @@ export const KATALOG_EVENT_JURNAL: readonly EventJurnalDef[] = [
     jenis: "OTOMATIS",
     deskripsi: "Reschedule menurunkan pokok; pengurangan tagihan diserap penyisihan lebih dulu",
   },
+  {
+    code: "SALDO_AWAL_DEBIT",
+    // ONE LEG FROM THE FILE, ONE LEG FIXED, and the fixed one is the whole
+    // reason there are two rows here instead of one.
+    //
+    // Spec 9.6's go-live import brings in a legacy TRIAL BALANCE: N accounts,
+    // each with a debit or a credit, adding up to zero between them. Those
+    // accounts ARE the data, so they cannot live in this table. The obvious
+    // shortcut is a single row with BOTH legs from the payload; it is refused
+    // by this catalogue's own tests, and rightly, because a mapping row that
+    // fixes neither leg decides nothing about accounts and ADR 0004 stops
+    // meaning anything for that event.
+    //
+    // The alternative that was actually tried and rejected: pair the file's
+    // debit balances off against its credit balances with a greedy match. It
+    // balances, it needs no clearing account, and it is DISHONEST -- a line
+    // reading "Dr Kas 450.000.000 / Cr Aset Neto 450.000.000" asserts a
+    // relationship between two figures that merely arrived on the same
+    // spreadsheet, and which figure ends up against which is an artefact of
+    // the matching order.
+    //
+    // So every imported debit balance is posted against 3.1.02, and every
+    // imported credit balance (below) against the same account. The cost is
+    // that the opening journal's GROSS totals are twice the trial balance's,
+    // because each balance is stated once on its own account and once on the
+    // clearing account. The benefit is that no pair is invented, 3.1.02 nets
+    // to exactly zero whenever the import was complete, and that zero is a
+    // one-query audit check. `postingEventGabungan` merges legs that agree, so
+    // this costs TWO extra journal lines in total, not two per account.
+    debitKode: null,
+    kreditKode: "3.1.02",
+    jenis: "SALDO_AWAL",
+    deskripsi: "Saldo awal go-live: saldo debit warisan masuk lewat pos transisi saldo awal",
+  },
+  {
+    code: "SALDO_AWAL_KREDIT",
+    // The mirror of the row above. Both carry `jenis = 'SALDO_AWAL'`, so a
+    // journal built from both is filed as SALDO_AWAL rather than OTOMATIS,
+    // which is what ADR 0006 fixed before the import tool existed.
+    debitKode: "3.1.02",
+    kreditKode: null,
+    jenis: "SALDO_AWAL",
+    deskripsi: "Saldo awal go-live: saldo kredit warisan masuk lewat pos transisi saldo awal",
+  },
 ];
 
 /** The 19 codes spec 6.4 lists, in the spec's order. */
@@ -331,6 +375,13 @@ export const EVENT_KEPUTUSAN_PEMILIK: readonly string[] = [
   "HAPUS_BUKU_KEKURANGAN_PENYISIHAN",
   "RESTRUKTUR_POKOK_NAIK",
   "RESTRUKTUR_POKOK_TURUN",
+  // Named by spec 9.6 and ADR 0006 rather than by spec 6.4, which lists the
+  // OPERATIONAL events. They are here because this list is "the codes 6.4 does
+  // not name", not because the opening balance is a provisional decision: the
+  // schema has carried `jenis_jurnal = 'SALDO_AWAL'` since 0010 and ADR 0006
+  // fixed the journal's shape before the tool existed.
+  "SALDO_AWAL_DEBIT",
+  "SALDO_AWAL_KREDIT",
 ];
 
 export interface SeedEventJurnalResult {

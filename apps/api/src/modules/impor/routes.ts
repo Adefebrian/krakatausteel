@@ -41,9 +41,11 @@ import {
   type ImporEngine,
   type JenisImpor,
   type PermintaanImpor,
+  type PermintaanSaldoAwal,
 } from "./contract";
 
 const POLA_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const POLA_TANGGAL = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface ImporRoutesDeps {
   engine: ImporEngine;
@@ -110,12 +112,35 @@ async function permintaan(c: Context): Promise<PermintaanImpor> {
   const cabangId = typeof body.cabangId === "string" && body.cabangId.length > 0 ? body.cabangId : null;
   if (cabangId !== null && !POLA_UUID.test(cabangId)) galat.cabangId = ["wajib berupa UUID"];
 
+  // SALDO_AWAL carries two fields no other kind has, because the go-live
+  // batch's cut-off date is not in the file: it is a statement ABOUT the file.
+  // Shape-checked here; whether the date is the RIGHT one is the engine's
+  // (see decision 2 in ./saldo-awal.ts), because that answer depends on the
+  // entity's periods and this layer has no database.
+  let saldoAwal: PermintaanSaldoAwal | null = null;
+  if (jenis === "SALDO_AWAL") {
+    const mentah =
+      typeof body.saldoAwal === "object" && body.saldoAwal !== null && !Array.isArray(body.saldoAwal)
+        ? (body.saldoAwal as Record<string, unknown>)
+        : {};
+    const tanggalEfektif = typeof mentah.tanggalEfektif === "string" ? mentah.tanggalEfektif : "";
+    if (!POLA_TANGGAL.test(tanggalEfektif)) {
+      galat["saldoAwal.tanggalEfektif"] = ["wajib tanggal YYYY-MM-DD"];
+    }
+    const keteranganSaldo = typeof mentah.keterangan === "string" ? mentah.keterangan : null;
+    if (keteranganSaldo !== null && keteranganSaldo.length > 240) {
+      galat["saldoAwal.keterangan"] = ["maksimal 240 karakter"];
+    }
+    saldoAwal = { tanggalEfektif, keterangan: keteranganSaldo };
+  }
+
   if (Object.keys(galat).length > 0) throw badRequest("Data yang dikirim belum valid", galat);
 
   return {
     jenis: jenis!,
     berkas: { namaFile, isi: isi!, format: format! },
     cabangId,
+    saldoAwal,
   };
 }
 

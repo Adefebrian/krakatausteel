@@ -15,6 +15,7 @@ import type { ImporEngine, ImporEngineDeps } from "./contract";
 export { createImporEngine } from "./service";
 export { parseCsv, dariMatriks, checksumTeks, KesalahanCsv } from "./csv";
 export { parseXlsx, dariBase64, BATAS_IMPOR_XLSX, KesalahanXlsx } from "./xlsx";
+export { EVENT_SALDO_AWAL_DEBIT, EVENT_SALDO_AWAL_KREDIT } from "./saldo-awal";
 export {
   ImporError,
   KODE_IMPOR,
@@ -22,12 +23,15 @@ export {
   JENIS_IMPOR,
   KOLOM_MITRA,
   KOLOM_ANGSURAN,
+  KOLOM_SALDO_AWAL,
+  BAGIAN_SALDO_AWAL,
   kolomUntuk,
   MAKS_BARIS,
   MAKS_ISI_BYTE,
   PERMISSION_IMPOR,
 } from "./contract";
 export type {
+  BagianSaldoAwal,
   BarisDiterima,
   BarisDitolak,
   BerkasImpor,
@@ -40,9 +44,13 @@ export type {
   ImporEngineDeps,
   JenisImpor,
   KodeImpor,
+  KomponenSaldoAwal,
   PabrikAngsuran,
   PermintaanImpor,
+  PermintaanSaldoAwal,
   PorterAngsuranImpor,
+  PorterJurnalSaldoAwal,
+  RingkasanSaldoAwal,
 } from "./contract";
 
 /**

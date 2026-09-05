@@ -60,6 +60,11 @@ export interface BuatSubmissionInput {
 
 export interface PortalRepo {
   entitasAktif(tx: QueryRunner, kode: string): Promise<BarisEntitas | null>;
+  /** Live entities, code and name only, for the public application form. */
+  daftarEntitasPublik(
+    tx: QueryRunner,
+    batas: number,
+  ): Promise<{ kode: string; nama: string }[]>;
   /** Submissions from one address in the last `jam` hours. Anti-spam, spec 9.5. */
   cacahPengajuanDariIp(tx: QueryRunner, ip: string, jam: number): Promise<number>;
   buatSubmission(tx: QueryRunner, input: BuatSubmissionInput): Promise<BarisSubmission>;
@@ -93,12 +98,30 @@ const KOLOM = `
 export function createPortalRepo(): PortalRepo {
   return {
     async entitasAktif(tx, kode) {
+      // `aktif` as well as `deleted_at`, which the function's own name always
+      // claimed and the query did not do: an entity switched off in
+      // Organisasi kept accepting public applications, and the public list
+      // below would have advertised a different set from the one this accepts.
+      // The two must describe the same entities or the form lies.
       const r = await tx.query<BarisEntitas>(
         `select id::text as id, kode, nama from bumn
-          where kode = $1 and deleted_at is null limit 1`,
+          where kode = $1 and aktif and deleted_at is null limit 1`,
         [kode],
       );
       return r[0] ?? null;
+    },
+
+    async daftarEntitasPublik(tx, batas) {
+      // TWO COLUMNS, NAMED, NEVER `select *`. This row goes to the internet,
+      // so a column added to `bumn` later (an address, an NPWP, a config blob)
+      // must not join the answer by accident.
+      return tx.query<{ kode: string; nama: string }>(
+        `select kode, nama from bumn
+          where aktif and deleted_at is null
+          order by nama asc, kode asc
+          limit $1`,
+        [batas],
+      );
     },
 
     async cacahPengajuanDariIp(tx, ip, jam) {

@@ -384,7 +384,13 @@ describe("apa yang dikirim seed, dan apa yang tetap ditambahkan fixture ini", ()
     // category, so `AKUN_TAMBAHAN` adopts that row (renaming and
     // re-classifying it) instead of inserting a duplicate, and adds `3.2.01`
     // as the other half of the split. Same two codes, different provenance.
-    expect(baris.map((b) => b.kode)).toEqual(["3.1.01", "3.2.01"]);
+    // RE-PINNED AGAIN, and `3.1.02` is the go-live clearing account (spec 9.6,
+    // ADR 0006). It is postable because the opening journal names it, it is
+    // ASET_NETO because an unexplained residual belongs where the residual of
+    // the accounting equation belongs, and its balance is always zero after a
+    // complete opening import, so it prints a zero on the statement rather
+    // than moving a figure. See the row in seed/coa-inti.ts.
+    expect(baris.map((b) => b.kode)).toEqual(["3.1.01", "3.1.02", "3.2.01"]);
   });
 
   test("seed inti KINI mengirim baris laporan ARUS_KAS dan PERUBAHAN_ASET_NETO", async () => {

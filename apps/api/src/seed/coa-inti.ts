@@ -366,6 +366,38 @@ export const AKUN_INTI: readonly AkunDef[] = [
     klasifikasi: "ASET_NETO",
   },
   {
+    // THE GO-LIVE CLEARING ACCOUNT, and it exists because of a rule this
+    // catalogue's own tests enforce: no `event_jurnal_mapping` row may have
+    // BOTH legs from the payload, or the mapping decides nothing about
+    // accounts and ADR 0004 is void for that event.
+    //
+    // An opening balance is N accounts with N balances, so its accounts are
+    // irreducibly data. Pairing them off against each other would satisfy the
+    // arithmetic and INVENT ECONOMIC RELATIONSHIPS THAT DO NOT EXIST: a line
+    // reading "Dr Kas 450.000.000 / Cr Aset Neto 450.000.000" asserts those two
+    // figures are connected, and they are not; they merely both arrived from
+    // the same legacy trial balance. Posting every imported balance against
+    // THIS account states the truth instead -- "this balance came in from the
+    // old system" -- once per account, with no invented pairs.
+    //
+    // ITS BALANCE IS ALWAYS ZERO after a complete opening import, because the
+    // trial balance that produced it balances, and the import refuses one that
+    // does not. So it never moves Aset Neto. A non-zero balance here is a
+    // finding, checkable in one query, which is a property the paired design
+    // could not have offered at all.
+    //
+    // Filed under ASET_NETO because an unexplained residual on a balance sheet
+    // belongs where the residual of the accounting equation belongs, not
+    // hidden among assets.
+    kode: "3.1.02",
+    nama: "Pos Transisi Saldo Awal",
+    tipe: "ASET_NETO",
+    saldoNormal: "K",
+    level: 2,
+    parentKode: "3",
+    klasifikasi: "ASET_NETO",
+  },
+  {
     kode: "4.1.01",
     nama: "Pendapatan Alokasi Dana BUMN Pembina",
     tipe: "PENDAPATAN",

@@ -55,6 +55,13 @@ export const MAKS_BADAN_PORTAL = 32 * 1024;
 /** Coarse transport ceilings. Deliberately looser than the engine's policy. */
 const LIMIT_AJUKAN = { limit: 30, windowSeconds: 60 * 60 } as const;
 const LIMIT_CEK = { limit: 30, windowSeconds: 5 * 60 } as const;
+/**
+ * Looser than the other two, and it should be: this one is a page load on the
+ * public form, so a household or an office behind one NAT address legitimately
+ * hits it several times a minute. It is still a CEILING rather than nothing,
+ * because an unauthenticated read with no ceiling is a free amplifier.
+ */
+const LIMIT_ENTITAS = { limit: 120, windowSeconds: 5 * 60 } as const;
 
 const JENIS: readonly JenisPengajuan[] = ["PUMK", "NON_PUMK"];
 const STATUS: readonly StatusSubmission[] = ["BARU", "DIPROSES", "DIKONVERSI", "DITOLAK"];
@@ -156,21 +163,62 @@ export function createPortalRoutes({ engine, guards, pembatas, keyPrefix, batas 
   const lihat = [requireSession, requirePermission("portal.view")] as const;
   const tindak = [requireSession, requirePermission("portal.konversi")] as const;
 
+  // OWN NAMESPACE, and it is load-bearing. `rateLimit` keys on
+  // `<prefix>:<path>:<ip>`, and `applyHardening` has ALREADY registered a
+  // global limiter on the bare prefix, so a route limiter constructed with the
+  // same prefix consumes the SAME counter as the global one. Every request to
+  // these routes then spends the budget twice and the tighter ceiling bites at
+  // half its stated number, which is a limit nobody can reason about from
+  // reading it. Suffixing makes the public ceiling and the global ceiling two
+  // ceilings rather than one shared miscount.
+  const prefixRute = `${keyPrefix ?? "rl"}:portal-rute`;
   const batasAjukan = rateLimit({
     ...LIMIT_AJUKAN,
     ...(batas?.rutePengajuan !== undefined ? { limit: batas.rutePengajuan } : {}),
     limiter: pembatas,
-    ...(keyPrefix ? { keyPrefix } : {}),
+    keyPrefix: prefixRute,
   });
   const batasCek = rateLimit({
     ...LIMIT_CEK,
     ...(batas?.ruteCek !== undefined ? { limit: batas.ruteCek } : {}),
     limiter: pembatas,
-    ...(keyPrefix ? { keyPrefix } : {}),
+    keyPrefix: prefixRute,
+  });
+
+  const batasEntitas = rateLimit({
+    ...LIMIT_ENTITAS,
+    ...(batas?.ruteEntitas !== undefined ? { limit: batas.ruteEntitas } : {}),
+    limiter: pembatas,
+    keyPrefix: prefixRute,
   });
 
   return new Hono()
     // ------------------------------------------------------------- PUBLIC
+    /**
+     * The entities a member of the public may apply to, code and name.
+     *
+     * A GET, unlike the two public POSTs below, because it verifies no secret
+     * and stores nothing: there is no credential to keep out of an access log.
+     *
+     * IT REVEALS WHAT A LEAFLET REVEALS AND NOTHING ELSE, and the shape of the
+     * route is what keeps that true: no path parameter, no query string, no
+     * filter, no id in the answer. There is nothing here to enumerate BY, so
+     * this cannot become the reconnaissance step for anything -- not branches,
+     * not officers, not submission counts. See `entitasPublik` in
+     * ./contract.ts.
+     *
+     * SAME FAIL-CLOSED LIMITER AS THE OTHER TWO PUBLIC ROUTES. The global
+     * limiter is fail-OPEN by design; that stance is wrong on a public surface,
+     * where an attacker who can knock Redis over would otherwise get an
+     * unmetered window. `public, max-age=300` because the answer is the same
+     * for everybody and changes when an entity is created, which is rare.
+     */
+    .get("/entitas", batasEntitas, async (c) => {
+      const data = await engine.entitasPublik(publik(c));
+      c.header("Cache-Control", "public, max-age=300");
+      return c.json({ data });
+    })
+
     /**
      * Spec 9.5: submit without logging in. Answers with the ticket number and
      * nothing else that could be used to reach the row again: no id, no

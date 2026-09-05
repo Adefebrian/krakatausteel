@@ -87,10 +87,14 @@ export function createMitraRoutes(deps: MitraRoutesDeps) {
   const mitraGuards: MitraGuards = createMitraGuards({ engine, audit: deps.audit });
   const milikSendiri = [mitraGuards.requireMitra, mitraGuards.wajibSandiSendiri] as const;
   const petugas = [guards.requireSession, guards.requirePermission("konfigurasi.user")] as const;
+  // Own namespace, for the reason spelled out in modules/portal/routes.ts:
+  // `applyHardening`'s global limiter already keys on the bare prefix, so a
+  // route limiter sharing it spends one counter twice and the login ceiling
+  // silently halves.
   const batasMasuk = rateLimit({
     ...LIMIT_MASUK,
     limiter: deps.pembatas,
-    ...(deps.keyPrefix ? { keyPrefix: deps.keyPrefix } : {}),
+    keyPrefix: `${deps.keyPrefix ?? "rl"}:mitra-rute`,
   });
 
   return (

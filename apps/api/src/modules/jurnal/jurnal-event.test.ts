@@ -95,9 +95,11 @@ describe("spec 6.4 postingEvent membaca event_jurnal_mapping", () => {
     expect(r.map((x) => x.event_code)).toEqual(
       KATALOG_EVENT.map((e) => e.code).sort((a, b) => a.localeCompare(b)),
     );
-    // 19 from spec 6.4 + 3 owner decisions. Asserted against the catalogue
-    // above as well, so this number cannot drift away from the seed.
-    expect(r).toHaveLength(22);
+    // 19 from spec 6.4 + 5 codes the spec does not name (3 owner decisions and
+    // the two halves of the go-live opening balance, spec 9.6 / ADR 0006).
+    // Asserted against the catalogue above as well, so this number cannot
+    // drift away from the seed.
+    expect(r).toHaveLength(24);
   });
 
   // One test per catalogue row, named by event code so a failure names the

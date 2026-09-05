@@ -145,14 +145,17 @@ describe("impor: unggah massal", () => {
   });
 
   test("jenis impor yang tidak dikenal: 400 VALIDASI", async () => {
-    const res = await f.request("/impor/SALDO_AWAL/pratinjau", {
+    // `SALDO_AWAL` used to be the example here, which stopped being an unknown
+    // kind the day the go-live import landed. The CLAIM is unchanged: a kind
+    // the router does not know is a 400 that names the set it does know.
+    const res = await f.request("/impor/AKAD/pratinjau", {
       cookie: cookieMaker,
       method: "POST",
       body: { isi: "a,b\n1,2" },
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { detail?: Record<string, string[]> };
-    expect(body.detail?.jenis?.[0]).toContain("MITRA, ANGSURAN");
+    expect(body.detail?.jenis?.[0]).toContain("MITRA, ANGSURAN, SALDO_AWAL");
   });
 
   test("cabang di luar scope penyunggah DITOLAK 403 dengan kodeDomain", async () => {

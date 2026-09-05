@@ -33,6 +33,7 @@ import { createDbAdapter } from "./adapters/db";
 import { createKeyValueAdapter } from "./adapters/keyvalue";
 import { createRateLimiterAdapter } from "./adapters/ratelimit";
 import { createS3ObjectStoreAdapter } from "./adapters/s3";
+import { createAiAdapter } from "./adapters/ai";
 import { createPdfChromiumAdapter } from "./adapters/pdf-chromium";
 import { applyHardening } from "./hardening";
 import { createErrorHandler } from "./http";
@@ -58,6 +59,8 @@ import { createPortalHttpModule } from "../modules/portal";
 import { createMitraHttpModule } from "../modules/mitra";
 import { createImporHttpModule } from "../modules/impor";
 import { createOrganisasiModule } from "../modules/organisasi";
+import { createAiHttpModule } from "../modules/ai";
+import type { AiPort } from "./ports/ai";
 // modules/example is deliberately NOT imported: see the note above the route
 // table below.
 
@@ -104,6 +107,23 @@ export interface AppOverrides {
     rutePengajuan?: number;
     ruteCek?: number;
   };
+  /**
+   * THE AI LAYER (spec 12, Fase 8), OFF BY DEFAULT.
+   *
+   * `aiAktif` defaults to `AI_ENABLED === "true"`, which no test sets and which
+   * `.env.example`, the CI workflow and the production compose file all ship as
+   * false. `ai` is the port; when the flag is off no adapter is constructed at
+   * all, so a deployment with the layer off contains no OpenAI client and needs
+   * no API key.
+   *
+   * Tests inject a stub port (modules/ai/test-support.ts). That is what keeps
+   * the promise that no test in this repository reaches a network or a key: the
+   * real adapter is only ever built on the `AI_ENABLED === "true"` branch.
+   */
+  ai?: AiPort;
+  aiAktif?: boolean;
+  /** Route-level AI ceilings. A cost knob for the harness; production never sets it. */
+  aiBatasRute?: { ekstraksi?: number; anomali?: number };
   /** Namespace for Redis keys, so a test run cannot collide with another. */
   keyPrefix?: string;
 }
@@ -377,7 +397,58 @@ export function createApp(overrides: AppOverrides = {}) {
     audit,
     angsuran: (terikat) =>
       createAngsuranModule({ db: terikat, jurnal: jurnal.engine }).engine,
+    // The GO-LIVE import (spec 9.6, ADR 0006) is the one import with no
+    // business engine behind it: an opening balance is not a disbursement, a
+    // receipt or an allowance, so there is nothing to route it through and
+    // routing it through something would mean inventing a fake business event.
+    // It therefore names the ledger engine directly, and STILL through
+    // `postingEventGabungan`, so `event_jurnal_mapping` decides the accounts
+    // and the document type exactly as it does for everything else. See
+    // `PorterJurnalSaldoAwal` in modules/impor/contract.ts.
+    jurnal: jurnal.engine,
     guards: auth.guards,
+  });
+
+  // Fase 8 (spec 12), THE ASSISTANT: document extraction and the anomaly review
+  // queue. OFF BY DEFAULT.
+  //
+  // NO JOURNAL PORT, NO PUMK PORT, NO MITRA PORT, NO ANGSURAN PORT, and every
+  // one of those absences is the point rather than an omission. The repo owner
+  // set the boundary of this whole phase: the assistant never approves, never
+  // posts, never closes and never writes to the ledger; it proposes, and a
+  // person decides. That is not enforced by convention here, it is the wiring:
+  // this module is handed a database port, a rate limiter and (only when the
+  // flag is on) an AI port, so invariant 11 is unreachable from it rather than
+  // merely respected. The one table it writes is `ai_saran`, a log.
+  //
+  // AND ITS ENGINE IS HANDED TO NOBODY. Unlike `rka.engine`, `nonpumk.engine`
+  // and `closing.engine`, which the dashboard consumes, nothing downstream
+  // takes `ai.engine`: the closing checklist does not consult it, no approval
+  // path reads `ai_saran`, and a flagged journal is a valid journal. If a
+  // future wiring line hands this engine to another module, that line is the
+  // moment the assistant acquires authority, and it should be refused.
+  //
+  // THE ADAPTER IS BUILT ONLY ON THE ENABLED BRANCH. With `AI_ENABLED` unset or
+  // false there is no OpenAI client in the process and no API key is read, so
+  // the system is not merely "AI-free by policy" but AI-free by construction.
+  //
+  // A FAIL-CLOSED LIMITER, the same instance the auth and portal surfaces use.
+  // The global limiter fails open because Redis being down must not take the
+  // API down; for THIS surface refusing is right, because an extraction that
+  // does not happen costs a Maker one form typed by hand -- exactly what the
+  // whole feature being off costs them -- while an uncounted extraction
+  // endpoint is a bill with no ceiling.
+  const aiAktif = overrides.aiAktif ?? process.env.AI_ENABLED === "true";
+  const aiPort = overrides.ai ?? (aiAktif ? createAiAdapter() : undefined);
+  const asisten = createAiHttpModule({
+    db,
+    ...(aiPort ? { ai: aiPort } : {}),
+    pembatas: pembatasKetat,
+    aktif: aiAktif,
+    guards: auth.guards,
+    keyPrefix,
+    ...(overrides.aiBatasRute ? { batasRute: overrides.aiBatasRute } : {}),
+    ...(overrides.sessionOptions?.now ? { jam: overrides.sessionOptions.now } : {}),
   });
 
   // modules/example IS NOT MOUNTED, and must not be.
@@ -410,6 +481,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .route("/portal", portal.routes)
     .route("/mitra", mitra.routes)
     .route("/impor", impor.routes)
+    .route("/ai", asisten.routes)
     .route("/audit", auditModule.routes);
 
   return {
@@ -439,6 +511,7 @@ export function createApp(overrides: AppOverrides = {}) {
     portal: portal.engine,
     mitra: mitra.engine,
     impor: impor.engine,
+    ai: asisten.engine,
   };
 }
 
@@ -461,4 +534,5 @@ export const dashboard = instance.dashboard;
 export const portal = instance.portal;
 export const mitra = instance.mitra;
 export const impor = instance.impor;
+export const ai = instance.ai;
 export type AppType = typeof app;

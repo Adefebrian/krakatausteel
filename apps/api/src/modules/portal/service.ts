@@ -28,6 +28,7 @@ import {
   JENIS_DOKUMEN,
   KODE_PORTAL,
   MAKS_DOKUMEN,
+  MAKS_ENTITAS_PUBLIK,
   MAKS_NAMA_FILE,
   PERMISSION_PORTAL,
   POLA_NIK,
@@ -38,6 +39,7 @@ import {
   type CekStatusInput,
   type DetailSubmission,
   type DokumenPengajuan,
+  type EntitasPublik,
   type FilterSubmission,
   type HasilPengajuan,
   type JenisDokumen,
@@ -360,6 +362,25 @@ export function createPortalEngine(deps: PortalEngineDeps): PortalEngine {
   }
 
   return {
+    /**
+     * ANONYMOUS, and the smallest public read in the system.
+     *
+     * NO RATE LIMIT IN THE ENGINE, deliberately, and that is not an omission:
+     * the two public WRITE-shaped surfaces (`ajukan`, `cekStatus`) carry engine
+     * limits because each of them consumes something an attacker wants to
+     * exhaust -- a row in `portal_submission`, or an argon2id verification.
+     * This one consumes a single indexed read of at most `MAKS_ENTITAS_PUBLIK`
+     * rows and reveals what a leaflet reveals, so the honest protection is the
+     * transport limiter and a hard row cap, both of which it has. Adding a
+     * per-IP budget here would throttle a form's own page load and buy nothing.
+     *
+     * NO AUDIT ROW EITHER, for the same reason: `audit_log` records who
+     * touched what, and this touches nothing.
+     */
+    async entitasPublik(): Promise<EntitasPublik[]> {
+      return repo.daftarEntitasPublik(deps.db, MAKS_ENTITAS_PUBLIK);
+    },
+
     async ajukan(input: PengajuanInput, ctx: PortalPublikContext): Promise<HasilPengajuan> {
       const sekarang = jam();
       const cek = new Pemeriksa();

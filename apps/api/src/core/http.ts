@@ -175,6 +175,8 @@ export const NAMA_ERROR_BERKODE: ReadonlySet<string> = new Set([
   "PortalError",
   "MitraError",
   "ImporError",
+  // Fase 8 (spec 12), the assistant. Listed WITH its router.
+  "AiError",
 ]);
 
 function errorBerkode(err: unknown): ErrorBerkode | null {
@@ -199,6 +201,13 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   // could hold it. Fail closed, and let the audit row carry the reason.
   IZIN_BELUM_TERDAFTAR: "TIDAK_BERWENANG",
   MAKER_TIDAK_BOLEH_CHECKER: "SEGREGASI_TUGAS",
+  // modules/ai (spec 12). The rest of its codes are validations and default to
+  // 400, which is right; these three would be a lie as one.
+  // `PERIODE_TIDAK_DITEMUKAN` is not repeated here: modules/rka already maps
+  // it below, and the table is keyed by CODE rather than by module.
+  TERLALU_BANYAK_PERMINTAAN: "TERLALU_BANYAK_PERMINTAAN",
+  SARAN_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
+  SARAN_SUDAH_DIKONFIRMASI: "KONFLIK",
   JURNAL_TIDAK_DITEMUKAN: "TIDAK_DITEMUKAN",
   // State conflicts: the request was well formed, the ledger simply refuses it
   // in its current state, and a retry with the same body would refuse again.
@@ -450,6 +459,14 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   // perfectly well formed and has simply already been imported, so an
   // identical retry refuses identically.
   BERKAS_SUDAH_DIIMPOR: "KONFLIK",
+  // The go-live import (spec 9.6, ADR 0006). `SALDO_AWAL_TIDAK_BALANCE` and
+  // `SUBLEDGER_PIUTANG_TIDAK_COCOK` are deliberately ABSENT, i.e. 400: each is
+  // a problem with the FILE, and the operator fixes it by correcting the
+  // spreadsheet. The three below are the opposite -- the file is fine and the
+  // SYSTEM's state refuses it, so an identical retry refuses identically.
+  SALDO_AWAL_SUDAH_DIPOSTING: "KONFLIK",
+  PERIODE_SALDO_AWAL_TIDAK_SIAP: "KONFLIK",
+  REKONSILIASI_PIUTANG_GAGAL: "KONFLIK",
 };
 
 /**
@@ -604,6 +621,16 @@ const handleTanpaAudit: ErrorHandler = (err, c: Context) => {
       console.error(`[domain] ${c.req.method} ${c.req.path}: ${berkode.kode}`, err);
     } else {
       console.warn(`[domain] ${c.req.method} ${c.req.path}: ${berkode.kode} ${berkode.message}`);
+    }
+    // A 429 WITHOUT `Retry-After` TELLS A CLIENT TO GUESS. Every engine that
+    // throttles already knows the answer and parks it in `detail`, so it is
+    // emitted here, once, for all of them (modules/ai, modules/portal,
+    // modules/mitra) rather than in each router.
+    if (code === "TERLALU_BANYAK_PERMINTAAN") {
+      const sisa = berkode.detail?.retryAfterSeconds;
+      if (typeof sisa === "number" && Number.isFinite(sisa)) {
+        c.header("Retry-After", String(Math.max(1, Math.ceil(sisa))));
+      }
     }
     // `kodeDomain` is additive: `code` stays the HTTP taxonomy every client
     // already branches on, and the precise ledger reason travels beside it

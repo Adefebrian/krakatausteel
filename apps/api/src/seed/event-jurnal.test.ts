@@ -84,6 +84,11 @@ const KODE_KEPUTUSAN_PEMILIK = [
   "HAPUS_BUKU_KEKURANGAN_PENYISIHAN",
   "RESTRUKTUR_POKOK_NAIK",
   "RESTRUKTUR_POKOK_TURUN",
+  // Spec 9.6 / ADR 0006, not spec 6.4. See the note next to it in the
+  // catalogue: it is in this list because 6.4 does not name it, not because
+  // the opening balance is provisional.
+  "SALDO_AWAL_DEBIT",
+  "SALDO_AWAL_KREDIT",
 ];
 
 describe("the catalogue matches spec 6.4, plus the owner's three decisions", () => {
@@ -98,7 +103,7 @@ describe("the catalogue matches spec 6.4, plus the owner's three decisions", () 
       ...KODE_SPEC_6_4,
       ...KODE_KEPUTUSAN_PEMILIK,
     ]);
-    expect(KATALOG_EVENT_JURNAL).toHaveLength(22);
+    expect(KATALOG_EVENT_JURNAL).toHaveLength(24);
   });
 
   test("penghapustagihan has NO event code, on purpose", () => {
@@ -139,7 +144,14 @@ describe("the catalogue matches spec 6.4, plus the owner's three decisions", () 
     }
   });
 
-  test("exactly the three 'per bidang / per jenis' events resolve a leg from the payload", () => {
+  test("exactly five events resolve a leg from the payload, and this is the list", () => {
+    // An INVENTORY, not a ceiling: the point is that adding a payload leg is
+    // visible in a diff, because a leg the row does not fix is a leg ADR 0004
+    // cannot correct without a deploy. Three are spec 6.4's "per bidang / per
+    // jenis" accounts chosen on a form; the two SALDO_AWAL halves take the
+    // real account from the imported trial balance and fix the clearing leg,
+    // which is why they are here and why they are not ONE row with both legs
+    // from the payload (see the test below).
     const dariPayload = KATALOG_EVENT_JURNAL.filter(
       (ev) => debitDariPayload(ev) || kreditDariPayload(ev),
     ).map((ev) => ev.code);
@@ -147,6 +159,8 @@ describe("the catalogue matches spec 6.4, plus the owner's three decisions", () 
       "PENYALURAN_NON_PUMK",
       "PENGEMBALIAN_SISA_NON_PUMK",
       "BEBAN_OPERASIONAL",
+      "SALDO_AWAL_DEBIT",
+      "SALDO_AWAL_KREDIT",
     ]);
   });
 
@@ -317,10 +331,10 @@ describe("seedCoaInti", () => {
 });
 
 describe("seedEventJurnalMapping", () => {
-  test("seeds all 22 rows, active, with the right accounts on the right sides", async () => {
+  test("seeds all 24 rows, active, with the right accounts on the right sides", async () => {
     const bumnId = await bumnBaru();
     const { event } = await seedCoaDanEventMapping(db, bumnId);
-    expect(event).toEqual({ seeded: 22, total: 22 });
+    expect(event).toEqual({ seeded: 24, total: 24 });
 
     const rows = await db.query<{
       event_code: string;
@@ -339,7 +353,7 @@ describe("seedEventJurnalMapping", () => {
         WHERE m.bumn_id = $1`,
       [bumnId],
     );
-    expect(rows).toHaveLength(22);
+    expect(rows).toHaveLength(24);
     const byCode = new Map(rows.map((row) => [row.event_code, row]));
     for (const ev of KATALOG_EVENT_JURNAL) {
       const row = byCode.get(ev.code);
@@ -374,7 +388,7 @@ describe("seedEventJurnalMapping", () => {
       "SELECT count(*)::text AS n FROM event_jurnal_mapping WHERE bumn_id = $1",
       [bumnId],
     );
-    expect(Number(rows[0]!.n)).toBe(22);
+    expect(Number(rows[0]!.n)).toBe(24);
   });
 
   test("never overwrites an account an accountant corrected (ADR 0004)", async () => {
@@ -407,7 +421,7 @@ describe("seedEventJurnalMapping", () => {
       [[a, b]],
     );
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect(Number(row.n)).toBe(22);
+    for (const row of rows) expect(Number(row.n)).toBe(24);
   });
 });
 
@@ -420,6 +434,6 @@ describe("seedFase0 leaves a database that can actually post", () => {
       "SELECT count(*)::text AS n FROM event_jurnal_mapping WHERE bumn_id = $1 AND aktif",
       [extra],
     );
-    expect(Number(rows[0]!.n)).toBe(22);
+    expect(Number(rows[0]!.n)).toBe(24);
   }, 30_000);
 });

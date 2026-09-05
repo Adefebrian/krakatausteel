@@ -122,6 +122,69 @@ export async function buatDuniaImpor(
   });
 }
 
+export interface AkadWarisan {
+  mitraId: string;
+  kodeMitra: string;
+  akadId: string;
+  noAkad: string;
+}
+
+/**
+ * A LEGACY AKAD AS IT ARRIVES AT GO-LIVE: signed, never disbursed IN THIS
+ * SYSTEM, so `status = 'BELUM_CAIR'`, `outstanding_pokok = 0` and no ledger
+ * line anywhere. That is exactly the state the opening-balance import demands
+ * (an import that could adjust a live receivable would be a correction from a
+ * spreadsheet, not a migration), so the fixture has to be able to produce it.
+ *
+ * NO SCHEDULE, deliberately, and it is the honest shape rather than a
+ * shortcut: ADR 0006 leaves "whether the legacy arrears history needs to be
+ * reconstructed as schedule rows" open, so a migrated akad has aggregate
+ * opening arrears and no instalment rows. `v_integritas_jadwal` joins
+ * `pumk_jadwal_versi`, so an akad with no version never appears there and the
+ * integrity check stays honest about what it did and did not look at.
+ */
+export async function buatAkadBelumCair(
+  db: DbPort,
+  input: { cabangId: string; suffix: string; pokok: string },
+): Promise<AkadWarisan> {
+  const tag = seri();
+  const kodeMitra = `SA-${input.suffix}-${tag}`;
+  const noAkad = `AKS-${input.suffix}-${tag}`;
+
+  return db.transaction(async (tx) => {
+    const m = await tx.query<{ id: string }>(
+      `insert into mitra (cabang_id, kode_mitra, nama_lengkap, status, aktif)
+       values ($1::uuid, $2, $3, 'AKTIF', true) returning id::text as id`,
+      [input.cabangId, kodeMitra, `Mitra Warisan ${tag}`],
+    );
+    const mitraId = m[0]!.id;
+
+    const p = await tx.query<{ id: string }>(
+      `insert into pumk_proposal
+         (cabang_id, no_proposal, tanggal_proposal, tanggal_daftar, mitra_id,
+          jumlah_diajukan, tenor_diajukan, sumber_pengajuan, status, current_step)
+       values ($1::uuid, $2, date '2025-06-05', date '2025-06-05', $3::uuid,
+               $4::numeric, 12, 'INTERNAL', 'DICAIRKAN', 9)
+       returning id::text as id`,
+      [input.cabangId, `PS-${input.suffix}-${tag}`, mitraId, input.pokok],
+    );
+
+    const a = await tx.query<{ id: string }>(
+      `insert into pumk_akad
+         (proposal_id, mitra_id, cabang_id, no_akad, tanggal_akad, pokok_pinjaman,
+          jasa_adm_rate, metode_perhitungan, tenor_bulan, tanggal_mulai_angsuran,
+          tanggal_jatuh_tempo_akhir, status, outstanding_pokok, outstanding_jasa)
+       values ($1::uuid, $2::uuid, $3::uuid, $4, date '2025-06-10', $5::numeric,
+               0.06, 'FLAT', 24, date '2025-07-10', date '2027-06-10',
+               'BELUM_CAIR', 0, 0)
+       returning id::text as id`,
+      [p[0]!.id, mitraId, input.cabangId, noAkad, input.pokok],
+    );
+
+    return { mitraId, kodeMitra, akadId: a[0]!.id, noAkad };
+  });
+}
+
 /** A CSV body from a header row and data rows, the way a spreadsheet exports. */
 export function csv(header: readonly string[], baris: readonly (readonly string[])[]): string {
   const sel = (v: string): string =>

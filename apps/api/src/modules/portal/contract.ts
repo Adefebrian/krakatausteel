@@ -222,6 +222,27 @@ export interface HasilPengajuan {
   pesan: string;
 }
 
+/**
+ * One row of the public entity list. TWO COLUMNS, AND THE LIST IS CLOSED: no
+ * id, no branch, no address, no statistics. Adding a third field here is a
+ * decision about what an anonymous caller may know, so it belongs in a diff a
+ * reviewer sees, not in a `select *`.
+ */
+export interface EntitasPublik {
+  /** `bumn.kode`, the value `POST /portal/pengajuan` takes as `kodeEntitas`. */
+  kode: string;
+  nama: string;
+}
+
+/**
+ * Hard ceiling on the public list. Not paging: a BOUND, so the answer can
+ * never grow into something worth scraping and can never become an unbounded
+ * response on an unauthenticated route. A deployment with more live entities
+ * than this needs a decision about what the public form should do, not a
+ * second page.
+ */
+export const MAKS_ENTITAS_PUBLIK = 200;
+
 export interface CekStatusInput {
   noTiket: string;
   nik?: string | null;
@@ -356,9 +377,10 @@ export interface BatasPortal {
   cekPerIp?: number;
   cekPerTiket?: number;
   jendelaCekDetik?: number;
-  /** Coarse transport ceilings on the two public routes (see ./routes.ts). */
+  /** Coarse transport ceilings on the public routes (see ./routes.ts). */
   rutePengajuan?: number;
   ruteCek?: number;
+  ruteEntitas?: number;
 }
 
 export interface PortalEngineDeps {
@@ -423,6 +445,31 @@ export interface PortalEngine {
    * always wins.
    */
   cekStatus(input: CekStatusInput, ctx: PortalPublikContext): Promise<StatusPengajuan>;
+
+  /**
+   * ANONYMOUS. The entities a member of the public may apply to: code and
+   * name, nothing else, live entities only.
+   *
+   * WHY IT EXISTS. `POST /portal/pengajuan` takes `kodeEntitas` (a `bumn.kode`)
+   * and there was no way to learn one, so the public form had to ask an
+   * applicant to type a code off a leaflet. A code typed wrong is a refused
+   * application the applicant cannot diagnose.
+   *
+   * WHY IT REVEALS NOTHING A LEAFLET DOES NOT. The two columns it returns are
+   * exactly the two a printed application form already carries. It lists
+   * ENTITIES and nothing else: not branches, not officers, not counts, not
+   * addresses, not NPWP, not whether an entity has any submissions. Rule 1 of
+   * this module applies unchanged -- it is a read of a selector, and a selector
+   * is never authority.
+   *
+   * WHY IT IS NOT AN ENUMERATION SURFACE. There is no filter, no search
+   * parameter, no pagination cursor and no id: the whole list is the answer,
+   * it is bounded by `MAKS_ENTITAS_PUBLIK`, and there is therefore nothing to
+   * enumerate BY. An attacker learns the same thing a poster on a wall tells
+   * them. What they specifically cannot learn is any internal id, which is why
+   * `bumn.id` is not in the row shape at all.
+   */
+  entitasPublik(ctx: PortalPublikContext): Promise<EntitasPublik[]>;
 
   /** Officer queue. Requires `portal.view`. */
   daftar(filter: FilterSubmission, ctx: PortalContext): Promise<RingkasanSubmission[]>;
