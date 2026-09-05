@@ -41,6 +41,7 @@ import {
   porterJurnalUji,
   rp,
   tolakDengan,
+  tolakDenganKodeKolaborator,
   MULAI_ANGSURAN_BAKU,
   POKOK_BAKU,
   type DuniaPumk,
@@ -339,17 +340,29 @@ describe("modul PUMK mendelegasikan alokasi, tidak menghitungnya sendiri", () =>
 // ---------------------------------------------------------------------------
 
 describe("penolakan penerimaan angsuran", () => {
-  test("setoran atas akad yang belum cair ditolak, dan tidak ada jurnal yang terbentuk", async () => {
-    // KODE_PUMK has no dedicated "akad belum bisa diangsur" code; the
-    // instalment engine owns that judgement (AKAD_TIDAK_BISA_DIANGSUR) and this
-    // module surfaces its refusal as SETORAN_GAGAL with the cause preserved for
-    // the log. Reported as a gap rather than papered over with a new code
-    // invented at a call site.
+  test("setoran atas akad yang belum cair ditolak dengan SEBABNYA, bukan dengan SETORAN_GAGAL", async () => {
+    // WAS A GAP, NOW CLOSED, AND THIS ASSERTION IS INVERTED. `KODE_PUMK` has no
+    // dedicated "akad belum bisa diangsur" code and must not grow one: the
+    // instalment engine owns that judgement. What was wrong was that this
+    // module used to FLATTEN the engine's `AKAD_TIDAK_BISA_DIANGSUR` into its
+    // own `SETORAN_GAGAL` -- "Penerimaan angsuran ini gagal diproses" -- and
+    // park the real sentence in `penyebabDb`, which only the server log sees.
+    // The clerk was told nothing they could act on about an akad that has not
+    // been disbursed yet.
+    //
+    // core/sebab-kolaborator.ts now lets a refusal like this cross the module
+    // boundary intact, and names the ones that may not: a branch-scope refusal
+    // (it would rebuild the enumeration oracle one module up) and a
+    // malformed-journal refusal (it blames an operator for arithmetic they did
+    // not do). Neither this module nor the instalment engine had to learn about
+    // the other to make it work.
     const f = await d.siapkanProposal("JADWAL_SIAP");
-    await tolakDengan(
+    const err = await tolakDenganKodeKolaborator(
       () => terima(f.akadId as string, TGL_1, TEPAT, "BKM-X"),
-      KODE_PUMK.SETORAN_GAGAL,
+      "AKAD_TIDAK_BISA_DIANGSUR",
     );
+    // The sentence the clerk actually reads names the state of the akad.
+    expect(err.message).toContain("dicairkan");
     expect(jurnal.panggilan).toHaveLength(0);
     expect(await d.bacaAngsuran(f.akadId as string)).toHaveLength(0);
   });

@@ -38,6 +38,7 @@ import {
   porterJurnalUji,
   rp,
   tolakDengan,
+  tolakDenganKodeKolaborator,
   MULAI_ANGSURAN_BAKU,
   POKOK_BAKU,
   type BarisJadwalDb,
@@ -392,9 +393,13 @@ describe("persetujuan reschedule: versi baru terbentuk, versi lama utuh (skenari
       d.ctx.maker,
     );
     await engine.setujuiReschedule(r.id, d.ctx.approver);
-    await tolakDengan(
+    // INVERTED. This used to assert `JADWAL_GAGAL`, this module's own "the
+    // schedule engine refused something", which told an approver clicking twice
+    // nothing at all. The instalment engine's `RESCHEDULE_SUDAH_DIPROSES` now
+    // crosses the boundary intact and says which of the two clicks landed.
+    await tolakDenganKodeKolaborator(
       () => engine.setujuiReschedule(r.id, d.ctx.approver),
-      KODE_PUMK.JADWAL_GAGAL,
+      "RESCHEDULE_SUDAH_DIPROSES",
     );
     expect(await d.bacaVersi(akadId)).toHaveLength(2);
   }, 60_000);
@@ -414,6 +419,13 @@ describe("restruktur pokok (ADR 0011)", () => {
     // to express one.
     //
     // This test pins the CURRENT closed seam rather than pretending it is open.
+    // It also still asserts the FLATTENED code, deliberately, while three of
+    // its neighbours were inverted: `POKOK_TIDAK_VALID` is a schedule-SHAPE
+    // code (core/sebab-kolaborator.ts rule 2), and telling an operator who
+    // asked to restructure a loan that "pokok pinjaman harus lebih besar dari
+    // nol" sends them looking for a principal field their form does not have.
+    // `JADWAL_GAGAL` with the real cause in `penyebabDb` is the honest answer
+    // until the seam opens.
     // What it must NOT do is let this module invent a principal correction of
     // its own: that would be invariant 11 gone, and a journal nobody sanctioned.
     // When the instalment engine opens the seam, this test is the one that has
@@ -448,7 +460,14 @@ describe("penolakan reschedule", () => {
   test("tenor baru di luar batas konfigurasi ditolak, dan batasnya dibaca dari konfigurasi", async () => {
     const { akadId } = await akadSetengahJalan();
     await d.setelKonfigurasi("batasan", "tenor_max_bulan", "24");
-    await tolakDengan(
+    // INVERTED. `TENOR_DILUAR_BATAS` is exactly the refusal an operator can act
+    // on -- lower the tenor, or have the parameter raised -- and flattening it
+    // into `JADWAL_GAGAL` turned a configurable policy limit into an
+    // unexplained failure. It travels now; the schedule-SHAPE codes next to it
+    // in that engine (`POKOK_TIDAK_VALID` and friends) deliberately do not, and
+    // the restructure test below still asserts the flattened code for that
+    // reason.
+    await tolakDenganKodeKolaborator(
       () =>
         engine.ajukanReschedule(
           {
@@ -460,7 +479,7 @@ describe("penolakan reschedule", () => {
           },
           d.ctx.maker,
         ),
-      KODE_PUMK.JADWAL_GAGAL,
+      "TENOR_DILUAR_BATAS",
     );
     // Raise the ceiling and the same request goes through: the mechanic, not
     // the number.
@@ -480,7 +499,11 @@ describe("penolakan reschedule", () => {
 
   test("reschedule atas akad yang belum cair ditolak dan tidak membocorkan teks trigger", async () => {
     const f = await d.siapkanProposal("JADWAL_SIAP");
-    const err = await tolakDengan(
+    // INVERTED, same reason as the setoran case in ./pumk-angsuran.test.ts: the
+    // instalment engine owns "this akad cannot be rescheduled" and its sentence
+    // says why. It used to arrive as `JADWAL_GAGAL` with the reason in
+    // `penyebabDb`, server-log only.
+    const err = await tolakDenganKodeKolaborator(
       () =>
         engine.ajukanReschedule(
           {
@@ -492,7 +515,7 @@ describe("penolakan reschedule", () => {
           },
           d.ctx.maker,
         ),
-      KODE_PUMK.JADWAL_GAGAL,
+      "AKAD_TIDAK_BISA_DIANGSUR",
     );
     expect(err.message).not.toMatch(/TJSL-[A-Z]{3}-\d{3}/);
     expect(await d.bacaReschedule(f.akadId as string)).toHaveLength(0);

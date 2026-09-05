@@ -75,6 +75,7 @@ import {
   type Uang,
 } from "./contract";
 import { bersihkanKesalahan, penyebab, tolak } from "./kesalahan";
+import { sebabYangBolehLolos } from "../../core/sebab-kolaborator";
 import { createPumkRepo, type AkadBaris, type ProposalBaris } from "./repo";
 import { bacaRate, bacaUang, dariSen, tambahBulan, tanggalValid } from "./uang";
 import { canonicalPermission } from "../auth/index";
@@ -452,33 +453,49 @@ export function buatEnginePumk(deps: PumkEngineDeps): PumkEngine {
   // ------------------------------------------------- collaborator failures
 
   /**
-   * A collaborating engine's refusal becomes THIS module's code, with the raw
-   * cause confined to `penyebabDb`. The engines raise their own domain errors
-   * (AngsuranError, JurnalError) whose messages may quote a trigger string;
-   * those are not this module's vocabulary and must not reach its caller.
+   * A collaborating engine's refusal, at the boundary where it becomes an
+   * answer to the person who asked.
+   *
+   * THIS USED TO FLATTEN EVERYTHING, AND THAT WAS A DEFECT. A receipt
+   * back-dated into a CLOSED period was refused correctly and nothing was
+   * written, and the clerk was told `SETORAN_GAGAL`, "Penerimaan angsuran ini
+   * gagal diproses, jadi tidak ada yang tersimpan." The ledger had raised
+   * `PERIODE_TIDAK_OPEN` -- the one fact that tells the clerk to ask head
+   * office to reopen January rather than retype the receipt and fail again --
+   * and it went into `penyebabDb`, which is server-log only.
+   *
+   * So a refusal that is SAFE to re-raise is re-raised UNCHANGED, and only the
+   * rest is flattened. `sebabYangBolehLolos` owns which is which and states the
+   * three rules; the two that matter here are that a branch-scope refusal never
+   * travels (it would rebuild the enumeration oracle one module up) and that a
+   * malformed-journal refusal never travels (it blames an operator for
+   * arithmetic they did not do). What is flattened still carries the raw cause
+   * in `penyebabDb`, exactly as before, so nothing was lost from the log.
    */
-  async function lewatAngsuran<T>(jalankan: () => Promise<T>, detail: Record<string, unknown>): Promise<T> {
+  async function lewatKolaborator<T>(
+    jalankan: () => Promise<T>,
+    kode: "JADWAL_GAGAL" | "SETORAN_GAGAL" | "JURNAL_GAGAL",
+    detail: Record<string, unknown>,
+  ): Promise<T> {
     try {
       return await jalankan();
     } catch (err) {
-      throw tolak("JADWAL_GAGAL", detail, penyebab(err));
+      const lolos = sebabYangBolehLolos(err);
+      if (lolos) throw lolos;
+      throw tolak(kode, detail, penyebab(err));
     }
+  }
+
+  async function lewatAngsuran<T>(jalankan: () => Promise<T>, detail: Record<string, unknown>): Promise<T> {
+    return lewatKolaborator(jalankan, "JADWAL_GAGAL", detail);
   }
 
   async function lewatSetoran<T>(jalankan: () => Promise<T>, detail: Record<string, unknown>): Promise<T> {
-    try {
-      return await jalankan();
-    } catch (err) {
-      throw tolak("SETORAN_GAGAL", detail, penyebab(err));
-    }
+    return lewatKolaborator(jalankan, "SETORAN_GAGAL", detail);
   }
 
   async function lewatJurnal<T>(jalankan: () => Promise<T>, detail: Record<string, unknown>): Promise<T> {
-    try {
-      return await jalankan();
-    } catch (err) {
-      throw tolak("JURNAL_GAGAL", detail, penyebab(err));
-    }
+    return lewatKolaborator(jalankan, "JURNAL_GAGAL", detail);
   }
 
   // ---------------------------------------------------------------- engine

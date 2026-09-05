@@ -121,6 +121,139 @@ describe("aturan pembentukan dokumen", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Rules 5 to 7: what a statement handed to management may and may not carry
+// ---------------------------------------------------------------------------
+
+/**
+ * A statement shaped exactly as `modules/laporan` returns one: template
+ * machinery on every line, the two comparative figures, and three per-section
+ * subsets built by FILTERING the same array, which is what makes them the same
+ * objects.
+ */
+const BARIS_STATEMENT = [
+  {
+    barisLaporanId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    kode: "ASET",
+    nama: "ASET",
+    parentKode: null,
+    urutan: 1,
+    level: 1,
+    tipeBaris: "HEADER",
+    seksi: "ASET",
+    tanda: 1,
+    cetakTebal: true,
+    akunKode: [] as string[],
+    nilaiTahunIni: uang("0.00"),
+    nilaiTahunLalu: uang("0.00"),
+  },
+  {
+    barisLaporanId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    kode: "KAS",
+    nama: "Kas dan Setara Kas",
+    parentKode: "ASET",
+    urutan: 2,
+    level: 2,
+    tipeBaris: "DETAIL",
+    seksi: "ASET",
+    tanda: 1,
+    cetakTebal: false,
+    akunKode: ["1.1.01", "1.1.02"],
+    nilaiTahunIni: uang("1500000.00"),
+    nilaiTahunLalu: uang("1200000.00"),
+  },
+  {
+    barisLaporanId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    kode: "TOTAL_ASET",
+    nama: "Total Aset",
+    parentKode: null,
+    urutan: 3,
+    level: 1,
+    tipeBaris: "TOTAL",
+    seksi: "ASET",
+    tanda: 1,
+    cetakTebal: true,
+    akunKode: [] as string[],
+    nilaiTahunIni: uang("1500000.00"),
+    nilaiTahunLalu: uang("1200000.00"),
+  },
+];
+
+const POSISI = {
+  header: { ...HEADER, namaLaporan: "Laporan Posisi Keuangan" },
+  kolom: { labelTahunIni: "2026", labelTahunLalu: "2025" },
+  baris: BARIS_STATEMENT,
+  barisAset: BARIS_STATEMENT.filter((b) => b.seksi === "ASET"),
+  barisLiabilitas: BARIS_STATEMENT.filter((b) => b.seksi === "LIABILITAS"),
+  totalAsetTahunIni: uang("1500000.00"),
+};
+
+describe("laporan keuangan yang diserahkan ke manajemen (spec 16 skenario 20)", () => {
+  const dok = dokumenDariLaporan(POSISI, "Posisi Keuangan");
+  const utama = dok.tabel[0]!;
+
+  test("aturan 5: kolom mesin template tidak ikut tercetak", () => {
+    // Nine columns before the first figure, every one of them a column of
+    // `baris_laporan` rather than a fact about the entity.
+    for (const kolom of [
+      "Baris Laporan Id",
+      "Parent Kode",
+      "Urutan",
+      "Level",
+      "Tipe Baris",
+      "Seksi",
+      "Tanda",
+      "Cetak Tebal",
+    ]) {
+      expect([kolom, utama.kolom.includes(kolom)]).toEqual([kolom, false]);
+    }
+  });
+
+  test("yang tinggal adalah laporannya: kode baris, uraian, akun sumbernya, dan dua kolom banding", () => {
+    expect(utama.judul).toBe("Posisi Keuangan");
+    expect(utama.kolom).toEqual(["Kode", "Nama", "Akun Kode", "Nilai Tahun Ini", "Nilai Tahun Lalu"]);
+    // `akunKode` USED TO VANISH ENTIRELY: an array of scalars went to the child
+    // table builder, which filters for objects, finds none and emits nothing.
+    // It is the drill-down, so it is now one comma-joined cell on its own line.
+    expect(utama.baris[1]![2]).toEqual({ jenis: "teks", teks: "1.1.01, 1.1.02", tebal: false });
+    // An empty list is empty, not the string "[]".
+    expect(utama.baris[0]![2]!.jenis).toBe("kosong");
+  });
+
+  test("aturan 6: level jadi indentasi dan cetakTebal jadi tebal, bukan kolom", () => {
+    const nama = utama.baris.map((r) => r[1]!.teks);
+    // Relative to the table's own shallowest row, so a template whose levels
+    // start at 1 does not put a margin on everything.
+    expect(nama[0]).toBe("ASET");
+    expect(nama[2]).toBe("Total Aset");
+    // Non-breaking spaces: an ordinary leading space collapses in HTML, which
+    // is the copy that gets printed and handed over.
+    expect(nama[1]).toBe("\u00a0\u00a0\u00a0Kas dan Setara Kas");
+    // Bold is a property of the whole ROW, which is what a total line is.
+    expect(utama.baris.map((r) => r.every((c) => c.tebal === true))).toEqual([true, false, true]);
+  });
+
+  test("aturan 7: himpunan bagian yang hanya mengulang laporan yang sama tidak dicetak lagi", () => {
+    // `barisAset` is `baris.filter(...)`, so its rows ARE `baris`'s rows: the
+    // same objects, printed a second time under a second heading. Identity is
+    // the test, so nothing that merely looks similar is ever suppressed.
+    expect(dok.tabel.map((t) => t.judul)).not.toContain("Baris Aset");
+    // An EMPTY subset still gets its "(kosong)" table: "this section has no
+    // lines" is an answer, and there are no rows to recognise as repeats.
+    expect(dok.tabel.map((t) => t.judul)).toContain("Baris Liabilitas");
+  });
+
+  test("indentasi dan penebalan tidak merusak netralisasi formula maupun pelolosan HTML", () => {
+    const html = htmlDariDokumen(dok);
+    expect(html).toContain("<td>\u00a0\u00a0\u00a0Kas dan Setara Kas</td>");
+    expect(html).toContain('<td class="b">Total Aset</td>');
+    // U+00A0 is not one of the five characters escaped and not one of the six
+    // a spreadsheet evaluates, so an indented caption is neither mangled nor
+    // prefixed with an apostrophe.
+    expect(html).not.toContain("&#39;\u00a0");
+  });
+});
+
 describe("workbook yang dihasilkan", () => {
   const berkas = tulisXlsx(lembarDariDokumen(dokumenDariLaporan(HASIL, "Aging Piutang")));
 

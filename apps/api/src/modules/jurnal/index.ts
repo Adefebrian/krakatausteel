@@ -1,8 +1,14 @@
 // The ONLY file another module or the app entrypoint may import from this
-// module. ./service.ts, ./repo.ts, ./kesalahan.ts and ./uang.ts stay private.
+// module. ./service.ts, ./repo.ts, ./baca.ts, ./kesalahan.ts and ./uang.ts stay
+// private.
 //
-// NO HTTP SURFACE YET, deliberately. Fase 1 (spec 14) is the engine and its
-// tests; the journal screens of spec 9 come later and will add routes.ts here.
+// THE HTTP SURFACE IS HERE NOW (./routes.ts), wired with the guard set from
+// modules/auth exactly as every other module's router is. It landed long after
+// the engine, and the gap was real rather than cosmetic: spec 9.4's screens --
+// including "Hapus Jurnal Transaksi", which is spec 6.3's correction by
+// reversing entry and the single most important accounting control in the
+// product -- had no door, so spec 16 scenario 10 could not be run and the DRAFT
+// scenario 12 needs had to be made by reaching past HTTP into the engine.
 // Business modules (PUMK, Non PUMK, closing) must reach the ledger through
 // `postingEvent`, `postingEventGabungan` or `postingHapusBukuPiutang` on the
 // engine built here, and never write jurnal rows themselves (invariant 11).
@@ -17,7 +23,10 @@
 // per-fixture app (testing/harness.ts) a call could land on another fixture's
 // pool. `createJurnalModule` builds one engine and hands it back; the caller
 // decides who gets it.
+import { buatJurnalBaca, type JurnalBaca } from "./baca";
 import { createJurnalEngine, type JurnalEngine, type JurnalEngineDeps } from "./contract";
+import { createJurnalRoutes } from "./routes";
+import type { Guards } from "../../core/principal";
 
 export {
   createJurnalEngine,
@@ -67,4 +76,37 @@ export type {
  */
 export function createJurnalModule(deps: JurnalEngineDeps): { engine: JurnalEngine } {
   return { engine: createJurnalEngine(deps) };
+}
+
+export type { JurnalBaca };
+export type {
+  BarisJurnalTampil,
+  FilterJurnal,
+  JurnalTampil,
+  RingkasanJurnal,
+} from "./baca";
+
+export interface JurnalModuleDeps extends JurnalEngineDeps {
+  guards: Guards;
+}
+
+/**
+ * The module WITH its HTTP surface, for the composition root. Kept separate
+ * from `createJurnalModule` above so a caller that only needs the engine (a
+ * seed, a batch job, the five business modules' fixtures) does not have to
+ * invent a guard set to get one.
+ *
+ * The engine handed back here is the SAME instance the routes are built over,
+ * which is what keeps invariant 11 true after the door is opened: mounting a
+ * router does not add a second way into the ledger, it adds a way to reach the
+ * one that was already there.
+ */
+export function createJurnalHttpModule(deps: JurnalModuleDeps): {
+  engine: JurnalEngine;
+  baca: JurnalBaca;
+  routes: ReturnType<typeof createJurnalRoutes>;
+} {
+  const engine = createJurnalEngine(deps);
+  const baca = buatJurnalBaca({ db: deps.db });
+  return { engine, baca, routes: createJurnalRoutes({ engine, baca, guards: deps.guards }) };
 }

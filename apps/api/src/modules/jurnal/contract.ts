@@ -91,6 +91,16 @@ export const POLA_NO_JURNAL = /^[A-Z_]+\/\d{6}\/\d{5}$/;
 
 /** Permission codes this engine checks (spec 6.3 + spec 2). */
 export const PERMISSION_JURNAL = {
+  /**
+   * Reading a journal document. Not checked by any method of `JurnalEngine`,
+   * because the engine only ever reads inside the transaction it is about to
+   * write in, and it has already demanded the write code by then. It is the
+   * code ./baca.ts and the GET routes of ./routes.ts are gated by, and it is
+   * the ONLY journal code the read-only Auditor holds: every operational role
+   * has it (`LIHAT` in modules/auth/permissions.ts) and it grants no power to
+   * create, verify, post or reverse anything.
+   */
+  LIHAT: "jurnal.view",
   BUAT: "jurnal.create",
   UBAH: "jurnal.update",
   VERIFIKASI: "jurnal.verify",

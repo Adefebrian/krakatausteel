@@ -74,6 +74,7 @@ import {
 } from "./alokasi-akrual";
 import { rateFlatDariEfektif, ringkas, susunJadwal, pecahTanggal } from "./jadwal";
 import { bersihkanKesalahan, tolak } from "./kesalahan";
+import { sebabYangBolehLolos } from "../../core/sebab-kolaborator";
 import { createAngsuranRepo, type AkadBaris, type AngsuranRepo, type JadwalBaris } from "./repo";
 import { bacaRate, bacaUang, dariMikro, dariSen } from "./uang";
 
@@ -832,6 +833,17 @@ export function buatEngineAngsuran(deps: AngsuranEngineDeps): AngsuranEngine {
             // aborts the transaction, and the driver/trigger text stays in
             // penyebabDb instead of reaching the caller.
             if (err instanceof AngsuranError) throw err;
+            // A LEDGER REFUSAL THE OPERATOR CAN ACT ON KEEPS ITS OWN CODE.
+            // This used to flatten every one of them into `JURNAL_GAGAL`, and
+            // `PERIODE_TIDAK_OPEN` -- a receipt back-dated into a closed month,
+            // which needs head office to reopen the period and not a retype --
+            // died here, one layer below modules/pumk, which then flattened the
+            // flattening into `SETORAN_GAGAL`. core/sebab-kolaborator.ts states
+            // which codes may travel and why; a malformed-journal refusal and a
+            // branch-scope refusal still may not, and still arrive as
+            // `JURNAL_GAGAL` with the cause in `penyebabDb`.
+            const lolos = sebabYangBolehLolos(err);
+            if (lolos) throw lolos;
             throw tolak(
               "JURNAL_GAGAL",
               { angsuranId },

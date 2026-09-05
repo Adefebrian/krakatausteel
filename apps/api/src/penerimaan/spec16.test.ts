@@ -23,11 +23,13 @@
 //      compares a number, a status, a state, or an explicit refusal code.
 //
 //   4. A SCENARIO WITH NO SHIPPED SURFACE IS A FINDING, NOT A SKIP. Scenario 10
-//      is the case: there is no `/jurnal` router in `core/app.ts` at all. It is
-//      written below as a test that PROVES the absence, so the gap is visible in
-//      the suite instead of being quietly missing from it. `test.skip` is not
-//      used anywhere in this file, deliberately: a silent skip in an acceptance
-//      run is worse than a red line.
+//      was the case: there was no `/jurnal` router in `core/app.ts` at all, so
+//      it was written below as a test that PROVED the absence, and the gap was
+//      visible in the suite instead of being quietly missing from it.
+//      `modules/jurnal/routes.ts` has since landed and the test is now the
+//      scenario, run end to end. `test.skip` is not used anywhere in this file,
+//      deliberately: a silent skip in an acceptance run is worse than a red
+//      line, and a finding written as a passing test is worth more than either.
 //
 //   5. ONE WORLD, IN SCENARIO ORDER. Bagian 16's list is a narrative. Scenario 7
 //      reads the card of the loan scenario 4 created; scenario 14 reads the
@@ -96,6 +98,17 @@ interface Akad {
 interface Angka {
   nilai: string;
   tampil: string;
+}
+interface JurnalUmum {
+  id: string;
+  noJurnal: string;
+  jenis: string;
+  status: string;
+  keterangan: string | null;
+  totalDebit: string;
+  totalKredit: string;
+  reversalOfJurnalId: string | null;
+  baris: Array<{ akunId: string; debit: string; kredit: string }>;
 }
 
 // State handed from one scenario to the next, exactly as an operator's day is.
@@ -592,31 +605,81 @@ describe("Bagian 16", () => {
   });
 
   // =========================================================================
-  // 10  TIDAK BISA DIJALANKAN LEWAT PERMUKAAN YANG DIKIRIM
+  // 10  Jurnal Umum manual, lalu "Hapus Jurnal Transaksi"
   // =========================================================================
 
-  test("skenario 10: Jurnal Umum manual + Hapus Jurnal Transaksi TIDAK PUNYA RUTE HTTP sama sekali", async () => {
-    // THIS TEST PROVES A GAP, and it is written as a test rather than left out
-    // so the gap is counted rather than forgotten.
+  test("skenario 10: input Jurnal Umum manual, posting, lalu Hapus Jurnal Transaksi menghasilkan jurnal PEMBALIK, bukan penghapusan", async () => {
+    // WAS A FINDING, NOW A SCENARIO. Until `modules/jurnal/routes.ts` landed,
+    // `core/app.ts` mounted fifteen routers and `/jurnal` was not among them,
+    // so spec 9.4's "Input Jurnal Umum", its posting and the "Hapus Jurnal
+    // Transaksi" utility had no shipped surface at all: the single most
+    // important accounting control in the product could not be reached by a
+    // person, and this test asserted the four 404s that proved it. It now runs
+    // the scenario through the door instead.
     //
-    // `core/app.ts` mounts fifteen routers and `/jurnal` is not among them;
-    // `modules/jurnal/index.ts` says so in its own header ("the journal screens
-    // of spec 9 come later and will add routes.ts here"). So spec 9.4's "Input
-    // Jurnal Umum", its posting, and the "Hapus Jurnal Transaksi" utility have
-    // no shipped surface, and neither does anything that would let an operator
-    // create the DRAFT journal scenario 12 requires.
-    //
-    // WHEN THE ROUTER LANDS, THIS TEST MUST BE REPLACED by the real scenario 10.
-    for (const path of [
-      "/jurnal",
-      "/jurnal/umum",
-      "/jurnal/kas-bank",
-      "/jurnal/hapus-transaksi",
-    ]) {
-      const get = await d.panggil("APPROVER", path);
-      const post = await d.panggil("APPROVER", path, { body: {} });
-      expect([get.status, post.status]).toEqual([404, 404]);
-    }
+    // Three roles, three acts, because that is what the control IS: the Maker
+    // files, the Checker verifies, the Approver posts. None of the three can do
+    // another's part, and ../modules/jurnal/jurnal-rute-otorisasi.test.ts pins
+    // each refusal; what is asserted here is the happy path an operator walks.
+    const dibuat = await d.ok<JurnalUmum>("MAKER", "/jurnal", {
+      body: {
+        cabangId: d.f.cabangA.id,
+        jenis: "UMUM",
+        tanggalTransaksi: "2026-01-29",
+        keterangan: "Reklasifikasi beban administrasi Januari (skenario 10)",
+        baris: [
+          { akunId: d.akunBebanId, debit: rp(750_000), keterangan: "Beban administrasi" },
+          { akunId: d.akunKasId, kredit: rp(750_000), keterangan: "Kas keluar" },
+        ],
+      },
+    });
+    expect(dibuat.status).toBe("DRAFT");
+    expect(dibuat.jenis).toBe("UMUM");
+    expect(dibuat.noJurnal).toMatch(/^UMUM\/202601\/\d{5}$/);
+    expect(dibuat.totalDebit).toBe(rp(750_000));
+    expect(dibuat.totalKredit).toBe(rp(750_000));
+
+    await d.ok<JurnalUmum>("CHECKER", `/jurnal/${dibuat.id}/verifikasi`, { body: {} });
+    const diposting = await d.ok<JurnalUmum>("APPROVER", `/jurnal/${dibuat.id}/posting`, {
+      body: {},
+    });
+    expect(diposting.status).toBe("POSTED");
+
+    // "HAPUS JURNAL TRANSAKSI". The screen is called delete; what the system
+    // does is spec 6.3's correction by reversing entry, and the 201 says so: a
+    // document EXISTS afterwards that did not before.
+    const res = await d.panggil("APPROVER", `/jurnal/${dibuat.id}/pembalik`, {
+      body: { alasan: "Salah akun beban, dikoreksi lewat jurnal pembalik (skenario 10)" },
+    });
+    expect(res.status).toBe(201);
+    const pembalik = (await res.json()) as JurnalUmum;
+
+    expect(pembalik.jenis).toBe("REVERSAL");
+    expect(pembalik.status).toBe("POSTED");
+    expect(pembalik.reversalOfJurnalId).toBe(dibuat.id);
+    // Same amounts to the sen, sides swapped line for line, and the original's
+    // document number quoted so the pair is readable on paper.
+    expect(pembalik.totalDebit).toBe(rp(750_000));
+    expect(pembalik.totalKredit).toBe(rp(750_000));
+    expect(pembalik.keterangan).toContain(dibuat.noJurnal);
+    const bebanDibalik = pembalik.baris.find((b) => b.akunId === d.akunBebanId)!;
+    expect([bebanDibalik.debit, bebanDibalik.kredit]).toEqual([rp(0), rp(750_000)]);
+
+    // AND THE ORIGINAL IS STILL THERE. ADR 0010: two rows added, none removed.
+    // A deletion would have taken the document out of every report while its
+    // lines stayed in the ledger; this is why the screen is not a delete.
+    const asli = await d.ok<JurnalUmum & { dibalikOleh: { noJurnal: string } | null }>(
+      "AUDITOR",
+      `/jurnal/${dibuat.id}`,
+    );
+    expect(asli.status).toBe("REVERSED");
+    expect(asli.dibalikOleh?.noJurnal).toBe(pembalik.noJurnal);
+
+    // Reversing it a second time is refused, by name (spec 6.6.7).
+    const lagi = await d.tolak("APPROVER", `/jurnal/${dibuat.id}/pembalik`, {
+      body: { alasan: "Percobaan membalik dokumen yang sudah dibalik" },
+    });
+    expect([lagi.status, lagi.kodeDomain]).toEqual([409, "JURNAL_SUDAH_REVERSED"]);
   });
 
   // =========================================================================
@@ -676,20 +739,13 @@ describe("Bagian 16", () => {
     await d.ok("APPROVER", `/closing/periode/${periodeTransaksi}/penyisihan`, { body: {} });
     await d.ok("APPROVER", `/closing/periode/${periodeTransaksi}/akrual`, { body: {} });
 
-    // THE ONE PLACE THIS FILE LEAVES HTTP, AND IT IS FORCED. There is no route
-    // that creates a journal (see scenario 10), so the DRAFT this scenario
-    // requires has to be made through the same engine `core/app.ts` wired into
-    // the app under test. Everything AFTER this line is HTTP again: the
-    // checklist, the refusal, and the close.
-    const ctxJurnal = {
-      userId: d.f.users.MAKER.id,
-      cabangId: d.f.cabangA.id,
-      bumnId: d.f.bumnId,
-      permissions: ["jurnal.create", "jurnal.post", "jurnal.view"],
-      cabangDalamScope: [d.f.cabangA.id],
-    };
-    const draft = await d.f.ctx.jurnal.buatJurnal(
-      {
+    // THIS USED TO BE THE ONE PLACE THE FILE LEFT HTTP, AND IT WAS FORCED:
+    // there was no route that created a journal (see scenario 10), so the DRAFT
+    // this scenario needs had to be made by reaching past the app into the
+    // engine. `modules/jurnal/routes.ts` has landed, so it is a Maker filing a
+    // form now, exactly as an operator would leave one unposted at month end.
+    const draft = await d.ok<JurnalUmum>("MAKER", "/jurnal", {
+      body: {
         cabangId: d.f.cabangA.id,
         jenis: "UMUM",
         tanggalTransaksi: "2026-01-30",
@@ -699,8 +755,7 @@ describe("Bagian 16", () => {
           { akunId: d.akunKasId, kredit: rp(250_000), keterangan: "Kas keluar" },
         ],
       },
-      ctxJurnal,
-    );
+    });
     expect(draft.status).toBe("DRAFT");
 
     const prasyaratMerah = await d.ok<{
@@ -724,10 +779,11 @@ describe("Bagian 16", () => {
     expect(ditolak.status).toBeLessThan(500);
     expect(ditolak.kodeDomain).toBe("PRASYARAT_GAGAL");
 
-    // Post it, through the same engine, and the month closes.
-    const diposting = await d.f.ctx.jurnal.postingJurnal(draft.id, {
-      ...ctxJurnal,
-      userId: d.f.users.APPROVER.id,
+    // Post it, through the shipped route and as the role that holds the code,
+    // and the month closes.
+    await d.ok("CHECKER", `/jurnal/${draft.id}/verifikasi`, { body: {} });
+    const diposting = await d.ok<JurnalUmum>("APPROVER", `/jurnal/${draft.id}/posting`, {
+      body: {},
     });
     expect(diposting.status).toBe("POSTED");
 
@@ -765,14 +821,30 @@ describe("Bagian 16", () => {
     });
     expect(ditolak.status).toBe(409);
 
-    // TEMUAN, AND IT IS NOT A SOFTENING OF THE SCENARIO. The scenario asks for
-    // a refusal and gets one. What the operator is TOLD is another matter:
-    // `modules/pumk`'s `lewatSetoran` turns every collaborating-engine refusal
-    // into its own `SETORAN_GAGAL`, so the journal engine's `PERIODE_TIDAK_OPEN`
-    // -- the one fact that tells the clerk to ask head office to reopen January
-    // rather than to retype the receipt -- is confined to `penyebabDb`, which is
-    // server-log only. The refusal is correct; the reason is anonymous.
-    expect(ditolak.kodeDomain).toBe("SETORAN_GAGAL");
+    // WAS A TEMUAN, NOW CLOSED, AND THE INVERTED ASSERTION IS THE PROOF.
+    //
+    // The scenario always asked for a refusal and always got one. What the
+    // operator was TOLD was another matter: `modules/angsuran` turned the
+    // ledger's refusal into `JURNAL_GAGAL` and `modules/pumk`'s `lewatSetoran`
+    // turned THAT into `SETORAN_GAGAL`, so the journal engine's
+    // `PERIODE_TIDAK_OPEN` -- the one fact that tells the clerk to ask head
+    // office to reopen January rather than to retype the receipt and fail again
+    // -- was confined to `penyebabDb`, which is server-log only. Two layers of
+    // flattening, and the refusal arrived anonymous.
+    //
+    // Both layers now re-raise a refusal that is safe to re-raise
+    // (`core/sebab-kolaborator.ts`, three rules, and the codes that must NOT
+    // travel are named there: a branch-scope refusal, because it would rebuild
+    // the enumeration oracle one module up, and a malformed-journal refusal,
+    // because it blames an operator for arithmetic they did not do). So the
+    // ledger's own code crosses two module boundaries without either module
+    // knowing the other exists.
+    expect(ditolak.kodeDomain).toBe("PERIODE_TIDAK_OPEN");
+    // And the sentence with it, which is what the clerk actually reads.
+    expect(ditolak.error).toContain("periode yang masih terbuka");
+    // Still free of driver and trigger internals: `penyebabDb` never leaves the
+    // server log.
+    expect(ditolak.error).not.toContain("TJSL-");
 
     // AND THE PROOF THAT THE CLOSED PERIOD IS WHAT REFUSED IT. The same date,
     // straight at the ledger engine the route reaches through: the engine names
@@ -1096,21 +1168,61 @@ describe("Bagian 16", () => {
     // which leaves every actual payload still prefixed.
     expect([totalAset, /^-?[0-9]/.test(totalAset)]).toEqual([totalAset, true]);
 
-    // STILL OPEN, and asserted as it stands so it cannot be lost. The same
-    // statement dumps its INTERNAL columns into the management copy: the row
-    // id, the parent code, the sort order, the nesting level, the row type, the
-    // section and the sign. A reader is handed the schema.
+    // WAS THE OTHER HALF OF WHY THE EXPORT WAS NOT FIT TO SEND UPWARD, NOW
+    // CLOSED, AND THIS ASSERTION IS INVERTED.
     //
-    // INVERT THIS HALF when that is closed.
+    // The statement used to dump the TEMPLATE's own schema into the management
+    // copy -- the caption's raw UUID, the parent code, the sort order, the
+    // nesting level, the row type, the section and the arithmetic sign, nine
+    // columns before the first figure -- and then print the same rows three
+    // more times under `Baris Aset`, `Baris Liabilitas` and `Baris Aset Neto`.
+    // `core/ekspor/dokumen.ts` now drops the machinery (rule 5), turns nesting
+    // and weight into LAYOUT rather than columns (rule 6), and suppresses a
+    // table that only repeats one already printed (rule 7).
     const html = await (
       await d.panggil(
         "AUDITOR",
         `/laporan/ekspor/POSISI_KEUANGAN?periodeId=${periodeLaporan}&format=html`,
       )
     ).text();
-    for (const kolom of ["Baris Laporan Id", "Tipe Baris", "Cetak Tebal", "Tanda"]) {
-      expect([kolom, html.includes(kolom)]).toEqual([kolom, true]);
+    for (const kolom of [
+      "Baris Laporan Id",
+      "Parent Kode",
+      "Urutan",
+      "Level",
+      "Tipe Baris",
+      "Seksi",
+      "Tanda",
+      "Cetak Tebal",
+    ]) {
+      expect([kolom, html.includes(kolom)]).toEqual([kolom, false]);
     }
+
+    // WHAT IS KEPT, because "the schema is gone" is not the same as "the
+    // statement is there". A balance sheet still has to carry its line codes,
+    // its captions, the accounts that fed each line, and both comparative
+    // columns.
+    for (const kolom of ["Kode", "Nama", "Akun Kode", "Nilai Tahun Ini", "Nilai Tahun Lalu"]) {
+      expect([kolom, html.includes(`<th>${kolom}</th>`)]).toEqual([kolom, true]);
+    }
+
+    // THE LAYOUT THE DROPPED COLUMNS BECAME IS NOT ASSERTED HERE, AND THAT IS
+    // A FINDING RATHER THAN AN OMISSION. `level` now indents a caption and
+    // `cetakTebal` now bolds a row, but the SHIPPED core template exercises
+    // neither: apps/api/src/seed/coa-inti.ts writes a literal `level = 1` and
+    // `tipe_baris = 'DETAIL'` for every line and never sets `cetak_tebal`, so
+    // this statement is four flat, unweighted lines with no total row at all.
+    // Indentation is relative to the table's own shallowest row, so a flat
+    // template correctly indents nothing; the rules themselves are pinned over
+    // a nested, bolded statement in ../core/ekspor/ekspor-dokumen.test.ts.
+    // What is asserted here is that no caption was mangled on the way.
+    expect(html).toContain("<td>Aset</td>");
+
+    // AND IT IS PRINTED ONCE. The three per-section repeats are gone; only the
+    // statement in template order survives.
+    expect(html).not.toContain("<h2>Baris Aset</h2>");
+    expect(html).not.toContain("<h2>Baris Liabilitas</h2>");
+    expect(html).not.toContain("<h2>Baris Aset Neto</h2>");
   });
 
   // =========================================================================
@@ -1250,6 +1362,12 @@ describe("Bagian 16", () => {
       ["beban penyisihan", `/laporan/beban-penyisihan?periodeId=${periodeLaporan}`],
       ["akrual jasa", `/laporan/akrual-jasa?periodeId=${periodeLaporan}`],
       ["audit trail", "/laporan/audit-trail?dariTanggal=2026-01-01&sampaiTanggal=2027-12-31"],
+      // The ledger itself, which the Auditor could not open at all until
+      // `modules/jurnal/routes.ts` landed (see scenario 10). `jurnal.view` is
+      // the only journal code the role holds, and it grants no power to create,
+      // verify, post or reverse anything.
+      ["daftar jurnal", "/jurnal?status=POSTED"],
+      ["detail jurnal", `/jurnal/${jurnalPencairan1}`],
       ["rka versus realisasi", "/rka/laporan/realisasi?tahun=2026&jenis=PUMK&mode=BULANAN&bulan=1"],
     ];
     const gagal: string[] = [];
@@ -1281,6 +1399,12 @@ describe("Bagian 16", () => {
       ["buka periode", `/closing/periode/${periodeLaporan}/buka`, { alasan: "coba coba saja" }],
       ["buat RKA", "/rka", { tahun: 2026, jenis: "PUMK" }],
       ["impor", "/impor/ANGSURAN/komit", {}],
+      // Every write on the ledger surface, including the reversal, which is the
+      // one act that could change a POSTED figure.
+      ["buat jurnal", "/jurnal", { cabangId: d.f.cabangA.id, jenis: "UMUM" }],
+      ["posting jurnal", `/jurnal/${jurnalPencairan1}/posting`, {}],
+      ["batal jurnal", `/jurnal/${jurnalPencairan1}/batal`, {}],
+      ["pembalik jurnal", `/jurnal/${jurnalPencairan1}/pembalik`, { alasan: "coba coba saja" }],
     ];
     const lolos: string[] = [];
     for (const [nama, path, body] of tulisan) {

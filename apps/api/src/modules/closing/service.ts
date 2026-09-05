@@ -72,6 +72,7 @@ import {
   type Uang,
 } from "./contract";
 import { petakanKesalahanDb, tolak, tolakKonfigurasi } from "./kesalahan";
+import { sebabYangBolehLolos } from "../../core/sebab-kolaborator";
 import {
   buatRepoClosing,
   type AkadRow,
@@ -206,12 +207,27 @@ export function buatEngineClosing(deps: ClosingEngineDeps): ClosingEngine {
 
   /**
    * The ledger refused, so the whole step rolls back. The raw reason stays in
-   * `penyebabDb` for the server log; what reaches a caller is the catalogue
+   * `penyebabDb` for the server log; what reaches a caller is a catalogue
    * message, free of trigger codes and constraint names.
+   *
+   * Returns `Error` rather than `ClosingError`, and that widening is the point:
+   * a refusal this module is allowed to pass through arrives as the LEDGER's
+   * own error, with the ledger's own code, which is the whole subject of the
+   * comment inside.
    */
-  function gagalJurnal(eventCode: string, e: unknown): ClosingError {
+  function gagalJurnal(eventCode: string, e: unknown): Error {
     const dipetakan = petakanKesalahanDb(e);
     if (dipetakan) return dipetakan;
+    // A LEDGER REFUSAL THE OPERATOR CAN ACT ON KEEPS ITS OWN CODE, rather than
+    // becoming a second anonymous `JURNAL_GAGAL`. The allowance and the accrual
+    // are posted into the period being closed, so `PERIODE_TIDAK_OPEN` and
+    // `EVENT_MAPPING_TIDAK_DITEMUKAN` are the two an accountant actually meets
+    // here, and each has a different next action: reopen the month, or complete
+    // the account mapping. core/sebab-kolaborator.ts states which codes may
+    // travel; a branch-scope refusal and a malformed-journal refusal still may
+    // not, and still arrive as `JURNAL_GAGAL` with the cause in `penyebabDb`.
+    const lolos = sebabYangBolehLolos(e);
+    if (lolos) return lolos;
     const mentah = e instanceof Error ? e.message : String(e);
     return tolak("JURNAL_GAGAL", { eventCode }, mentah);
   }

@@ -191,7 +191,7 @@ function errorBerkode(err: unknown): ErrorBerkode | null {
  * new one appearing as a 400 with its own message is a far better failure than
  * a 500 that discards it.
  */
-const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
+export const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
   TIDAK_BERWENANG: "TIDAK_BERWENANG",
   // Spec 2 rule 3 / spec 16 scenario 24. A row in another branch is a
   // REFUSAL, not a bad request: it must be a 403 so the error handler writes
@@ -476,6 +476,22 @@ const KODE_KE_HTTP: Readonly<Record<string, ErrorCode>> = {
  * handler below. Without it, a permission refusal would be logged twice; with
  * it, the handler only fills the gaps.
  */
+/**
+ * The HTTP meaning of a domain code, as one function rather than as a table
+ * every reader has to find. `VALIDASI` for anything absent, which is the same
+ * default the handler applies.
+ *
+ * Exported for ./sebab-kolaborator.ts, which decides whether one module may
+ * re-raise another module's refusal. That decision turns on exactly this
+ * mapping -- a code whose HTTP meaning is an identity answer is the one kind
+ * that must not travel -- and deriving it here means a code added to the table
+ * below is classified by the same line that already decides its status, rather
+ * than by a second list somebody has to remember to update.
+ */
+export function httpUntukKodeDomain(kode: string): ErrorCode {
+  return KODE_KE_HTTP[kode] ?? "VALIDASI";
+}
+
 export const DENIAL_LOGGED_VAR = "denialLogged";
 
 export function markDenialLogged(c: Context): void {

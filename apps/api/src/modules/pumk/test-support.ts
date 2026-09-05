@@ -66,6 +66,7 @@ import { SQL } from "bun";
 import { expect } from "bun:test";
 import { createAngsuranModule, type AngsuranContext, type Jadwal } from "../angsuran/index";
 import { createJurnalModule, type Jurnal, type JurnalContext } from "../jurnal/index";
+import { NAMA_ERROR_BERKODE } from "../../core/http";
 import { createDbAdapter } from "../../core/adapters/db";
 import { seedCoaDanEventMapping } from "../../seed/event-jurnal";
 import { permissionsForRole, seedRbac } from "../../seed/rbac";
@@ -1556,6 +1557,48 @@ export async function tolakDengan(
   expect(err.message.length).toBeGreaterThan(0);
   expect(err.message).not.toMatch(POLA_KEBOCORAN_DB);
   return err;
+}
+
+/**
+ * Asserts a rejection carries a COLLABORATOR's own code, re-raised unchanged
+ * through this module rather than flattened into `SETORAN_GAGAL` /
+ * `JADWAL_GAGAL` / `JURNAL_GAGAL`.
+ *
+ * WHY THERE ARE NOW TWO ASSERTIONS. `tolakDengan` above insists on a
+ * `PumkError`, and that is still right for every refusal this module makes
+ * itself. It is wrong for the refusals it PASSES THROUGH: a receipt back-dated
+ * into a closed month is the ledger's `PERIODE_TIDAK_OPEN` and a setoran
+ * against an undisbursed akad is the instalment engine's
+ * `AKAD_TIDAK_BISA_DIANGSUR`, and each of those crossed a module boundary
+ * intact on purpose (core/sebab-kolaborator.ts, which also names the codes that
+ * must NOT cross). Demanding a `PumkError` there would be demanding the defect
+ * back.
+ *
+ * What is still demanded is everything that made the old assertion worth
+ * having: a REGISTERED coded domain error (a bare `Error("not implemented")`
+ * must not satisfy this), the exact code, a non-empty message, and no driver or
+ * trigger text in it.
+ */
+export async function tolakDenganKodeKolaborator(
+  janji: Promise<unknown> | (() => Promise<unknown> | unknown),
+  kode: string,
+): Promise<{ kode: string; message: string; penyebabDb?: string }> {
+  let ditangkap: unknown;
+  try {
+    await (typeof janji === "function" ? janji() : janji);
+  } catch (e) {
+    ditangkap = e;
+  }
+  if (ditangkap === undefined) {
+    throw new Error(`diharapkan ditolak dengan ${kode}, tapi operasi berhasil`);
+  }
+  expect(ditangkap).toBeInstanceOf(Error);
+  const err = ditangkap as Error & { kode?: string; penyebabDb?: string };
+  expect(NAMA_ERROR_BERKODE.has(err.name)).toBe(true);
+  expect(err.kode).toBe(kode);
+  expect(err.message.length).toBeGreaterThan(0);
+  expect(err.message).not.toMatch(POLA_KEBOCORAN_DB);
+  return { kode: err.kode ?? "", message: err.message, penyebabDb: err.penyebabDb };
 }
 
 /** Sanity: every code a test names exists in the contract's catalogue. */

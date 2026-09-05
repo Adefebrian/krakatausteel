@@ -46,7 +46,7 @@ import { createAuditModule, createAuditService, type AuditService } from "../mod
 import { auditActor, createAuthModule } from "../modules/auth";
 import { createAngsuranModule } from "../modules/angsuran";
 import { createClosingHttpModule } from "../modules/closing";
-import { createJurnalModule } from "../modules/jurnal";
+import { createJurnalHttpModule } from "../modules/jurnal";
 import { createKonfigurasiModule } from "../modules/konfigurasi";
 import { createNomorService } from "../modules/nomor";
 import { createNonPumkHttpModule } from "../modules/nonpumk";
@@ -174,15 +174,26 @@ export function createApp(overrides: AppOverrides = {}) {
   // No HTTP surface by design (see modules/nomor/index.ts); exposed here so
   // later phases and the tests get the same instance.
   const nomor = createNomorService({ db });
-  // Also no HTTP surface yet: Fase 1 is the engine, the journal screens of
-  // spec 9 add routes later. Wired here so the business modules of Fase 3
-  // onward reach the ledger through this one engine instance, which is what
-  // invariant 11 (a single posting path) actually rests on.
+  // Fase 1's engine, and NOW ITS ROUTES (spec 9.4, mounted at /jurnal below).
+  // Wired here so the business modules of Fase 3 onward reach the ledger
+  // through this one engine instance, which is what invariant 11 (a single
+  // posting path) actually rests on.
+  //
+  // MOUNTING THE ROUTES DOES NOT WIDEN THAT, and the wiring is what makes that
+  // true rather than a promise: `createJurnalHttpModule` builds ONE engine and
+  // hands the same object to the router and to every module below, so the
+  // manual journal screens reach the ledger through exactly the code path
+  // `postingEvent` uses, including migration 0020's posting-path trigger. What
+  // the routes add is a door onto the engine that was already the only way in;
+  // for four phases there was none, so spec 9.4's screens -- including "Hapus
+  // Jurnal Transaksi", which is spec 6.3's correction by reversing entry --
+  // could not be reached by a person at all.
+  //
   // `audit` is the same instance auth and konfigurasi use, so a posting and the
   // login that led to it land in one audit_log stream. The engine writes its
   // rows on the transaction that changed the ledger, so a rolled back posting
   // leaves no row claiming it happened.
-  const jurnal = createJurnalModule({ db, audit });
+  const jurnal = createJurnalHttpModule({ db, audit, guards: auth.guards });
   // The installment engine reaches the ledger ONLY through the journal engine
   // instance above, never by writing jurnal rows itself. That is invariant 11,
   // and migration 0020's posting-path trigger refuses any other route.
@@ -470,6 +481,7 @@ export function createApp(overrides: AppOverrides = {}) {
     .get("/health", (c) => c.json({ ok: true }))
     .route("/auth", auth.routes)
     .route("/organisasi", organisasi.routes)
+    .route("/jurnal", jurnal.routes)
     .route("/konfigurasi", konfigurasi.routes)
     .route("/pumk", pumk.routes)
     .route("/nonpumk", nonpumk.routes)
@@ -495,6 +507,7 @@ export function createApp(overrides: AppOverrides = {}) {
     organisasi: organisasi.service,
     nomor,
     jurnal: jurnal.engine,
+    jurnalBaca: jurnal.baca,
     angsuran: angsuran.engine,
     pumk: pumk.engine,
     pumkBaca: pumk.baca,

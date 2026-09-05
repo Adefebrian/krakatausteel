@@ -86,6 +86,7 @@ import {
   type VerifikasiLpjInput,
 } from "./contract";
 import { bersihkanKesalahan, penyebab, tolak, tolakKonfigurasi } from "./kesalahan";
+import { sebabYangBolehLolos } from "../../core/sebab-kolaborator";
 import {
   createNonPumkRepo,
   type LpjBaris,
@@ -590,10 +591,19 @@ export function buatEngineNonPumk(deps: NonPumkEngineDeps): NonPumkEngine {
   // ------------------------------------------------- collaborator failures
 
   /**
-   * The ledger engine's refusal becomes THIS module's code, with the raw cause
-   * confined to `penyebabDb`. `JurnalError`'s message may quote a trigger
-   * string or a balance total; that is not this module's vocabulary and must
-   * not reach its caller.
+   * The ledger engine's refusal, at the boundary where it becomes an answer to
+   * the person who asked.
+   *
+   * A refusal that is SAFE to re-raise is re-raised UNCHANGED; the rest becomes
+   * this module's `JURNAL_GAGAL` with the raw cause confined to `penyebabDb`.
+   * core/sebab-kolaborator.ts owns which is which and states the three rules,
+   * and the defect it closes was found on `POST /pumk/angsuran`: a disbursement
+   * dated into a CLOSED period is refused for a reason the operator can act on
+   * (`PERIODE_TIDAK_OPEN`, "ask head office to reopen the month"), and
+   * flattening it left them retyping a form that will refuse identically. A
+   * branch-scope refusal and a malformed-journal refusal still do not travel:
+   * the first would rebuild the enumeration oracle one module up, the second
+   * would blame an operator for arithmetic this module did.
    */
   async function lewatJurnal<T>(
     jalankan: () => Promise<T>,
@@ -602,6 +612,8 @@ export function buatEngineNonPumk(deps: NonPumkEngineDeps): NonPumkEngine {
     try {
       return await jalankan();
     } catch (err) {
+      const lolos = sebabYangBolehLolos(err);
+      if (lolos) throw lolos;
       throw tolak("JURNAL_GAGAL", detail, penyebab(err));
     }
   }
