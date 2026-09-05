@@ -294,6 +294,22 @@ export function dokumenDariLaporan(hasil: unknown, namaTabelUtama: string): Doku
       }
       continue;
     }
+    // AN `Angka` SITTING DIRECTLY ON THE RESULT IS A FIGURE, AND THE MOST
+    // IMPORTANT ONE THERE IS. `objekBiasa` excludes `Angka` on purpose, so
+    // without this branch a top-level money value fell past both the array
+    // case and the object case and landed on `String(v)` below, which for
+    // `{nilai, tampil}` is the string "[object Object]".
+    //
+    // That is what "Total Aset Tahun Ini" printed in the exported workbook,
+    // the HTML and therefore the PDF, on the six statements an entity actually
+    // hands upward: Aktivitas, Arus Kas, Posisi Keuangan, Perubahan Aset Neto,
+    // Buku Besar and Perhitungan Penyisihan. A figure nested one level deeper
+    // formatted correctly, which is why every test that read the engine's JSON
+    // stayed green and only opening the file showed it.
+    if (adalahAngka(v)) {
+      ringkasan.push([selTeks(judulDariKunci(k)), selDariNilai(k, v)]);
+      continue;
+    }
     // A scalar at the top level is a fact about the report, not a figure in
     // it: `mode`, `dasarWilayah`, `basisPerhitungan`. It belongs in the header
     // where a reader looks for the terms the numbers were produced under.

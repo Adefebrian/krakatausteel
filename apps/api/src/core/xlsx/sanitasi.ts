@@ -45,10 +45,34 @@
  */
 export const AWALAN_FORMULA: readonly string[] = ["=", "+", "-", "@", "\t", "\r"];
 
+/**
+ * A FORMATTED NUMBER, in this product's Indonesian convention: an optional
+ * minus, thousands separated by dots, an optional two-decimal tail after a
+ * comma. Anchored at both ends, so anything with an operator, a space or a
+ * letter in it fails.
+ *
+ * WHY THIS EXISTS. A negative rupiah begins with `-`, which is on the formula
+ * list, so every negative figure in the system was exported as
+ * `'-41.842.500,00`. In a workbook that apostrophe is invisible; in the HTML
+ * and PDF statements, which are the ones handed upward, it printed on the face
+ * of every negative total. Spec 16 scenario 20 asks whether the export is fit
+ * to give to management, and a stray apostrophe on every loss is the kind of
+ * detail that makes a reader doubt the figures beside it.
+ *
+ * Narrowing rather than switching off: `-41.842.500,00` pasted into a
+ * spreadsheet is a negative number and nothing else. `-1+cmd|...` is not a
+ * formatted number and is still prefixed, and so is every other payload,
+ * because the pattern below admits no operator, no space and no letter.
+ */
+const POLA_ANGKA_TERFORMAT = /^-?\d{1,3}(\.\d{3})*(,\d+)?$/;
+
 /** True when a spreadsheet would evaluate this text instead of displaying it. */
 export function berpotensiFormula(teks: string): boolean {
   if (teks.length === 0) return false;
-  return AWALAN_FORMULA.includes(teks[0]!);
+  if (!AWALAN_FORMULA.includes(teks[0]!)) return false;
+  // Only `-` can begin a formatted number; `=`, `+`, `@`, tab and CR never do,
+  // so the pattern is tried only where it can possibly match.
+  return !POLA_ANGKA_TERFORMAT.test(teks);
 }
 
 /**
